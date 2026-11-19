@@ -29,6 +29,7 @@ if systemctl --user is-active --quiet "$unit.service"; then
         echo 'The service is running from a different workspace.' >&2
         exit 1
     fi
+    systemctl --user restart "$unit.service"
     wait_for_server
     exit
 fi

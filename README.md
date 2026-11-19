@@ -25,7 +25,7 @@ npm --prefix frontend run build
 
 ### 실행 상태와 중지
 
-`./start.sh`는 `mediauto-studio` Conda 환경을 찾아 사용자 서비스로 시작합니다. 이미 실행 중이면 접속 주소를 출력합니다. 사용자 systemd를 사용할 수 없는 환경에서는 현재 터미널에서 실행되며 `Ctrl+C`로 중지합니다.
+`./start.sh`는 `mediauto-studio` Conda 환경을 찾아 사용자 서비스로 시작합니다. 이 프로젝트의 서비스가 이미 실행 중이면 종료한 뒤 9920 포트에서 다시 시작하고, 헬스 체크가 통과하면 접속 주소를 출력합니다. 사용자 systemd를 사용할 수 없는 환경에서는 현재 터미널에서 실행되며 `Ctrl+C`로 중지합니다.
 
 ```bash
 systemctl --user status mediauto-studio-dev.service
