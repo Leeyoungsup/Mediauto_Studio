@@ -1,0 +1,270 @@
+<section id="ims-screen-draft" lang="ko" aria-label="Mediauto Studio 화면 초안">
+  <style>
+    #ims-screen-draft { color-scheme: light dark; --paper:light-dark(#f7f8f6,#171c1a); --surface:light-dark(#fff,#222925); --ink:light-dark(#182720,#eef5ef); --quiet:light-dark(#506359,#b6c7bc); --rule:light-dark(#d7e1d9,#3c4a42); --brand:light-dark(#185642,#99e0c0); --select:light-dark(#e5f3eb,#293e34); --warn:light-dark(#8b3b19,#ffba93); color:var(--ink); font:14px/1.5 system-ui,sans-serif; }
+    #ims-screen-draft * { box-sizing:border-box; }
+    #ims-screen-draft :is(h2,h3,p,dl,dd) { margin:0; }
+    #ims-screen-draft h2 { font-size:24px; letter-spacing:-.035em; }
+    #ims-screen-draft h3 { font-size:15px; }
+    #ims-screen-draft [hidden] { display:none !important; }
+    #ims-screen-draft .shell { background:var(--paper); border:1px solid var(--rule); border-radius:14px; overflow:hidden; }
+    #ims-screen-draft .bar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:14px 18px; background:var(--surface); border-bottom:1px solid var(--rule); }
+    #ims-screen-draft .brand { color:var(--brand); font-weight:700; letter-spacing:-.02em; }
+    #ims-screen-draft .main { padding:18px; display:grid; gap:14px; }
+    #ims-screen-draft .row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    #ims-screen-draft .split { justify-content:space-between; }
+    #ims-screen-draft .muted, #ims-screen-draft dt { color:var(--quiet); }
+    #ims-screen-draft .warning { color:var(--warn); }
+    #ims-screen-draft button, #ims-screen-draft input, #ims-screen-draft select { font:inherit; color:var(--ink); background:var(--surface); border:1px solid var(--rule); border-radius:7px; padding:6px 9px; min-height:34px; max-width:100%; }
+    #ims-screen-draft button { white-space:normal; }
+    #ims-screen-draft button[aria-pressed="true"], #ims-screen-draft .primary { background:var(--select); color:var(--brand); border-color:var(--brand); }
+    #ims-screen-draft button:disabled { opacity:.58; }
+    #ims-screen-draft table { border-collapse:collapse; width:100%; text-align:left; }
+    #ims-screen-draft :is(th,td) { padding:9px 8px; border-bottom:1px solid var(--rule); vertical-align:middle; }
+    #ims-screen-draft th { background:var(--select); color:var(--quiet); font-weight:500; }
+    #ims-screen-draft .panel { background:var(--surface); border:1px solid var(--rule); border-radius:10px; padding:14px; display:grid; gap:10px; min-width:0; }
+    #ims-screen-draft .columns { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px; }
+    #ims-screen-draft dl { display:grid; grid-template-columns: auto minmax(0,1fr); gap:6px 12px; }
+    #ims-screen-draft dd { overflow-wrap:anywhere; }
+    #ims-screen-draft .viewer { display:grid; grid-template-columns:minmax(110px, .68fr) minmax(0, 2.6fr); gap:10px; }
+    #ims-screen-draft .stage { position:relative; display:grid; place-items:center; text-align:center; min-height:220px; padding:34px 20px; overflow:hidden; background:var(--surface); border:1px solid var(--rule); border-radius:8px; }
+    #ims-screen-draft .specimen { position:absolute; inset:22% 22%; border:2px dashed var(--rule); border-radius:18% 35% 26% 42%; pointer-events:none; }
+    #ims-screen-draft .stage-label { position:relative; }
+    #ims-screen-draft .mini { position:absolute; right:10px; top:10px; padding:4px 7px; border:1px solid var(--rule); border-radius:5px; }
+    #ims-screen-draft .form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    #ims-screen-draft .form-grid label { display:grid; gap:4px; }
+    @media (max-width:600px) { #ims-screen-draft :is(.columns,.form-grid,.viewer) { grid-template-columns:1fr; } #ims-screen-draft .wide { display:none; } #ims-screen-draft :is(td,th) { padding:7px 3px; } #ims-screen-draft :is(.main,.bar) { padding:12px; } }
+  </style>
+  <div class="shell">
+    <header class="bar">
+      <div class="row"><span class="brand">Mediauto Studio</span><span class="muted">검토용 샘플</span></div>
+      <label class="row" for="ims-emr">EMR 시연 상태 <select id="ims-emr"><option value="off">미설정</option><option value="on">연결됨</option><option value="down">연결 장애</option></select></label>
+    </header>
+    <main class="main">
+      <nav class="row" aria-label="화면 전환">
+        <button type="button" data-screen="list" aria-pressed="true">Worklist</button>
+        <button type="button" data-screen="case" aria-pressed="false">케이스 상세</button>
+        <button type="button" data-screen="viewer" aria-pressed="false">WSI 뷰어</button>
+      </nav>
+      <section id="ims-list" class="main" style="padding:0" aria-label="Worklist">
+        <div class="row split"><h2>Worklist</h2><button type="button" class="primary" id="ims-new">케이스 등록</button></div>
+        <div class="row">
+          <input type="search" id="ims-search" aria-label="Case ID 검색" placeholder="Case ID 검색">
+          <select id="ims-filter" aria-label="검토 상태"><option value="">모든 상태</option><option>배정 대기</option><option>배정됨</option><option>검토 중</option><option>검토 완료</option></select>
+          <select id="ims-assignee-filter" aria-label="담당자"><option value="">모든 담당자</option><option value="병리의 A">내 배정 건</option><option value="미배정">미배정</option></select>
+        </div>
+        <table><thead><tr><th scope="col">Case ID</th><th scope="col" class="wide">검체</th><th scope="col" class="wide">담당자</th><th scope="col">검토 상태</th><th scope="col">WSI 준비</th><th scope="col" class="wide">환자 정보</th></tr></thead><tbody id="ims-rows"></tbody></table>
+        <p id="ims-empty" aria-live="polite" class="muted" hidden>검색 결과가 없습니다. Case ID 또는 필터를 바꿔보세요.</p>
+      </section>
+      <section id="ims-case" class="main" style="padding:0" aria-labelledby="ims-case-id" hidden>
+        <div class="row split"><div><h2 id="ims-case-id"></h2><p id="ims-case-meta" class="muted"></p></div><button type="button" class="primary" id="ims-open">뷰어 열기</button></div>
+        <div class="columns">
+          <section class="panel"><h3>환자 정보</h3><p id="ims-patient" aria-live="polite"></p><dl id="ims-demographics" hidden><dt>생년월일</dt><dd id="ims-birth"></dd><dt>성별</dt><dd id="ims-sex"></dd></dl>
+            <div class="row"><button type="button" id="ims-manual">직접 입력</button><button type="button" id="ims-find">EMR 조회</button></div>
+            <p class="muted" id="ims-emr-message" aria-live="polite"></p>
+            <form id="ims-lookup-form" hidden><label class="row">EMR 환자번호 <input name="lookupNumber" required placeholder="EMR-P001"></label><div class="row" style="margin-top:8px"><button type="submit">조회</button><button type="button" id="ims-lookup-cancel">취소</button></div></form>
+            <form id="ims-patient-form" hidden>
+              <div class="form-grid"><label>환자명 <input name="patientName" placeholder="시연용 별칭"></label><label>환자번호 <input name="patientNumber" placeholder="DEMO-P001"></label><label>생년월일 <input name="birth" type="date"></label><label>성별 <select name="sex"><option>미입력</option><option>여</option><option>남</option><option>기타</option></select></label></div>
+              <div class="row" style="margin-top:8px"><button type="submit" class="primary">저장</button><button type="button" id="ims-cancel">취소</button></div><p id="ims-form-error" class="warning" role="alert"></p>
+            </form>
+            <section id="ims-emr-candidate" hidden><p>조회 후보 <strong>시연 환자 · EMR-P001</strong></p><p class="muted">위 환자 정보와 대조한 뒤 연결하세요.</p><button type="button" id="ims-link">동일 환자 확인 후 연결</button></section>
+          </section>
+          <section class="panel"><h3>검체와 슬라이드</h3><dl id="ims-slides"></dl><p id="ims-case-alert" class="warning" role="status"></p></section>
+        </div>
+        <section class="panel"><h3>담당자와 이력</h3><div class="row"><label for="ims-assignee">담당 병리의</label><select id="ims-assignee"><option>미배정</option><option>병리의 A</option><option>병리의 B</option></select><button type="button" id="ims-assign">배정 저장</button></div><p class="muted" id="ims-history" aria-live="polite"></p></section>
+      </section>
+      <section id="ims-viewer" class="main" style="padding:0" aria-labelledby="ims-viewer-id" hidden>
+        <div class="row split"><div><h2 id="ims-viewer-id"></h2><p class="muted" id="ims-viewer-meta"></p></div><button type="button" id="ims-review" class="primary">검토 시작</button></div>
+        <div class="viewer">
+          <aside class="panel" aria-label="슬라이드 목록"><h3>슬라이드</h3><div id="ims-slide-buttons" class="row"></div></aside>
+          <div class="stage"><div class="specimen" aria-hidden="true"></div><span class="mini muted">미니맵</span><div class="stage-label"><strong id="ims-stage-text"></strong><p class="muted" id="ims-stage-detail" role="status"></p></div></div>
+        </div>
+        <div class="row split"><span class="muted" id="ims-scale"></span><div class="row"><button type="button" id="ims-zoom-out" aria-label="축소">−</button><button type="button" id="ims-zoom-in" aria-label="확대">+</button><button type="button" id="ims-retry">타일 다시 시도</button></div></div>
+        <p id="ims-viewer-alert" class="warning" role="status"></p>
+      </section>
+      <section id="ims-register" class="panel" aria-labelledby="ims-register-label" hidden>
+        <h2 id="ims-register-label">케이스 등록</h2>
+        <form id="ims-register-form"><div class="form-grid"><label>Case ID <input name="caseId" required placeholder="IMS-0103"></label><label>검체 <input name="specimen" required placeholder="조직 검체"></label></div><div class="row" style="margin-top:8px"><button type="submit" class="primary">등록</button><button type="button" id="ims-register-cancel">취소</button></div><p id="ims-register-error" class="warning" role="alert"></p></form>
+      </section>
+    </main>
+  </div>
+  <script>
+    (() => {
+      const root = document.getElementById('ims-screen-draft');
+      const get = (id) => root.querySelector(`#ims-${id}`);
+      const samples = [
+        {id:'IMS-0101', specimen:'조직 검체 A', assignee:'병리의 A', status:'배정됨', patient:null, source:'정보 없음', slides:[['A1 · H&E · NDPI','열람 가능'],['A2 · IHC · SVS','열람 가능']], history:'병리의 A에게 배정됨'},
+        {id:'IMS-0102', specimen:'조직 검체 B', assignee:'미배정', status:'배정 대기', patient:{name:'시연 환자 02',number:'DEMO-P002'}, source:'직접 입력', slides:[['B1 · H&E · SVS','열기 오류'],['B2 · IHC','미연결']], history:'검체 등록 완료'}
+      ];
+      let screen = 'list', selected = 0, slideIndex = 0, zoom = 1, candidate = false, message = '', notice = '';
+      const active = () => samples[selected];
+      const ready = () => active().slides.filter((slide) => slide[1] === '열람 가능').length;
+      const text = (id, value) => { get(id).textContent = value; };
+      const element = (tag, value) => { const node = document.createElement(tag); node.textContent = value; return node; };
+      const remember = () => window.openai?.setWidgetState?.({modelContent:{screen,emr:get('emr').value},privateContent:null})?.catch(() => {});
+      function restore(saved) {
+        const state = saved?.modelContent;
+        if (!state) return;
+        if (['list','case','viewer'].includes(state.screen)) screen = state.screen;
+        if (['off','on','down'].includes(state.emr)) get('emr').value = state.emr;
+        render();
+      }
+      function selectScreen(next) {
+        screen = next;
+        get('patient-form').hidden = true;
+        get('lookup-form').hidden = true;
+        get('register').hidden = true;
+        candidate = false;
+        notice = '';
+        render();
+        remember();
+      }
+      function renderList() {
+        const query = get('search').value.trim().toUpperCase();
+        const status = get('filter').value;
+        const assignee = get('assignee-filter').value;
+        const rows = samples.flatMap((sample, index) => {
+          if (!sample.id.includes(query) || (status && status !== sample.status) || (assignee && assignee !== sample.assignee)) return [];
+          const row = document.createElement('tr');
+          const cell = document.createElement('td');
+          const button = element('button', sample.id);
+          button.type = 'button';
+          button.addEventListener('click', () => { selected = index; slideIndex = 0; zoom = 1; message = ''; selectScreen('case'); });
+          cell.append(button); row.append(cell);
+          const count = sample.slides.filter((slide) => slide[1] === '열람 가능').length;
+          [sample.specimen, sample.assignee, sample.status, `${count} / ${sample.slides.length}`, sample.source].forEach((value, column) => { const td = element('td',value); if ([0,1,4].includes(column)) td.className = 'wide'; row.append(td); });
+          return [row];
+        });
+        get('rows').replaceChildren(...rows);
+        get('empty').hidden = rows.length !== 0;
+      }
+      function renderCase() {
+        const current = active();
+        const emr = get('emr').value;
+        text('case-id',current.id);
+        text('case-meta',`${current.specimen} · ${current.status}`);
+        text('patient',current.patient ? `${current.patient.name || '환자명 미입력'} · ${current.patient.number || '환자번호 미입력'} · ${current.source}${current.externalId ? ` · EMR ${current.externalId}` : ''}` : '환자 정보 미입력');
+        get('demographics').hidden = !current.patient;
+        text('birth', current.patient?.birth || '미입력');
+        text('sex', current.patient?.sex || '미입력');
+        text('emr-message',message || {off:'EMR 미설정 · 직접 입력 가능',on:'EMR 연결됨 · 조회 후 연결 가능',down:'EMR 연결 장애 · 직접 입력 가능'}[emr]);
+        get('emr-candidate').hidden = !candidate;
+        get('find').disabled = Boolean(current.externalId);
+        get('assignee').value = current.assignee;
+        text('history',current.history);
+        get('slides').replaceChildren(...current.slides.flatMap(([label,status]) => [element('dt',label),element('dd',status)]));
+        text('case-alert', current.slides.length ? (ready() < current.slides.length ? `${current.slides.length - ready()}장 확인 필요` : '') : '연결된 슬라이드가 없습니다.');
+      }
+      function renderViewer() {
+        const current = active();
+        const slide = current.slides[slideIndex];
+        text('viewer-id',current.id);
+        text('viewer-meta',`${current.specimen} · ${current.status}`);
+        const options = current.slides.map(([label,status], index) => {
+          const button = element('button',`${label} · ${status}`);
+          button.type = 'button';
+          button.setAttribute('aria-pressed',String(index === slideIndex));
+          button.addEventListener('click', () => { slideIndex = index; zoom = 1; notice = ''; render(); });
+          return button;
+        });
+        get('slide-buttons').replaceChildren(...options);
+        const available = slide?.[1] === '열람 가능';
+        text('stage-text',available ? 'WSI 표시 영역' : (slide?.[1] || '연결된 슬라이드 없음'));
+        text('stage-detail',slide?.[0] || '케이스 상세에서 슬라이드 상태를 확인하세요.');
+        text('scale',available ? `배율 ${zoom}× · 스케일바 위치` : '배율 및 스케일바 대기');
+        text('viewer-alert',notice || (slide?.[1] === '열기 오류' ? '슬라이드를 열 수 없습니다. 타일 요청을 다시 시도하세요.' : ''));
+        get('retry').disabled = slide?.[1] !== '열기 오류';
+        for (const id of ['zoom-in','zoom-out']) get(id).disabled = !available;
+        text('review',current.status === '검토 중' ? '검토 완료' : (current.status === '검토 완료' ? '검토 완료됨' : '검토 시작'));
+        get('review').disabled = current.assignee === '미배정' || current.status === '검토 완료' || ready() === 0;
+      }
+      function render() {
+        for (const name of ['list','case','viewer']) get(name).hidden = screen !== name;
+        for (const button of root.querySelectorAll('[data-screen]')) button.setAttribute('aria-pressed',String(button.dataset.screen === screen));
+        if (screen === 'list') renderList();
+        if (screen === 'case') renderCase();
+        if (screen === 'viewer') renderViewer();
+      }
+      for (const button of root.querySelectorAll('[data-screen]')) button.addEventListener('click', () => selectScreen(button.dataset.screen));
+      for (const id of ['search','filter','assignee-filter']) get(id).addEventListener('input',renderList);
+      get('emr').addEventListener('change', () => { candidate = false; message = ''; get('lookup-form').hidden = true; render(); remember(); });
+      get('new').addEventListener('click', () => { get('register-form').reset(); text('register-error',''); get('register').hidden = false; get('register-form').elements.caseId.focus(); });
+      get('register-cancel').addEventListener('click', () => { get('register').hidden = true; get('new').focus(); });
+      get('register-form').addEventListener('submit', (event) => {
+        event.preventDefault();
+        const form = new FormData(event.currentTarget);
+        const id = form.get('caseId').trim().toUpperCase();
+        const specimen = form.get('specimen').trim();
+        if (!id || !specimen) { text('register-error','Case ID와 검체를 입력하세요.'); return; }
+        if (samples.some((sample) => sample.id === id)) { text('register-error','이미 등록된 Case ID입니다.'); return; }
+        samples.push({id,specimen,assignee:'미배정',status:'배정 대기',patient:null,source:'정보 없음',slides:[],history:'신규 케이스 등록'});
+        selected = samples.length - 1; slideIndex = 0; zoom = 1; message = ''; selectScreen('case');
+      });
+      get('manual').addEventListener('click', () => { const form = get('patient-form'); form.reset(); text('form-error',''); candidate = false; get('lookup-form').hidden = true; render(); form.elements.patientName.value = active().patient?.name || ''; form.elements.patientNumber.value = active().patient?.number || ''; form.elements.birth.value = active().patient?.birth || ''; form.elements.sex.value = active().patient?.sex || '미입력'; form.hidden = false; form.elements.patientName.focus(); });
+      get('cancel').addEventListener('click', () => { get('patient-form').hidden = true; get('manual').focus(); });
+      get('patient-form').addEventListener('submit', (event) => {
+        event.preventDefault();
+        const form = new FormData(event.currentTarget);
+        const name = form.get('patientName').trim(), number = form.get('patientNumber').trim();
+        if (!name && !number) { text('form-error','시연용 환자명 또는 환자번호를 입력하세요.'); return; }
+        active().patient = {name,number,birth:form.get('birth'),sex:form.get('sex')};
+        active().source = '직접 입력';
+        active().history = '환자 정보 직접 입력 저장';
+        get('patient-form').hidden = true;
+        render();
+      });
+      get('find').addEventListener('click', () => {
+        const emr = get('emr').value;
+        candidate = false;
+        get('patient-form').hidden = true;
+        message = emr === 'on' ? '' : (emr === 'down' ? '조회에 실패했습니다. 직접 입력하거나 연결 복구 후 다시 조회하세요.' : 'EMR 미설정 상태입니다. 직접 입력할 수 있습니다.');
+        const form = get('lookup-form');
+        form.hidden = emr !== 'on';
+        if (emr === 'on') { form.reset(); form.elements.lookupNumber.focus(); }
+        render();
+      });
+      get('lookup-cancel').addEventListener('click', () => { candidate = false; message = ''; get('lookup-form').hidden = true; render(); get('find').focus(); });
+      get('lookup-form').addEventListener('submit', (event) => {
+        event.preventDefault();
+        const number = new FormData(event.currentTarget).get('lookupNumber').trim().toUpperCase();
+        const existing = samples.find((sample) => sample.externalId === number);
+        const conflict = existing && active().patient && existing.patient !== active().patient;
+        candidate = number === 'EMR-P001' && !conflict;
+        message = candidate ? '' : (conflict ? '이 EMR ID는 다른 환자 레코드에 연결되어 있습니다. 담당자가 확인하세요.' : '일치하는 환자가 없습니다. 직접 입력할 수 있습니다.');
+        render();
+      });
+      get('link').addEventListener('click', () => {
+        if (!candidate) return;
+        const current = active();
+        const existing = samples.find((sample) => sample.externalId === 'EMR-P001');
+        if (!current.patient) {
+          current.patient = existing?.patient || {name:'시연 환자',number:'EMR-P001'};
+          current.source = existing?.source || 'EMR 가져오기';
+        }
+        current.externalId = 'EMR-P001';
+        current.history = '외부 환자 연결 이력 추가';
+        candidate = false;
+        get('lookup-form').hidden = true;
+        message = '외부 환자 연결이 저장되었습니다.';
+        render();
+      });
+      get('assign').addEventListener('click', () => {
+        const current = active(), target = get('assignee').value;
+        if (target !== '미배정' && ready() === 0) { text('case-alert','열람 가능한 슬라이드가 한 장 이상 필요합니다.'); return; }
+        if (current.status === '검토 완료' || target === current.assignee) return;
+        current.assignee = target; current.status = target === '미배정' ? '배정 대기' : '배정됨'; current.history = `담당자 변경 · ${target}`; render();
+      });
+      get('open').addEventListener('click', () => selectScreen('viewer'));
+      get('zoom-in').addEventListener('click', () => { zoom = Math.min(40,zoom * 2); render(); });
+      get('zoom-out').addEventListener('click', () => { zoom = Math.max(1,zoom / 2); render(); });
+      get('retry').addEventListener('click', () => { active().slides[slideIndex][1] = '열람 가능'; notice = '타일 요청 복구 예시'; render(); });
+      get('review').addEventListener('click', () => {
+        const current = active();
+        if (current.status === '검토 중' && ready() !== current.slides.length) { notice = '필수 슬라이드가 모두 열람 가능해지면 완료할 수 있습니다.'; render(); return; }
+        current.status = current.status === '검토 중' ? '검토 완료' : '검토 중'; current.history = `${current.status} · ${current.assignee}`; render();
+      });
+      window.addEventListener('openai:set_globals', (event) => restore(event.detail?.globals?.widgetState));
+      render();
+      restore(window.openai?.widgetState);
+    })();
+  </script>
+</section>
