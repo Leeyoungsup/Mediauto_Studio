@@ -4,22 +4,21 @@ import json
 import stat
 from contextlib import asynccontextmanager
 from datetime import date
-from ipaddress import ip_address
 from pathlib import Path
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path as RoutePath, Query, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Path as RoutePath, Query
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import CurrentUser, Session as DatabaseSession, WRITERS, require_organization, require_roles
 from app.intake import DATA_ROOT
 from app.models import Case, ClinicalEvent, ExternalIdentifier, Patient, RegistrationRequest, Slide, SlideScan, Specimen
 
-ACTOR = "local-development"
 SOURCE = "manual"
 Organization = Annotated[str, RoutePath(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")]
 RegistrationKey = Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")]
@@ -33,17 +32,7 @@ MODELS = {"patients": Patient, "cases": Case, "specimens": Specimen, "slides": S
 PARENT_FIELDS = {"cases": Case.patient_id, "specimens": Specimen.case_id, "slides": Slide.specimen_id, "scans": SlideScan.slide_id}
 
 
-def require_local(request: Request, response: Response) -> None:
-    response.headers["Cache-Control"] = "no-store"
-    try:
-        address = ip_address(request.client.host) if request.client else None
-    except ValueError:
-        address = None
-    if address is None or not address.is_loopback:
-        raise HTTPException(403, "인증 연동 전에는 서버 내부에서만 이 API를 사용할 수 있습니다.")
-
-
-router = APIRouter(prefix="/api/clinical/{organization}", tags=["Clinical records"], dependencies=[Depends(require_local)])
+router = APIRouter(prefix="/api/clinical/{organization}", tags=["Clinical records"])
 
 
 class ClinicalInput(BaseModel):
@@ -101,16 +90,18 @@ class IdentifierLink(IdentifierQuery):
     reason: Reason
 
 
-async def session_for(request: Request):
-    async with AsyncSession(request.app.state.engine, expire_on_commit=False) as session:
-        yield session
+async def scoped_session(organization: Organization, user: CurrentUser, session: DatabaseSession):
+    require_organization(user, organization)
+    session.info["user"] = user
+    return session
 
 
-Session = Annotated[AsyncSession, Depends(session_for)]
+Session = Annotated[AsyncSession, Depends(scoped_session)]
 
 
 @asynccontextmanager
 async def write(session: AsyncSession):
+    require_roles(session.info["user"], WRITERS)
     try:
         async with session.begin():
             yield
@@ -127,6 +118,7 @@ def public_fields(record) -> dict:
 
 async def find(session: AsyncSession, model, organization: str, record_id: UUID, lock=False):
     statement = select(model).where(model.organization == organization, model.id == record_id)
+    statement = statement.where(case_visibility(model, session.info["user"]))
     if lock:
         statement = statement.with_for_update()
     record = await session.scalar(statement)
@@ -135,10 +127,25 @@ async def find(session: AsyncSession, model, organization: str, record_id: UUID,
     return record
 
 
+def case_visibility(model, user):
+    if user.role in WRITERS:
+        return True
+    assigned = (Case.organization == user.organization, Case.assigned_to == user.id)
+    if model is Case:
+        return Case.assigned_to == user.id
+    if model is Patient:
+        return Patient.id.in_(select(Case.patient_id).where(*assigned))
+    specimens = select(Specimen.id).where(Specimen.case_id.in_(select(Case.id).where(*assigned)))
+    if model is Specimen:
+        return Specimen.id.in_(specimens)
+    slides = select(Slide.id).where(Slide.specimen_id.in_(specimens))
+    return Slide.id.in_(slides) if model is Slide else SlideScan.slide_id.in_(slides)
+
+
 def add_event(session: AsyncSession, record, action: str, before: dict, after: dict, reason: str | None = None) -> None:
     session.add(ClinicalEvent(
         organization=record.organization, record_type=record.__tablename__, record_id=record.id,
-        version=record.version, action=action, actor=ACTOR, source=SOURCE, before=before, after=after,
+        version=record.version, action=action, actor=str(session.info["user"].id), source=SOURCE, before=before, after=after,
         reason=reason, transaction_id=uuid4(),
     ))
 
@@ -202,7 +209,7 @@ async def register(session: AsyncSession, organization: str, model, key: str, da
             fields["status"] = "registered" if data.specimen_id else "unlinked"
         elif model is SlideScan:
             fields.update(await asyncio.to_thread(scan_metadata, data.storage_key))
-        record = model(id=record_id, organization=organization, created_by=ACTOR, **fields)
+        record = model(id=record_id, organization=organization, created_by=str(session.info["user"].id), **fields)
         session.add(record)
         await session.flush()
         add_event(session, record, "registered", {}, relationship_state(record))
@@ -241,7 +248,7 @@ async def list_records(
     parent_id: UUID | None = None, unlinked: bool = False,
 ):
     model = MODELS[category]
-    statement = select(model).where(model.organization == organization)
+    statement = select(model).where(model.organization == organization, case_visibility(model, session.info["user"]))
     if parent_id is not None or unlinked:
         parent_field = PARENT_FIELDS.get(category)
         if parent_field is None or (unlinked and (category not in {"cases", "slides"} or parent_id is not None)):
@@ -312,6 +319,7 @@ async def lookup_identifier(organization: Organization, category: IdentityCatego
     record_id = getattr(identifier, category.removesuffix("s") + "_id", None)
     if record_id is None:
         raise HTTPException(404, "이 기관에서 연결된 외부 식별자를 찾을 수 없습니다.")
+    await find(session, MODELS[category], organization, record_id)
     return {"record_id": record_id, "identifier": public_fields(identifier)}
 
 
@@ -329,7 +337,7 @@ async def link_identifier(organization: Organization, category: IdentityCategory
 
         identifier = ExternalIdentifier(
             organization=organization, system=data.system, kind=data.kind, value=data.value,
-            source=SOURCE, linked_by=ACTOR, **{field: record_id},
+            source=SOURCE, linked_by=str(session.info["user"].id), **{field: record_id},
         )
         session.add(identifier)
         record.version += 1

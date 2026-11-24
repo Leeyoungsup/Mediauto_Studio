@@ -7,14 +7,24 @@ from string import Formatter
 from typing import Annotated
 from uuid import NAMESPACE_URL, uuid5
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, StringConstraints, ValidationError
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
 from app.models import ApplicationSetting
+from app.auth import CurrentUser, WRITERS, require_organization, require_roles
 
-router = APIRouter(prefix="/api/intake", tags=["Slide intake"])
+def require_intake(user: CurrentUser):
+    require_organization(user, "local")
+    require_roles(user, WRITERS)
+
+
+def require_rules(user: CurrentUser):
+    require_roles(user, ("admin",))
+
+
+router = APIRouter(prefix="/api/intake", tags=["Slide intake"], dependencies=[Depends(require_intake)])
 DATA_ROOT = Path(__file__).resolve().parents[2] / "data"
 RULES_KEY = "slide_filename_rules"
 INTAKE_PREFIX = "slide_intake:"
@@ -187,13 +197,13 @@ async def save_slide(file_id: str, data: ManualEntry, request: Request):
     return {**entry, "version": data.version + 1}
 
 
-@router.get("/rules")
+@router.get("/rules", dependencies=[Depends(require_rules)])
 async def get_rules(request: Request):
     async with request.app.state.engine.connect() as connection:
         return await saved_rules(connection)
 
 
-@router.put("/rules")
+@router.put("/rules", dependencies=[Depends(require_rules)])
 async def configure_rules(data: RuleUpdate, request: Request):
     compiled_rules(data)
     async with request.app.state.engine.begin() as connection:
@@ -204,14 +214,14 @@ async def configure_rules(data: RuleUpdate, request: Request):
     return data.model_copy(update={"version": data.version + 1})
 
 
-@router.post("/rules/preview")
+@router.post("/rules/preview", dependencies=[Depends(require_rules)])
 async def preview_rules(data: RuleDraft):
     rules = compiled_rules(data)
     sources = await asyncio.to_thread(scan_files, DATA_ROOT)
     return [{**asdict(source), "match": classify(source, rules)} for source in sources]
 
 
-@router.post("/rules/apply")
+@router.post("/rules/apply", dependencies=[Depends(require_rules)])
 async def apply_rules(data: RuleApplication, request: Request):
     sources = await asyncio.to_thread(scan_files, DATA_ROOT)
     async with request.app.state.engine.begin() as connection:

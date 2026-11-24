@@ -10,10 +10,12 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from starlette.staticfiles import StaticFiles
 
+from app.auth import load_auth_key, router as auth_router
 from app.clinical import router as clinical_router
 from app.database import database_url
 from app.intake import router as intake_router
 from app.models import ApplicationSetting
+from app.worklist import router as worklist_router
 
 logger = logging.getLogger(__name__)
 EmrState = Literal["unconfigured", "disabled", "connected", "unavailable", "unknown"]
@@ -27,6 +29,7 @@ class Health(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app.state.auth_key = load_auth_key()
     engine = create_async_engine(
         database_url(),
         pool_pre_ping=True,
@@ -41,8 +44,10 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Mediauto Studio", lifespan=lifespan)
+app.include_router(auth_router)
 app.include_router(clinical_router)
 app.include_router(intake_router)
+app.include_router(worklist_router)
 
 
 @app.get("/api/health", responses={503: {"model": Health}})

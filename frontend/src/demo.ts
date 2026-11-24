@@ -7,13 +7,14 @@ export type Slide = { id: string; label?: string; stain: string; specimen: strin
 export type DemoCase = {
   id: string;
   specimen: string;
-  assignee: Doctor | '';
+  assignee: string;
   status: CaseStatus;
   received: string;
   patient: Patient | null;
   slides: Slide[];
   history: string[];
-  source?: 'files';
+  source?: 'files' | 'clinical';
+  recordId?: string;
 };
 
 const sampleSlides: Slide[] = [

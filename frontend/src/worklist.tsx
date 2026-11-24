@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { ArrowDown, ArrowDownWideNarrow, ArrowRight, ArrowUp, CheckCircle2, CircleDashed, Columns3, Files, FolderOpen, Layers3, Plus, ScanLine, Search, UserRoundCheck, X } from 'lucide-react';
-import { doctors, readyCount, statuses } from './demo';
+import { readyCount, statuses } from './demo';
 import type { CaseStatus, DemoCase, Slide } from './demo';
+import type { Assignee, Counts, WorklistQuery } from './worklist-api';
 
 const columns = [
   { id: 'specimen', label: '검체' }, { id: 'assignee', label: '담당자' },
@@ -63,25 +64,32 @@ function columnValue(item: DemoCase, id: ColumnId) {
 type Props = {
   cases: DemoCase[];
   loading: boolean;
+  total: number;
+  counts: Counts;
+  assignees: Assignee[];
+  onQuery: (query: WorklistQuery) => void;
   scope: Scope;
   current: DemoCase | undefined;
   onSelect: (id: string) => void;
   onOpen: (id: string) => void;
   onViewer: (id: string, slide?: string) => void;
-  onRegister: () => void;
+  onRegister?: () => void;
 };
 
-export function Worklist({ cases, loading, scope, current, onSelect, onOpen, onViewer, onRegister }: Props) {
+export function Worklist({ cases, loading, total, counts, assignees, onQuery, scope, current, onSelect, onOpen, onViewer, onRegister }: Props) {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<CaseStatus | ''>('');
   const [assignee, setAssignee] = useState('');
   const [sort, setSort] = useState('recent');
+  const [offset, setOffset] = useState(0);
   const [columnSettings, setColumnSettings] = useState(loadColumns);
   const [columnSearch, setColumnSearch] = useState('');
   const shownColumns = columnSettings.filter(({ visible }) => visible).map(({ id }) => columns.find((column) => column.id === id)!);
   useEffect(() => {
     try { localStorage.setItem(preferenceKey, JSON.stringify(columnSettings)); } catch { /* Storage is optional. */ }
   }, [columnSettings]);
+  useEffect(() => setOffset(0), [scope]);
+  useEffect(() => onQuery({ q: search, status, assignee, sort, offset }), [search, status, assignee, sort, offset, onQuery]);
 
   function moveColumn(index: number, offset: number) {
     const next = [...columnSettings];
@@ -89,43 +97,35 @@ export function Worklist({ cases, loading, scope, current, onSelect, onOpen, onV
     setColumnSettings(next);
   }
 
-  const matching = cases.filter((item) => {
-    const matchesScope = scope === 'all' || (scope === 'mine' ? item.assignee === '병리의 A' : !item.assignee);
-    const keyword = search.trim().toLowerCase();
-    return matchesScope && (!status || item.status === status) && (!assignee || item.assignee === assignee)
-      && (!keyword || `${item.id} ${item.specimen} ${item.patient?.number ?? ''}`.toLowerCase().includes(keyword));
-  });
-  if (sort === 'oldest') matching.sort((a, b) => a.received.localeCompare(b.received));
-  if (sort === 'case') matching.sort((a, b) => a.id.localeCompare(b.id));
-  const selected = matching.find(({ id }) => current?.id === id) ?? matching[0];
+  const selected = cases.find(({ id }) => current?.id === id) ?? cases[0];
   const metrics = [
-    { label: '전체 케이스', count: cases.length, icon: Files, tone: 'violet', value: '' },
-    { label: '배정 대기', count: cases.filter((item) => item.status === '배정 대기').length, icon: CircleDashed, tone: 'amber', value: '배정 대기' },
-    { label: '검토 중', count: cases.filter((item) => item.status === '검토 중').length, icon: UserRoundCheck, tone: 'blue', value: '검토 중' },
-    { label: '검토 완료', count: cases.filter((item) => item.status === '검토 완료').length, icon: CheckCircle2, tone: 'green', value: '검토 완료' },
+    { label: '전체 케이스', count: counts.all, icon: Files, tone: 'violet', value: '' },
+    { label: '배정 대기', count: counts.statuses.registered, icon: CircleDashed, tone: 'amber', value: '배정 대기' },
+    { label: '검토 중', count: counts.statuses.in_review, icon: UserRoundCheck, tone: 'blue', value: '검토 중' },
+    { label: '검토 완료', count: counts.statuses.reviewed, icon: CheckCircle2, tone: 'green', value: '검토 완료' },
   ] as const;
 
   function clearFilters() {
-    setSearch(''); setStatus(''); setAssignee('');
+    setSearch(''); setStatus(''); setAssignee(''); setOffset(0);
   }
 
   return <>
     <div className="page-heading"><div><h1>Worklist</h1><p>케이스 배정과 슬라이드 검토 상태를 확인하세요.</p></div>
-      <button className="button primary" onClick={onRegister}><Plus size={17} /> 케이스 등록</button>
+      {onRegister && <button className="button primary" onClick={onRegister}><Plus size={17} /> 케이스 등록</button>}
     </div>
     <section className="metrics" aria-label="케이스 현황">
-      {metrics.map(({ label, count, icon: Icon, tone, value }) => <button key={label} className="metric" aria-pressed={status === value} onClick={() => setStatus(status === value ? '' : value)}>
+      {metrics.map(({ label, count, icon: Icon, tone, value }) => <button key={label} className="metric" aria-pressed={status === value} onClick={() => { setStatus(status === value ? '' : value); setOffset(0); }}>
         <span className={`metric-icon ${tone}`}><Icon size={20} /></span><span className="metric-value"><span>{label}</span><strong>{count}</strong></span>
       </button>)}
     </section>
     <div className="worklist-layout">
       <section className="panel worklist-panel" aria-label="케이스 목록">
-        <div className="panel-title"><div className="title-inline"><h2>{scope === 'mine' ? '내 배정 건' : scope === 'unassigned' ? '미배정 케이스' : '케이스 목록'}</h2><span className="count">{matching.length}</span></div></div>
+        <div className="panel-title"><div className="title-inline"><h2>{scope === 'mine' ? '내 배정 건' : scope === 'unassigned' ? '미배정 케이스' : '케이스 목록'}</h2><span className="count">{total}</span></div></div>
         <div className="filters">
-          <label className="search-field"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Case ID, 검체 또는 환자번호" aria-label="케이스 검색" />{search && <button className="icon-button" aria-label="검색어 지우기" onClick={() => setSearch('')}><X size={15} /></button>}</label>
-          <select aria-label="검토 상태 필터" value={status} onChange={(event) => setStatus(event.target.value as CaseStatus | '')}><option value="">모든 상태</option>{statuses.map((value) => <option key={value}>{value}</option>)}</select>
-          <select aria-label="담당자 필터" value={assignee} onChange={(event) => setAssignee(event.target.value)}><option value="">모든 담당자</option>{doctors.map((value) => <option key={value}>{value}</option>)}</select>
-          <label className="sort-field"><ArrowDownWideNarrow size={16} /><select aria-label="정렬" value={sort} onChange={(event) => setSort(event.target.value)}><option value="recent">최근 접수순</option><option value="oldest">오래된 순</option><option value="case">Case ID순</option></select></label>
+          <label className="search-field"><Search size={17} /><input value={search} onChange={(event) => { setSearch(event.target.value); setOffset(0); }} maxLength={80} placeholder="Case ID 검색" aria-label="케이스 검색" />{search && <button className="icon-button" aria-label="검색어 지우기" onClick={() => { setSearch(''); setOffset(0); }}><X size={15} /></button>}</label>
+          <select aria-label="검토 상태 필터" value={status} onChange={(event) => { setStatus(event.target.value as CaseStatus | ''); setOffset(0); }}><option value="">모든 상태</option>{statuses.map((value) => <option key={value}>{value}</option>)}</select>
+          <select aria-label="담당자 필터" value={assignee} onChange={(event) => { setAssignee(event.target.value); setOffset(0); }}><option value="">모든 담당자</option>{assignees.map(({ id, name }) => <option key={id} value={id}>{name}</option>)}</select>
+          <label className="sort-field"><ArrowDownWideNarrow size={16} /><select aria-label="정렬" value={sort} onChange={(event) => { setSort(event.target.value); setOffset(0); }}><option value="recent">최근 접수순</option><option value="oldest">오래된 순</option><option value="case">Case ID순</option></select></label>
           <details className="column-menu"><summary className="button secondary"><Columns3 size={15} /> 열</summary><div className="column-options">
             <label className="search-field"><Search size={14} /><input aria-label="열 검색" placeholder="열 검색" value={columnSearch} onChange={(event) => setColumnSearch(event.target.value)} /></label>
             <div className="column-list">{columnSettings.map(({ id, visible }, index) => {
@@ -138,17 +138,18 @@ export function Worklist({ cases, loading, scope, current, onSelect, onOpen, onV
           </div></details>
         </div>
         <div className="table-scroll"><table><thead><tr><th scope="col">Case ID</th>{shownColumns.map(({ id, label }) => <th scope="col" key={id}>{label}</th>)}<th scope="col"><span className="sr-only">열기</span></th></tr></thead>
-          <tbody>{matching.map((item) => <tr key={item.id} className={selected?.id === item.id ? 'selected-row' : undefined} onClick={() => onSelect(item.id)}>
+          <tbody>{cases.map((item) => <tr key={item.id} className={selected?.id === item.id ? 'selected-row' : undefined} onClick={() => onSelect(item.id)}>
             <td><button className="case-id" onClick={(event) => { event.stopPropagation(); onSelect(item.id); }} aria-pressed={selected?.id === item.id}>{item.id}</button></td>
             {shownColumns.map(({ id }) => <td className="nowrap" key={id}>{columnValue(item, id)}</td>)}
             <td><button className="icon-button" aria-label={`${item.id} 상세 열기`} onClick={(event) => { event.stopPropagation(); onOpen(item.id); }}><ArrowRight size={16} /></button></td>
           </tr>)}</tbody></table></div>
-        {!matching.length && <div className="empty"><FolderOpen size={28} />
-          <strong>{loading ? '케이스를 불러오는 중입니다.' : cases.length ? '조건에 맞는 케이스가 없습니다.' : '등록된 케이스가 없습니다.'}</strong>
-          {!loading && (cases.length ? <button className="button secondary" onClick={clearFilters}>필터 초기화</button>
-            : <a className="button secondary" href="#scans">슬라이드 등록</a>)}
+        {!cases.length && <div className="empty"><FolderOpen size={28} />
+          <strong>{loading ? '케이스를 불러오는 중입니다.' : counts.all ? '조건에 맞는 케이스가 없습니다.' : '조회할 케이스가 없습니다.'}</strong>
+          {!loading && (search || status || assignee) && <button className="button secondary" onClick={clearFilters}>필터 초기화</button>}
         </div>}
-        <footer className="table-footer">{cases.length}건 중 {matching.length}건 표시</footer>
+        <footer className="table-footer"><span>{total}건 중 {cases.length ? offset + 1 : 0}–{offset + cases.length}건 표시</span>
+          {(offset > 0 || total > 50) && <div className="actions"><button className="button secondary" disabled={loading || offset === 0} onClick={() => setOffset(offset - 50)}>이전</button><button className="button secondary" disabled={loading || offset + 50 >= total} onClick={() => setOffset(offset + 50)}>다음</button></div>}
+        </footer>
       </section>
       <aside className="panel case-preview" aria-label="선택한 케이스 미리보기">
         <div className="panel-title"><h2>케이스 미리보기</h2><ScanLine size={18} className="muted" /></div>
