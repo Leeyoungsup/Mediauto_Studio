@@ -175,4 +175,5 @@ PYMEDIA
     export MEDIAUTO_PAP_TEST_PYTHON="$python" MEDIAUTO_PAP_TEST_DIR="$sandbox"
     node scripts/pap-gallery-browser.mjs
     node scripts/pap-review-browser.mjs
+    node scripts/related-cases-browser.mjs
 fi

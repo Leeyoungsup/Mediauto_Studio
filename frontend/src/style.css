@@ -694,3 +694,16 @@ dialog::backdrop { background: #21193575; }
 .pap-policy form, .pap-review-reason { margin: 10px 0; }
 .pap-review-reason { max-width: 780px; }
 .pap-findings-summary dd, .pap-review details p { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.related-cases-dialog { width: min(860px, calc(100vw - 32px)); }
+.related-fields { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin-bottom: 8px; }
+.related-fields > .form-field { flex: 1 1 250px; min-width: 0; }
+.related-confirm { display: grid; gap: 8px; padding: 10px; background: #f7f4fc; }
+.related-confirm > .button { justify-self: start; }
+.related-history article { border-top: 1px solid var(--line); padding: 10px 0; }
+.related-history article p { margin: 4px 0; overflow-wrap: anywhere; }
+.related-comparison-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.related-pane-heading { display: grid; gap: 4px; padding: 10px; background: #f2edf9; }
+.related-secondary { background: #fff0dc; border-left: 4px solid #b56308; }
+.related-comparison-grid .image-surface { height: max(300px, calc(100dvh - 272px)); }
+@media (max-width: 800px) { .related-comparison-grid { grid-template-columns: minmax(0, 1fr); } }

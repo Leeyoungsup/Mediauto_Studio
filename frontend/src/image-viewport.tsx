@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import type { PointerEvent as ReactPointerEvent } from 'react';
+import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { AlertTriangle, LocateFixed, Map, Minus, Pause, Play, Plus, ScanLine } from 'lucide-react';
 import type { WsiScan } from './demo';
 import { api, auditAttemptId, jsonBody, request } from './session';
@@ -74,8 +74,9 @@ type ViewerOptions = {
 
 const autopanVectors = { right: [-1, 0], left: [1, 0], down: [0, -1], up: [0, 1] } as const;
 
-export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint, initialSnapshot, initialRoi, roiCaseId, options, sharedReview }: {
+export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint, initialSnapshot, initialRoi, roiCaseId, options, sharedReview, extraAction }: {
   scan: WsiScan; label: string; stain: string; comparison?: PaneComparison; readOnlyEndpoint?: string; initialSnapshot?: string; initialRoi?: string; roiCaseId?: string; options?: ViewerOptions;
+  extraAction?: ReactNode;
   sharedReview?: { locked: boolean; camera?: Camera; onFrame: (camera: Camera) => void };
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -346,7 +347,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     data-view-center-x={view && view.x + view.width / 2} data-view-center-y={view && view.y + view.height / 2}
     data-view-zoom={view?.zoom}>
     <div className="image-toolbar"><span><ScanLine size={17} /> {label} <span className="image-stain">{stain} · {scan.format}</span>{options && <ScanReference scan={scan} />}</span>
-      <div className="image-actions">
+      <div className="image-actions">{extraAction}
         {canOpenSlideReview && <button type="button" className="button secondary" aria-expanded={showPapReview}
           onClick={() => setShowPapReview((open) => !open)}>Pap Review</button>}
         {canOpenSlideReview && <button type="button" className="button secondary" aria-expanded={showPap}

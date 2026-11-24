@@ -1024,3 +1024,37 @@ class PapReviewRevision(ClinicalRecord, Base):
     reason: Mapped[str | None] = mapped_column(String(240))
     request_key: Mapped[UUID] = mapped_column(Uuid)
     request_hash: Mapped[str] = mapped_column(String(64))
+
+
+class RelatedCaseLink(ClinicalRecord, Base):
+    __tablename__ = "related_case_links"
+    __table_args__ = (
+        ForeignKeyConstraint(("organization", "patient_id"), ("patients.organization", "patients.id")),
+        ForeignKeyConstraint(("organization", "pap_case_id", "pap_specimen_id"),
+                             ("specimens.organization", "specimens.case_id", "specimens.id")),
+        ForeignKeyConstraint(("organization", "biopsy_case_id", "biopsy_specimen_id"),
+                             ("specimens.organization", "specimens.case_id", "specimens.id")),
+        ForeignKeyConstraint(("organization", "pap_scan_id"), ("slide_scans.organization", "slide_scans.id")),
+        ForeignKeyConstraint(("organization", "biopsy_scan_id"), ("slide_scans.organization", "slide_scans.id")),
+        UniqueConstraint("organization", "created_by", "request_key"),
+        CheckConstraint("pap_case_id <> biopsy_case_id AND pap_specimen_id <> biopsy_specimen_id "
+                        "AND pap_scan_id <> biopsy_scan_id", name="related_case_distinct_sources"),
+        Index("ix_active_related_case_scans", "organization", "pap_scan_id", "biopsy_scan_id", unique=True,
+              postgresql_where=text("revoked_at IS NULL")),
+        Index("ix_related_case_pap", "organization", "pap_case_id"),
+        Index("ix_related_case_biopsy", "organization", "biopsy_case_id"),
+    )
+
+    patient_id: Mapped[UUID] = mapped_column(Uuid)
+    pap_case_id: Mapped[UUID] = mapped_column(Uuid)
+    pap_specimen_id: Mapped[UUID] = mapped_column(Uuid)
+    pap_scan_id: Mapped[UUID] = mapped_column(Uuid)
+    biopsy_case_id: Mapped[UUID] = mapped_column(Uuid)
+    biopsy_specimen_id: Mapped[UUID] = mapped_column(Uuid)
+    biopsy_scan_id: Mapped[UUID] = mapped_column(Uuid)
+    reason: Mapped[str] = mapped_column(String(240))
+    request_key: Mapped[UUID] = mapped_column(Uuid)
+    request_hash: Mapped[str] = mapped_column(String(64))
+    revoked_by: Mapped[str | None] = mapped_column(String(80))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoke_reason: Mapped[str | None] = mapped_column(String(240))

@@ -9,10 +9,11 @@ from sqlalchemy import Integer, String, and_, case, cast, literal, or_, select, 
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.auth import require_roles
+from app.related_cases import scope_links, visible_cases
 from app.clinical import ClinicalInput, Organization, Session, find
 from app.intake import source_id
 from app.models import (AuthUser, Case, CaseActivity, CaseAttachment, CaseNote, CaseRequest, ClinicalEvent,
-                        PatientHistoryRecord, Slide, SlideScan, Specimen, SpecimenBlock, ViewerAnnotation)
+                        PatientHistoryRecord, RelatedCaseLink, Slide, SlideScan, Specimen, SpecimenBlock, ViewerAnnotation)
 
 router = APIRouter(prefix="/api/clinical/{organization}/cases/{case_id}/logs", tags=["Case logs"])
 ROLE_SCOPE = ("admin", "doctor")
@@ -24,6 +25,7 @@ ENTITY_NAMES = {
     "review_rooms": "review_room", "review_participants": "review_participant",
     "analysis_runs": "analysis_run", "ihc_reviews": "ihc_review", "ihc_result_revisions": "ihc_result_revision",
     "skin_review_revisions": "skin_review_revision",
+    "related_case_links": "related_case_link",
     "pap_review_revisions": "pap_review_revision",
     "lymph_node_counts": "lymph_node_count", "slide_scans": "scan", "viewer_annotations": "annotation", "case_attachments": "attachment",
     "case_requests": "request", "case_notes": "note", "patient_history_records": "clinical_record",
@@ -44,7 +46,7 @@ def in_scope(record_type, query):
     return and_(ClinicalEvent.record_type == record_type, ClinicalEvent.record_id.in_(query))
 
 
-async def audit_rows(session, organization, case_id):
+async def audit_rows(session, organization, case_id, user):
     specimens = select(Specimen.id).where(Specimen.organization == organization, Specimen.case_id == case_id)
     # A previously linked slide may carry history from another case. Only an explicit case ID
     # can attribute its old records after a transfer.
@@ -70,6 +72,9 @@ async def audit_rows(session, organization, case_id):
         *(in_scope(model.__tablename__, select(model.id).where(model.organization == organization, model.case_id == case_id))
           for model in (CaseAttachment, CaseNote, CaseRequest, PatientHistoryRecord)),
     )
+    related = select(RelatedCaseLink.id).where(RelatedCaseLink.organization == organization,
+        or_(RelatedCaseLink.pap_case_id == case_id, RelatedCaseLink.biopsy_case_id == case_id),
+        *scope_links(visible_cases(organization, user)))
     mutation = ClinicalEvent
     failed = or_(
         mutation.action.in_(("or_confirmation_failed", "analysis_failed")),
@@ -84,7 +89,9 @@ async def audit_rows(session, organization, case_id):
         mutation.record_id.label("target_id"), case((failed, "failed"), else_="success").label("result"),
         literal(None, Integer).label("status_code"), mutation.before, mutation.after, mutation.reason,
     ).where(mutation.organization == organization,
-            or_(mutation.case_id == case_id, and_(mutation.case_id.is_(None), legacy)))
+            or_(and_(mutation.record_type != "related_case_links",
+                     or_(mutation.case_id == case_id, and_(mutation.case_id.is_(None), legacy))),
+                in_scope("related_case_links", related)))
     runtime = CaseActivity
     access = select(
         runtime.id, runtime.occurred_at, cast(runtime.actor_id, String).label("actor"), runtime.action,
@@ -100,7 +107,7 @@ async def logs(organization: Organization, case_id: UUID, session: Session, filt
     await find(session, Case, organization, case_id)
     if bool(filters.before_at) != bool(filters.before_id):
         raise HTTPException(422, "Provide both values of the log cursor.")
-    rows = await audit_rows(session, organization, case_id)
+    rows = await audit_rows(session, organization, case_id, session.info["user"])
     account = AuthUser
     actor_name = account.display_name.label("actor_name")
     base = rows.outerjoin(account, and_(account.organization == organization, cast(account.id, String) == rows.c.actor))

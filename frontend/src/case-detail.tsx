@@ -1,3 +1,4 @@
+import { RelatedCasesControl } from './related-cases-control';
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, ClipboardList, PencilLine, MessageSquare, FileSymlink, FileText, Camera, List, History, ScanLine, UserRound } from 'lucide-react';
@@ -10,9 +11,9 @@ import { readyCount } from './demo';
 import type { DemoCase } from './demo';
 import { ScanReference, SlidePreview, StatusLabel } from './worklist';
 
-export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, onConfirm, patientIntegration, requests, report, initialTab, dates, routing, editor, selectedScan, historyEndpoint, attachmentsEndpoint, logsEndpoint, notesEndpoint, frozen }: {
+export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, onConfirm, patientIntegration, requests, report, initialTab, dates, routing, editor, selectedScan, historyEndpoint, attachmentsEndpoint, logsEndpoint, notesEndpoint, frozen, relatedEndpoint }: {
   item: DemoCase; emr: string; onBack: () => void; onViewer: (slide?: string) => void;
-  onAssign?: () => void; onReview?: () => void; onConfirm?: () => void; patientIntegration?: ReactNode; requests?: ReactNode; report?: ReactNode; initialTab?: string; selectedScan?: string; historyEndpoint?: string; attachmentsEndpoint?: string; logsEndpoint?: string; notesEndpoint?: string; frozen?: ReactNode; dates?: ReactNode; routing?: ReactNode; editor?: ReactNode;
+  onAssign?: () => void; onReview?: () => void; onConfirm?: () => void; patientIntegration?: ReactNode; requests?: ReactNode; report?: ReactNode; initialTab?: string; selectedScan?: string; historyEndpoint?: string; attachmentsEndpoint?: string; logsEndpoint?: string; notesEndpoint?: string; frozen?: ReactNode; relatedEndpoint?: string; dates?: ReactNode; routing?: ReactNode; editor?: ReactNode;
 }) {
   const [showLogs, setShowLogs] = useState(false);
   const [tab, setTab] = useState(initialTab ?? 'Slides');
@@ -24,6 +25,7 @@ export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, on
     <div className="page-heading"><div><h1>{item.id}</h1><p>{item.specimen} · Received {item.received}</p></div>
       <div className="actions"><StatusLabel status={item.status} />
         {onReview && <button className="button secondary" disabled={!available} onClick={onReview}>{item.status === 'In Review' ? 'Review Complete' : 'Start Review'}</button>}
+        {relatedEndpoint && item.recordId && <RelatedCasesControl endpoint={relatedEndpoint} caseId={item.recordId} scanId={selected?.wsi?.id} />}
         {logsEndpoint && <button type="button" className="button secondary" onClick={() => setShowLogs(true)}><List size={16} /> Case Logs</button>}
         <button className="button primary" disabled={selected ? !selected.wsi : !available} onClick={() => onViewer(selected?.id)}><ScanLine size={17} /> Open Viewer</button>
       </div>

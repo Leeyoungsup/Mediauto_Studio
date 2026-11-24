@@ -1,3 +1,4 @@
+import { RelatedCasesControl } from './related-cases-control';
 import { CollaborativeReview, useCollaborativeReview } from './collaborative-review';
 import { roiSearchHref, roiViewerHref } from './roi-search';
 import type { RoiLocation } from './roi-search';
@@ -14,8 +15,8 @@ import { MultiView } from './multi-view';
 import { ViewerSettingsPanel, useViewerPreferences } from './viewer-preferences';
 import { ScanReference, SlidePreview, StatusLabel } from './worklist';
 
-export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsHref, initialSnapshot, initialRoi, roiOrigin, editorHref, historyEndpoint, attachmentsEndpoint, logsEndpoint, notesEndpoint, reviewEndpoint, viewerAccount }: {
-  item: DemoCase; activeSlide?: string; onSlide: (id: string) => void; onBack: (scan?: string) => void; onReview?: () => void; requestsHref?: string; initialSnapshot?: string; initialRoi?: string; roiOrigin?: RoiLocation; editorHref?: string; historyEndpoint?: string; attachmentsEndpoint?: string; logsEndpoint?: string; notesEndpoint?: string; reviewEndpoint?: string; viewerAccount: string;
+export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsHref, initialSnapshot, initialRoi, roiOrigin, editorHref, historyEndpoint, attachmentsEndpoint, logsEndpoint, notesEndpoint, reviewEndpoint, viewerAccount, relatedEndpoint }: {
+  item: DemoCase; activeSlide?: string; onSlide: (id: string) => void; onBack: (scan?: string) => void; onReview?: () => void; requestsHref?: string; initialSnapshot?: string; initialRoi?: string; roiOrigin?: RoiLocation; editorHref?: string; historyEndpoint?: string; attachmentsEndpoint?: string; logsEndpoint?: string; notesEndpoint?: string; reviewEndpoint?: string; relatedEndpoint?: string; viewerAccount: string;
 }) {
   const [showNotes, setShowNotes] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
@@ -137,6 +138,8 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
           camera: followingFrame?.scan_id === slide.wsi.id ? followingFrame : undefined,
           onFrame: (camera) => review.camera(slide.wsi!.id, camera),
         } : undefined}
+        extraAction={relatedEndpoint && item.recordId ? <RelatedCasesControl compact endpoint={relatedEndpoint}
+          caseId={item.recordId} scanId={slide.wsi.id} /> : undefined}
         options={{ settings, toggleFullscreen, toggleGallery, toggleMinimap: () => change('show_minimap', !settings.show_minimap) }} />
         : <div className="panel empty"><ScanLine size={30} /><strong>{activeSlide && !slide ? 'The requested scan could not be found.' : slide?.state === 'QC Hold' || slide?.state === 'Rescan Required' ? 'This scan is blocked by QC.' : 'No scans are available for review.'}</strong><button className="button secondary" onClick={() => onBack(slide?.id)}>Go to Case Details</button></div>}
     </div>}
