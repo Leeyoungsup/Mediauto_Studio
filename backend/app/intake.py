@@ -113,17 +113,17 @@ def compile_rule(rule: FilenameRule) -> re.Pattern[str]:
         if token is None:
             continue
         if not TOKEN.fullmatch(token) or spec or conversion or token in tokens:
-            raise ValueError("파일명 토큰은 중복 없이 {이름} 형식의 영문자로 지정하세요.")
+            raise ValueError("Use unique filename tokens with English letters inside braces, such as {name}.")
         if tokens and not any(not char.isalnum() for char in literal):
-            raise ValueError("파일명 토큰 사이에 하이픈, 밑줄 또는 점 같은 구분자가 필요합니다.")
+            raise ValueError("Separate filename tokens with a hyphen, underscore, or period.")
         tokens.add(token)
         pieces.append(fr"(?P<{token}>[^\W_]+)")
     if not tokens:
-        raise ValueError("파일명 패턴에 {case}와 같은 토큰을 넣으세요.")
+        raise ValueError("Include a token such as {case} in the filename pattern.")
     for key in FORM_FIELDS:
         for _, token, spec, conversion in formatter.parse(getattr(rule, key)):
             if token is not None and (token not in tokens or spec or conversion):
-                raise ValueError(f"출력 형식에 정의되지 않은 토큰 {{{token}}}이 있습니다.")
+                raise ValueError(f"The output format contains an undefined token: {{{token}}}.")
     return re.compile("".join(pieces), re.IGNORECASE)
 
 
@@ -171,7 +171,7 @@ async def save_version(connection, key: str, version: int, value: dict) -> None:
         )
     result = await connection.execute(statement.returning(ApplicationSetting.key))
     if not result.scalar_one_or_none():
-        raise HTTPException(409, "다른 곳에서 변경했습니다. 목록을 갱신한 뒤 다시 시도하세요.")
+        raise HTTPException(409, "Changes were saved elsewhere. Refresh the list and try again.")
 
 
 @router.get("/slides")
@@ -186,12 +186,12 @@ async def list_slides(request: Request):
 async def save_slide(file_id: str, data: ManualEntry, request: Request):
     sources = await asyncio.to_thread(scan_files, DATA_ROOT)
     if all(source.id != file_id for source in sources):
-        raise HTTPException(404, "파일이 이동되었거나 변경되었습니다. 목록을 갱신하세요.")
+        raise HTTPException(404, "The file was moved or changed. Refresh the list.")
     key = INTAKE_PREFIX + file_id
     async with request.app.state.engine.begin() as connection:
         existing = await connection.scalar(select(ApplicationSetting.value).where(ApplicationSetting.key == key))
         if (existing or {}).get("version", 0) != data.version:
-            raise HTTPException(409, "슬라이드가 변경되었습니다. 목록을 갱신하세요.")
+            raise HTTPException(409, "The slide was changed. Refresh the list.")
         updated_at = datetime.now(timezone.utc).isoformat()
         entry = {"fields": data.fields.model_dump(), "source": "manual", "updated_at": updated_at}
         history = [*existing.get("history", []), {key: value for key, value in existing.items() if key != "history"}] if existing else []
@@ -211,7 +211,7 @@ async def configure_rules(data: RuleUpdate, request: Request):
     async with request.app.state.engine.begin() as connection:
         current = await saved_rules(connection)
         if current.version != data.version:
-            raise HTTPException(409, "규칙이 변경되었습니다. 설정 화면을 다시 여세요.")
+            raise HTTPException(409, "The rules have changed. Reopen Settings.")
         await save_version(connection, RULES_KEY, data.version, data.model_dump())
     return data.model_copy(update={"version": data.version + 1})
 
@@ -232,13 +232,13 @@ async def apply_rules(data: RuleApplication, request: Request):
             IntegrationConnection.organization == "local", IntegrationConnection.channel == "emr",
         ))
         if mode == "connected" or (mode is None and (emr or {}).get("state") == "connected"):
-            raise HTTPException(409, "파일명 규칙은 EMR 미연결 상태에서 적용할 수 있습니다.")
+            raise HTTPException(409, "Filename rules are available when EMR is disconnected.")
         current = await saved_rules(connection)
         if current.version != data.version:
-            raise HTTPException(409, "규칙이 변경되었습니다. 설정 화면을 다시 여세요.")
+            raise HTTPException(409, "The rules have changed. Reopen Settings.")
         rules = compiled_rules(current)
         if not rules:
-            raise HTTPException(422, "적용할 파일명 규칙을 먼저 저장하세요.")
+            raise HTTPException(422, "Save the filename rules before applying them.")
         existing = await slide_entries(connection, sources)
         unmatched = 0
         applied = 0

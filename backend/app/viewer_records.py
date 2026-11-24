@@ -43,7 +43,7 @@ def measure(points, mpp_x, mpp_y):
 
 def check_point(x, y, dimensions):
     if not (0 <= x < dimensions[0] and 0 <= y < dimensions[1]):
-        raise HTTPException(422, "좌표가 스캔 영상 경계를 벗어났습니다.")
+        raise HTTPException(422, "Coordinates are outside the scan image.")
 
 
 def position_result(position):
@@ -95,7 +95,7 @@ async def save_position(source: Source, scan_id: UUID, data: Position, user: Cur
             command = update(ViewerPosition).filter_by(**identity, version=data.version).values(**values, saved_at=func.now())
         position = await session.scalar(command.returning(ViewerPosition))
         if position is None:
-            raise HTTPException(409, "다른 세션에서 위치가 바뀌었습니다. 저장 위치를 다시 불러오세요.")
+            raise HTTPException(409, "The position was changed in another session. Reload the saved position.")
         return position_result(position)
 
 
@@ -109,7 +109,7 @@ async def create_annotation(source: Source, scan_id: UUID, data: Annotation, use
         check_point(x, y, info["dimensions"])
     (x1, y1), (x2, y2) = points
     if (data.kind == "rectangle" and (x1 == x2 or y1 == y2)) or points[0] == points[1]:
-        raise HTTPException(422, "측정 또는 ROI에 유효한 두 점을 지정하세요.")
+        raise HTTPException(422, "Select two valid points for the measurement or ROI.")
     mpp_x, mpp_y = info["mpp_x"], info["mpp_y"]
     length, unit = measure(points, mpp_x, mpp_y) if data.kind == "distance" else (None, None)
     async with session.begin():
@@ -128,7 +128,7 @@ async def create_annotation(source: Source, scan_id: UUID, data: Annotation, use
         ))
         if existing and (existing.points, existing.kind, existing.label) == (points, data.kind, data.label):
             return annotation_result(existing, user.display_name, user)
-        raise HTTPException(409, "같은 저장 ID에 다른 주석이 있습니다.")
+        raise HTTPException(409, "This save ID belongs to a different annotation.")
 
 
 @router.delete("/annotations/{annotation_id}")
@@ -141,9 +141,9 @@ async def delete_annotation(source: Source, scan_id: UUID, annotation_id: UUID, 
             *scope_for(key, user), ViewerAnnotation.id == annotation_id,
         ).with_for_update())
         if annotation is None:
-            raise HTTPException(404, "이 스캔의 주석을 찾을 수 없습니다.")
+            raise HTTPException(404, "Annotation not found for this scan.")
         if annotation.author_id != user.id and user.role != "admin":
-            raise HTTPException(403, "본인이 작성한 주석만 삭제할 수 있습니다.")
+            raise HTTPException(403, "You can delete only the annotations you created.")
         if annotation.deleted_at is None:
             annotation.deleted_at = datetime.now(timezone.utc)
             annotation.version += 1

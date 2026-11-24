@@ -33,23 +33,23 @@ try {
       slide_id: slide.id, storage_key: `CODIPAI-BRCA-SS-00194-${suffix}-01.svs`,
     }, suffix + '-scan');
   }
-  const pane = (i) => page.getByRole('group', { name: new RegExp('^화면 ' + i + ':') });
-  const canvas = (i) => pane(i).getByLabel('WSI 캔버스');
+  const pane = (i) => page.getByRole('group', { name: new RegExp('^Pane ' + i + ':') });
+  const canvas = (i) => pane(i).getByLabel('WSI Canvas');
   const button = (text) => page.getByRole('button', { name: text, exact: true });
-  const sync = button('위치 동기화');
+  const sync = button('Sync Position');
 
   async function open(caseId) {
     await page.goto('/');
-    await button(caseId + ' 상세 열기').click();
+    await button(caseId + ' details').click();
     await page.getByRole('heading', { name: caseId, exact: true }).waitFor();
-    await button('뷰어 열기').click();
+    await button('Open Viewer').click();
     await button('Multi View').click();
-    await pane(1).getByRole('button', { name: '미니맵에서 이동' }).waitFor();
-    await pane(2).getByRole('button', { name: '미니맵에서 이동' }).waitFor();
+    await pane(1).getByRole('button', { name: 'Pan using minimap' }).waitFor();
+    await pane(2).getByRole('button', { name: 'Pan using minimap' }).waitFor();
   }
 
   async function zoom(i, count) {
-    for (let click = 0; click < count; click++) await pane(i).getByRole('button', { name: '확대', exact: true }).click();
+    for (let click = 0; click < count; click++) await pane(i).getByRole('button', { name: 'Zoom In', exact: true }).click();
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   }
 
@@ -101,19 +101,19 @@ try {
   await sync.click();
   await drag(2, -25, 22);
   const anchors = [await frame(1), await frame(2)];
-  await button('현재 위치를 기준점으로').click();
-  await page.getByText(/수동 기준점 사용/).waitFor();
+  await button('Use Current Positions as Alignment Points').click();
+  await page.getByText(/Manual Alignment Points/).waitFor();
   await sync.click();
   await drag(1, -34, -19);
   const anchored = report(await frame(1), await frame(2), dimensions[0], dimensions[1], anchors);
 
-  await button('활성 화면 확대').click();
+  await button('Expand Active Pane').click();
   await pane(2).waitFor({ state: 'hidden' });
-  await page.getByText(/확대 중 동기화 일시 중지/).waitFor();
-  await button('분할 화면 복원').click();
+  await page.getByText(/Sync Paused While Expanded/).waitFor();
+  await button('Restore Split View').click();
   await pane(2).waitFor();
   await canvas(2).focus();
-  await button('활성 스캔 단일 뷰').click();
+  await button('Open Active Scan in Single View').click();
   await page.getByRole('button', { name: /SYNTH-01.*SVS/, pressed: true }).waitFor();
   assert.equal(await page.locator('.multi-view').count(), 0);
 
@@ -131,21 +131,21 @@ try {
   await page.route(failurePath, reject);
   await page.getByRole('checkbox', { name: 'I-PR · SVS', exact: true }).check();
   await page.getByRole('checkbox', { name: 'S-TP · SVS', exact: true }).check();
-  await page.getByText('4 / 4 화면').waitFor();
+  await page.getByText('4 / 4 panes').waitFor();
   assert.ok(await page.getByRole('checkbox', { name: 'SYNTH LIMIT · SVS', exact: true }).isDisabled());
   await pane(4).getByText('QA pane error').waitFor();
-  await pane(1).getByRole('button', { name: '미니맵에서 이동' }).waitFor();
+  await pane(1).getByRole('button', { name: 'Pan using minimap' }).waitFor();
   assert.ok(await sync.isDisabled());
   await page.unroute(failurePath, reject);
-  await pane(4).getByRole('button', { name: '다시 시도', exact: true }).click();
-  for (const index of [1, 2, 3, 4]) await pane(index).getByRole('button', { name: '미니맵에서 이동' }).waitFor();
+  await pane(4).getByRole('button', { name: 'Retry', exact: true }).click();
+  for (const index of [1, 2, 3, 4]) await pane(index).getByRole('button', { name: 'Pan using minimap' }).waitFor();
   await sync.click();
   await zoom(1, 5);
   await drag(1, 40, 30);
   const brcaDimensions = [[117836, 82278], [87127, 82682], [85106, 82076], [79651, 82884]];
   const fourPaneSync = [];
   for (const i of [2, 3, 4]) fourPaneSync.push(report(await frame(1), await frame(i), brcaDimensions[0], brcaDimensions[i - 1]));
-  await button('비교 닫기').click();
+  await button('Close Comparison').click();
   await page.getByRole('button', { name: 'Multi View', exact: true }).waitFor();
   assert.equal(await page.locator('.wsi-canvas').count(), 1);
   assert.deepEqual(errors, []);

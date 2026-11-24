@@ -44,11 +44,11 @@ async def legacy_rows(session, user, case_numbers):
             patients.setdefault(case_number, set()).add((name, number))
         if entry["updated_at"] > group["created_at"]:
             group["created_at"] = entry["updated_at"]
-        source_label = "수기 등록" if entry["source"] == "manual" else "파일명 규칙 등록"
+        source_label = "Manual Registration" if entry["source"] == "manual" else "Filename Rule Registration"
         group["history"].append(f"{source_label} · {fields['slide_id']} ({source.format})")
         group["slides"].append({
-            "id": source.id, "label": fields["slide_id"], "stain": fields.get("stain") or "미입력",
-            "specimen": fields.get("specimen") or "미입력", "state": "열람 가능",
+            "id": source.id, "label": fields["slide_id"], "stain": fields.get("stain") or "Not Entered",
+            "specimen": fields.get("specimen") or "Not Entered", "state": "Viewable",
             "wsi": {"id": source.id, "source": "files", "format": source.format},
         })
     for case_number, group in groups.items():
@@ -58,7 +58,7 @@ async def legacy_rows(session, user, case_numbers):
             name, number = next(iter(identities))
             group["patient"] = {"name": name, "number": number, "birth": ""}
         elif len(identities) > 1:
-            group["history"].append("파일별 환자 정보가 다릅니다. 슬라이드 목록에서 확인하세요.")
+            group["history"].append("Patient details differ between files. Check the slide list.")
     return list(groups.values())
 
 
@@ -99,12 +99,12 @@ async def clinical_details(session, organization, references):
         scans_by_slide.setdefault(scan.slide_id, []).append(scan)
     for slide in slides:
         specimen = specimen_map[slide.specimen_id]
-        base = {"label": slide.slide_number, "stain": slide.stain or "미입력", "specimen": specimen.specimen_number}
+        base = {"label": slide.slide_number, "stain": slide.stain or "Not Entered", "specimen": specimen.specimen_number}
         tray = details[specimen.case_id]["slides"]
         if slide.id not in scans_by_slide:
-            tray.append({**base, "id": slide.id, "state": "스캔 미등록"})
+            tray.append({**base, "id": slide.id, "state": "No scan registered"})
         for scan in scans_by_slide.get(slide.id, []):
-            tray.append({**base, "id": scan.id, "state": "열람 가능",
+            tray.append({**base, "id": scan.id, "state": "Viewable",
                          "wsi": {"id": scan.id, "source": "clinical", "format": scan.format}})
     return details
 
@@ -140,7 +140,7 @@ def parse_order(order, legacy):
             terms.append(SortTerm(field=field, direction=direction))
         return ensure_unique(terms, "field")
     except ValueError as exc:
-        raise HTTPException(422, "서로 다른 정렬 기준을 최대 3개 지정하세요.") from exc
+        raise HTTPException(422, "Select up to three different sort fields.") from exc
 
 
 def utc_timestamp(value):
@@ -229,7 +229,7 @@ async def worklist(
 async def worklist_case(case_id: UUID, user: CurrentUser, session: Session):
     record = await session.scalar(accessible_cases(user).where(Case.id == case_id))
     if record is None:
-        raise HTTPException(404, "케이스를 찾을 수 없습니다.")
+        raise HTTPException(404, "Case not found.")
     result = (await clinical_details(session, user.organization, [record]))[record.id]
     events = (await session.scalars(select(ClinicalEvent).where(
         ClinicalEvent.organization == user.organization, ClinicalEvent.record_type == "cases",

@@ -11,7 +11,7 @@ export async function request(path: string, options?: RequestInit): Promise<Resp
   if (response.status === 401 && path !== '/api/auth/login') window.dispatchEvent(new Event(expired));
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
-    throw new Error(typeof data.detail === 'string' ? data.detail : response.status === 422 ? '필수값과 입력 형식을 확인하세요.' : '요청을 처리하지 못했습니다.');
+    throw new Error(typeof data.detail === 'string' ? data.detail : response.status === 422 ? 'Check the required fields and input format.' : 'Unable to process the request.');
   }
   return response;
 }
@@ -48,24 +48,24 @@ export function SessionGate({ children }: { children: (user: User, logout: () =>
     try {
       setUser(await api<User>('/api/auth/login', jsonBody('POST', Object.fromEntries(fields))));
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : '로그인할 수 없습니다.');
+      setError(failure instanceof Error ? failure.message : 'Unable to sign in.');
     } finally { setBusy(false); }
   }
 
   async function logout() {
     try { await api('/api/auth/logout', { method: 'POST' }); setUser(null); }
-    catch (failure) { setError(failure instanceof Error ? failure.message : '로그아웃할 수 없습니다.'); }
+    catch (failure) { setError(failure instanceof Error ? failure.message : 'Unable to sign out.'); }
   }
 
   if (user) return <>{error && <p className="notice" role="alert">{error}</p>}{children(user, () => void logout())}</>;
   return <main className="login-page"><section className="panel login-panel">
     <div className="title-inline"><span className="brand-icon"><Microscope size={23} /></span><h1>MeDIAuto Studio</h1></div>
-    {loading ? <p role="status">로그인 상태 확인 중</p> : <form className="login-form" onSubmit={(event) => void login(event)}>
-      <label className="form-field">기관 코드<input name="organization" defaultValue="local" required maxLength={64} /></label>
-      <label className="form-field">계정<input name="username" autoComplete="username" required maxLength={80} /></label>
-      <label className="form-field">비밀번호<input name="password" type="password" autoComplete="current-password" required maxLength={256} /></label>
+    {loading ? <p role="status">Checking sign-in status…</p> : <form className="login-form" onSubmit={(event) => void login(event)}>
+      <label className="form-field">Organization Code<input name="organization" defaultValue="local" required maxLength={64} /></label>
+      <label className="form-field">Username<input name="username" autoComplete="username" required maxLength={80} /></label>
+      <label className="form-field">Password<input name="password" type="password" autoComplete="current-password" required maxLength={256} /></label>
       {error && <p className="form-error" role="alert">{error}</p>}
-      <button className="button primary" type="submit" disabled={busy}>{busy ? '확인 중' : '로그인'}</button>
+      <button className="button primary" type="submit" disabled={busy}>{busy ? 'Checking…' : 'Sign In'}</button>
     </form>}
   </section></main>;
 }

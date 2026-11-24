@@ -54,10 +54,10 @@ async def assign_case(organization: Organization, case_id: UUID, data: Assignmen
         case = await find(session, Case, organization, case_id, lock=True)
         require_version(case, data.version)
         if case.status not in ("registered", "assigned", "in_review"):
-            raise HTTPException(409, "현재 상태에서는 배정을 변경할 수 없습니다.")
+            raise HTTPException(409, "Assignment cannot be changed in the current status.")
         assignee = await session.scalar(eligible_assignees(organization).where(AuthUser.id == data.assignee_id).with_for_update())
         if assignee is None:
-            raise HTTPException(422, "소속 기관의 활성 병리의 계정을 선택하세요.")
+            raise HTTPException(422, "Select an active pathologist in your organization.")
         if case.assigned_to == assignee.id:
             return public_fields(case)
         before = relationship_state(case)
@@ -75,13 +75,13 @@ async def review_case(organization: Organization, case_id: UUID, data: Review, s
         require_version(case, data.version)
         transitions = {"assigned": "in_review", "in_review": "reviewed"}
         if transitions.get(case.status) != data.status:
-            raise HTTPException(409, "현재 검토 상태에서 요청한 단계로 변경할 수 없습니다.")
+            raise HTTPException(409, "The case cannot move to the requested review status.")
         scan = await session.scalar(select(SlideScan.id).join(Slide, SlideScan.slide_id == Slide.id)
                                     .join(Specimen, Slide.specimen_id == Specimen.id)
                                     .where(Specimen.case_id == case.id, SlideScan.organization == organization,
                                            SlideScan.status == "registered").limit(1))
         if scan is None:
-            raise HTTPException(409, "검토 상태를 변경하려면 연결된 스캔이 필요합니다.")
+            raise HTTPException(409, "Link a scan before changing the review status.")
         before = relationship_state(case)
         case.status = data.status
         return record_change(session, case, "review_started" if data.status == "in_review" else "review_completed",
@@ -108,10 +108,10 @@ async def confirm_file_case(organization: Organization, case_number: intake.Iden
                    and entries[file.id]["fields"]["case_id"] == case_number]
         selected = {str(item.id): item.version for item in data.files}
         if selected != {file.id: entries[file.id]["version"] for file, _ in sources}:
-            raise HTTPException(409, "등록 파일 목록이 변경되었습니다. 케이스를 새로고침하세요.")
+            raise HTTPException(409, "The registered file list has changed. Refresh the case.")
         existing = await session.scalar(select(Case.id).where(Case.organization == organization, Case.case_number == case_number))
         if existing is not None:
-            raise HTTPException(409, "이 Case ID의 케이스가 이미 있습니다. Worklist를 갱신하세요.")
+            raise HTTPException(409, "A case with this Case ID already exists. Refresh the Worklist.")
 
         transaction_id = uuid4()
         ids = {"organization": organization, "created_by": str(user.id)}
@@ -129,14 +129,14 @@ async def confirm_file_case(organization: Organization, case_number: intake.Iden
         identities = {(fields.get("patient_name", ""), fields.get("patient_number", ""))
                       for _, fields in sources if fields.get("patient_name") or fields.get("patient_number")}
         if len(identities) > 1:
-            raise HTTPException(409, "파일별 환자 정보가 다릅니다. 슬라이드 등록에서 확인하세요.")
+            raise HTTPException(409, "Patient details differ between files. Check Slide Registration.")
         patient_id = None
         if identities:
             name, number = next(iter(identities))
             if number and await session.scalar(select(Patient.id).where(
                 Patient.organization == organization, Patient.local_reference == number,
             )):
-                raise HTTPException(409, "같은 환자번호의 기록이 있습니다. 환자 연결을 확인하세요.")
+                raise HTTPException(409, "A patient record already uses this patient ID. Review the patient link.")
             patient = await create(Patient, display_name=name or None, local_reference=number or None, source="manual")
             patient_id = patient.id
 
@@ -150,12 +150,12 @@ async def confirm_file_case(organization: Organization, case_number: intake.Iden
             for number, alternatives in slides.items():
                 stains = {fields["stain"] for _, fields in alternatives if fields.get("stain")}
                 if len(stains) > 1:
-                    raise HTTPException(409, "같은 Slide ID에 서로 다른 염색 정보가 있습니다. 슬라이드 등록에서 확인하세요.")
+                    raise HTTPException(409, "Files with the same Slide ID have different stains. Check Slide Registration.")
                 slide = await create(Slide, specimen_id=specimen.id, slide_number=number, stain=next(iter(stains), None),
                                      status="registered")
                 for file, _ in alternatives:
                     meta = await asyncio.to_thread(scan_metadata, file.filename, intake.DATA_ROOT)
                     if intake.source_id(file.filename, meta["size_bytes"], meta["modified_ns"]) != file.id:
-                        raise HTTPException(409, "확정하는 동안 스캔 파일이 변경되었습니다.")
+                        raise HTTPException(409, "The scan file changed while you were confirming the case.")
                     await create(SlideScan, origin=file, slide_id=slide.id, **meta)
         return public_fields(case)

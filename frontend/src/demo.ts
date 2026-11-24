@@ -1,10 +1,10 @@
-export const statuses = ['배정 대기', '배정됨', '검토 중', '검토 완료'] as const;
+export const statuses = ['Awaiting Assignment', 'Assigned', 'In Review', 'Review Complete'] as const;
 export type CaseStatus = typeof statuses[number];
 export type Patient = { id?: string; number: string; name: string; birth: string; localRef?: string };
 export type WsiScan = { id: string; source: 'files' | 'clinical'; format: 'NDPI' | 'SVS' };
 export type Slide = {
   id: string; label?: string; stain: string; specimen: string; wsi?: WsiScan; intakeVersion?: number;
-  state: '열람 가능' | '스캔 미등록';
+  state: 'Viewable' | 'No scan registered';
 };
 export type AuditEvent = {
   id: string; action: string; version: number; occurred_at: string; actor: string; actor_name?: string;
@@ -31,4 +31,4 @@ export type DemoCase = {
 
 };
 
-export const readyCount = (item: DemoCase) => item.slides.filter(({ state }) => state === '열람 가능').length;
+export const readyCount = (item: DemoCase) => item.slides.filter(({ state }) => state === 'Viewable').length;

@@ -8,7 +8,7 @@ const password = 'synthetic-test-password';
 const accounts = { admin: 'integration-admin', doctor: 'integration-doctor', other: 'integration-other' };
 const caseNumber = 'IMS-DEMO-101';
 const missingNumber = 'IMS-DEMO-NO-SCAN';
-const memo = '합성 시연 메모. NDPI와 SVS 전환을 확인했습니다.';
+const memo = 'Synthetic demo note. NDPI and SVS switching verified.';
 const samples = {
   NDPI: process.env.MEDIAUTO_DEMO_NDPI ?? 'CODIPAI-STBX-SS-04364-I-PD-22.ndpi',
   SVS: process.env.MEDIAUTO_DEMO_SVS ?? 'CODIPAI-STBX-SS-04364-I-PD-22.svs',
@@ -81,20 +81,21 @@ async function setupPage() {
   page.setDefaultTimeout(15000);
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(base);
+  assert.equal(await page.locator('html').getAttribute('lang'), 'en');
   return page;
 }
 async function signIn(page, actor, measured = true) {
   const enter = async () => {
-    await page.getByLabel('계정').fill(accounts[actor]);
-    await page.getByLabel('비밀번호').fill(password);
-    await page.getByRole('button', { name: '로그인', exact: true }).click();
+    await page.getByLabel('Username').fill(accounts[actor]);
+    await page.getByLabel('Password').fill(password);
+    await page.getByRole('button', { name: 'Sign In', exact: true }).click();
   };
   if (measured) {
     await measure(actor + '_login_to_worklist_ms', async () => {
-      await step(actor, '계정 입력', () => page.getByLabel('계정').fill(accounts[actor]));
-      await step(actor, '비밀번호 입력', () => page.getByLabel('비밀번호').fill(password));
+      await step(actor, 'Enter Username', () => page.getByLabel('Username').fill(accounts[actor]));
+      await step(actor, 'Enter Password', () => page.getByLabel('Password').fill(password));
       const list = page.waitForResponse((response) => response.url().includes('/api/worklist?') && response.ok());
-      await step(actor, '로그인', () => page.getByRole('button', { name: '로그인', exact: true }).click());
+      await step(actor, 'Sign In', () => page.getByRole('button', { name: 'Sign In', exact: true }).click());
       await list;
       await page.getByRole('heading', { name: 'Worklist', exact: true }).waitFor();
     });
@@ -105,13 +106,13 @@ async function signIn(page, actor, measured = true) {
   }
 }
 async function openCase(page, number, actor) {
-  const open = () => page.getByRole('button', { name: number + ' 상세 열기' }).click();
-  if (actor) { await step(actor, '케이스 상세 열기', open); transitions[actor]++; }
+  const open = () => page.getByRole('button', { name: number + ' details' }).click();
+  if (actor) { await step(actor, 'Open Case Details', open); transitions[actor]++; }
   else await open();
   await page.getByRole('heading', { name: number, exact: true }).waitFor();
 }
 async function displayed(page) {
-  await page.getByRole('button', { name: '미니맵에서 이동' }).waitFor();
+  await page.getByRole('button', { name: 'Pan using minimap' }).waitFor();
   await page.waitForFunction(() => {
     const canvas = document.querySelector('.wsi-canvas');
     if (!canvas?.width || !canvas.height) return false;
@@ -121,7 +122,7 @@ async function displayed(page) {
 }
 async function selectScan(page, format, actor) {
   const tab = page.getByRole('complementary').getByRole('button', { name: new RegExp('SYNTH-01.*' + format) });
-  if (actor) await step(actor, format + ' 선택', () => tab.click());
+  if (actor) await step(actor, format + ' Select', () => tab.click());
   else await tab.click();
   await tab.and(page.locator('[aria-pressed="true"]')).waitFor();
   await displayed(page);
@@ -129,56 +130,56 @@ async function selectScan(page, format, actor) {
 async function review(page, button, reason, note) {
   const action = (label, event) => step('doctor', label, event);
   await action(button, () => page.getByRole('button', { name: button, exact: true }).click());
-  await action('변경 사유 입력', () => dialog(page).getByLabel('변경 사유').fill(reason));
-  if (note) await action('검토 메모 입력', () => dialog(page).getByLabel('검토 메모 (선택)').fill(note));
-  await action('저장', () => dialog(page).getByRole('button', { name: '저장', exact: true }).click());
+  await action('Enter Reason for Change', () => dialog(page).getByLabel('Reason for Change').fill(reason));
+  if (note) await action('Enter Review Note', () => dialog(page).getByLabel('Review Note (Optional)').fill(note));
+  await action('Save', () => dialog(page).getByRole('button', { name: 'Save', exact: true }).click());
   await dialog(page).waitFor({ state: 'hidden' });
 }
 try {
   const admin = await setupPage();
   await measure('admin_task_ms', async () => {
     await signIn(admin, 'admin');
-    await step('admin', 'Case ID 입력', () => admin.getByLabel('케이스 검색').fill('ims-demo-101'));
+    await step('admin', 'Enter Case ID', () => admin.getByLabel('Search Cases').fill('ims-demo-101'));
     await openCase(admin, caseNumber, 'admin');
-    await step('admin', '담당자 배정', () => admin.getByRole('button', { name: '담당자 배정', exact: true }).click());
-    const target = dialog(admin).getByLabel('담당 병리의');
+    await step('admin', 'Assign Case', () => admin.getByRole('button', { name: 'Assign Case', exact: true }).click());
+    const target = dialog(admin).getByLabel('Assigned Pathologist');
     const doctor = await target.getByRole('option', { name: /integration-doctor/ }).getAttribute('value');
-    await step('admin', '병리의 선택', () => target.selectOption(doctor));
-    await step('admin', '배정 사유 입력', () => dialog(admin).getByLabel('변경 사유').fill('합성 케이스 배정'));
-    await step('admin', '배정 저장', () => dialog(admin).getByRole('button', { name: '저장', exact: true }).click());
+    await step('admin', 'Select Pathologist', () => target.selectOption(doctor));
+    await step('admin', 'Enter Assignment Reason', () => dialog(admin).getByLabel('Reason for Change').fill('Assign Synthetic Case'));
+    await step('admin', 'Save Assignment', () => dialog(admin).getByRole('button', { name: 'Save', exact: true }).click());
     await admin.getByRole('complementary').getByText(accounts.doctor, { exact: true }).waitFor();
   });
 
   const doctor = await setupPage();
   await measure('doctor_task_ms', async () => {
     await signIn(doctor, 'doctor');
-    await step('doctor', '내 배정 건', () => doctor.getByRole('link', { name: /내 배정 건/ }).click());
-    await step('doctor', 'Case ID 입력', () => doctor.getByLabel('케이스 검색').fill('ims-demo-101'));
+    await step('doctor', 'Assigned to Me', () => doctor.getByRole('link', { name: /Assigned to Me/ }).click());
+    await step('doctor', 'Enter Case ID', () => doctor.getByLabel('Search Cases').fill('ims-demo-101'));
     await openCase(doctor, caseNumber, 'doctor');
     await measure('detail_to_first_slide_ms', async () => {
-      await step('doctor', '뷰어 열기', () => doctor.getByRole('button', { name: '뷰어 열기', exact: true }).click());
+      await step('doctor', 'Open Viewer', () => doctor.getByRole('button', { name: 'Open Viewer', exact: true }).click());
       transitions.doctor++;
       await displayed(doctor);
       await doctor.getByRole('complementary').getByRole('button', { name: /SYNTH-01.*NDPI/, pressed: true }).waitFor();
     });
-    const zoom = doctor.getByLabel('스캔 대비 화면 배율');
+    const zoom = doctor.getByLabel('Zoom relative to scan');
     const initial = await zoom.innerText();
-    const canvas = doctor.getByLabel('WSI 캔버스');
+    const canvas = doctor.getByLabel('WSI Canvas');
     const position = await canvas.boundingBox();
     await canvas.hover();
     const tile = doctor.waitForResponse((response) => tilePattern(fixture.entries.NDPI).test(response.url()) && response.ok());
     await measure('wheel_to_zoom_update_ms', async () => {
-      await step('doctor', '휠 확대', () => doctor.mouse.wheel(0, -320));
+      await step('doctor', 'Zoom with Wheel', () => doctor.mouse.wheel(0, -320));
       await doctor.waitForFunction((label) => document.querySelector('.zoom-value')?.textContent !== label, initial);
     });
     for (let zoomClick = 0; zoomClick < 3; zoomClick++) {
-      await step('doctor', '추가 확대', () => doctor.getByRole('button', { name: '확대', exact: true }).click());
+      await step('doctor', 'Zoom In Further', () => doctor.getByRole('button', { name: 'Zoom In', exact: true }).click());
     }
     assert.match((await tile).headers()['content-type'], /image\/jpeg/);
     const initialRegion = await doctor.locator('.minimap span').getAttribute('style');
     await doctor.mouse.move(position.x + position.width / 2, position.y + position.height / 2);
     await measure('drag_to_viewport_update_ms', async () => {
-      await step('doctor', '캔버스 드래그', async () => {
+      await step('doctor', 'Drag Canvas', async () => {
         await doctor.mouse.down();
         await doctor.mouse.move(position.x + position.width / 2 + 100, position.y + position.height / 2 + 60, { steps: 4 });
         await doctor.mouse.up();
@@ -188,12 +189,12 @@ try {
     await measure('ndpi_to_svs_ms', () => selectScan(doctor, 'SVS', 'doctor'));
     const svsTile = doctor.waitForResponse((response) => tilePattern(fixture.entries.SVS).test(response.url()) && response.ok());
     for (let zoomClick = 0; zoomClick < 4; zoomClick++) {
-      await step('doctor', 'SVS 확대', () => doctor.getByRole('button', { name: '확대', exact: true }).click());
+      await step('doctor', 'Zoom In on SVS', () => doctor.getByRole('button', { name: 'Zoom In', exact: true }).click());
     }
     assert.match((await svsTile).headers()['content-type'], /image\/jpeg/);
-    await review(doctor, '검토 시작', '시연 검토 시작');
-    await review(doctor, '검토 완료', '시연 검토 종료', memo);
-    await doctor.waitForFunction(() => document.querySelector('.page-heading .status-pill')?.textContent === '검토 완료');
+    await review(doctor, 'Start Review', 'Start Demo Review');
+    await review(doctor, 'Review Complete', 'Complete Demo Review', memo);
+    await doctor.waitForFunction(() => document.querySelector('.page-heading .status-pill')?.textContent === 'Review Complete');
   });
 
   const viewerUrl = doctor.url();
@@ -206,17 +207,17 @@ try {
     }
     sampleRuns.push(row);
   }
-  await doctor.getByRole('button', { name: '로그아웃', exact: true }).click();
-  await doctor.getByRole('button', { name: '로그인', exact: true }).waitFor();
+  await doctor.getByRole('button', { name: 'Sign Out', exact: true }).click();
+  await doctor.getByRole('button', { name: 'Sign In', exact: true }).waitFor();
   await signInAfterLogout();
   async function signInAfterLogout() {
-    await doctor.getByLabel('계정').fill(accounts.doctor);
-    await doctor.getByLabel('비밀번호').fill(password);
-    await doctor.getByRole('button', { name: '로그인', exact: true }).click();
+    await doctor.getByLabel('Username').fill(accounts.doctor);
+    await doctor.getByLabel('Password').fill(password);
+    await doctor.getByRole('button', { name: 'Sign In', exact: true }).click();
     await doctor.waitForURL(viewerUrl);
     await displayed(doctor);
-    await doctor.getByRole('button', { name: '케이스 상세', exact: true }).click();
-    await doctor.getByRole('button', { name: '기록', exact: true }).click();
+    await doctor.getByRole('button', { name: 'Case Details', exact: true }).click();
+    await doctor.getByRole('button', { name: 'History', exact: true }).click();
     await doctor.getByText(memo, { exact: true }).waitFor();
     const audit = await (await doctor.request.get(detailPath(fixture.record.id))).json();
     assert.equal(audit.status, 'reviewed');
@@ -225,10 +226,10 @@ try {
 
   const unauthenticated = await setupPage();
   assert.equal((await unauthenticated.request.get(fixture.entries.NDPI.url + '/2/0/0.jpeg')).status(), 401);
-  await unauthenticated.getByLabel('계정').fill(accounts.other);
-  await unauthenticated.getByLabel('비밀번호').fill('invalid-synthetic-password');
-  await unauthenticated.getByRole('button', { name: '로그인', exact: true }).click();
-  await unauthenticated.getByRole('alert').getByText('계정 또는 비밀번호를 확인하세요.').waitFor();
+  await unauthenticated.getByLabel('Username').fill(accounts.other);
+  await unauthenticated.getByLabel('Password').fill('invalid-synthetic-password');
+  await unauthenticated.getByRole('button', { name: 'Sign In', exact: true }).click();
+  await unauthenticated.getByRole('alert').getByText('Check your username and password.').waitFor();
   retries++;
   await signIn(unauthenticated, 'other', false);
   assert.equal((await unauthenticated.request.get(detailPath(fixture.record.id))).status(), 404);
@@ -238,11 +239,11 @@ try {
   })).status(), 403);
 
   await admin.getByRole('button', { name: 'Worklist', exact: true }).click();
-  await admin.getByLabel('케이스 검색').fill('does-not-exist');
-  await admin.getByText('조건에 맞는 케이스가 없습니다.').waitFor();
-  await admin.getByLabel('케이스 검색').fill(missingNumber);
+  await admin.getByLabel('Search Cases').fill('does-not-exist');
+  await admin.getByText('No cases match these filters.').waitFor();
+  await admin.getByLabel('Search Cases').fill(missingNumber);
   await openCase(admin, missingNumber);
-  assert.ok(await admin.getByRole('button', { name: '뷰어 열기', exact: true }).isDisabled());
+  assert.ok(await admin.getByRole('button', { name: 'Open Viewer', exact: true }).isDisabled());
   const doctorId = (await (await doctor.request.get('/api/auth/me')).json()).id;
   const assignment = await admin.request.patch(`${clinical}/cases/${fixture.missing.id}/assignment`, {
     data: { version: 1, assignee_id: doctorId, reason: 'Incomplete input fixture' },
@@ -257,21 +258,21 @@ try {
   await displayed(doctor);
   const rejectTile = (route) => route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"Synthetic tile outage"}' });
   await doctor.route(tilePattern(fixture.entries.NDPI), rejectTile);
-  const zoomIn = doctor.getByRole('button', { name: '확대', exact: true });
+  const zoomIn = doctor.getByRole('button', { name: 'Zoom In', exact: true });
   for (let click = 0; click < 8; click++) await zoomIn.click();
-  await doctor.getByText('일부 타일을 불러오지 못했습니다.', { exact: false }).waitFor();
+  await doctor.getByText('Some tiles could not be loaded.', { exact: false }).waitFor();
   await doctor.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  const previous = await doctor.getByLabel('스캔 대비 화면 배율').innerText();
+  const previous = await doctor.getByLabel('Zoom relative to scan').innerText();
   const previousRect = await doctor.locator('.minimap span').getAttribute('style');
   await doctor.unroute(tilePattern(fixture.entries.NDPI), rejectTile);
   const recovered = doctor.waitForResponse((response) => tilePattern(fixture.entries.NDPI).test(response.url()) && response.ok());
-  await doctor.getByRole('button', { name: '다시 시도', exact: true }).click();
+  await doctor.getByRole('button', { name: 'Retry', exact: true }).click();
   retries++;
   const jpeg = await recovered;
   assert.match(jpeg.headers()['content-type'], /image\/jpeg/);
   assert.equal(jpeg.headers()['cache-control'], 'private, no-store');
-  await doctor.getByText('일부 타일을 불러오지 못했습니다.', { exact: false }).waitFor({ state: 'hidden' });
-  assert.equal(await doctor.getByLabel('스캔 대비 화면 배율').innerText(), previous);
+  await doctor.getByText('Some tiles could not be loaded.', { exact: false }).waitFor({ state: 'hidden' });
+  assert.equal(await doctor.getByLabel('Zoom relative to scan').innerText(), previous);
   assert.equal(await doctor.locator('.minimap span').getAttribute('style'), previousRect);
 
   assert.deepEqual(errors, []);

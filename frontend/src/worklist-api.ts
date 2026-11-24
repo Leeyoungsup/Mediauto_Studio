@@ -2,7 +2,7 @@ import type { SortTerm } from './worklist-config';
 import type { CaseStatus, DemoCase, Slide } from './demo';
 import { formatIntakeDate } from './intake-api';
 
-export const states = { '배정 대기': 'registered', '배정됨': 'assigned', '검토 중': 'in_review', '검토 완료': 'reviewed' } as const;
+export const states = { 'Awaiting Assignment': 'registered', 'Assigned': 'assigned', 'In Review': 'in_review', 'Review Complete': 'reviewed' } as const;
 export type State = typeof states[CaseStatus];
 export const stateLabel = (state: string) =>
   (Object.keys(states) as CaseStatus[]).find((label) => states[label] === state);
@@ -21,8 +21,8 @@ export const emptyResult: Result = { rows: [], total: 0, assignees: [],
 
 export function caseView(row: WorklistEntry): DemoCase {
   return { id: row.case_number, recordId: row.record_id ?? undefined, source: row.source,
-    status: stateLabel(row.status) ?? '배정 대기',
-    assignee: row.assignee ?? '', patient: row.patient, specimen: row.specimen || '미입력', slides: row.slides,
+    status: stateLabel(row.status) ?? 'Awaiting Assignment',
+    assignee: row.assignee ?? '', patient: row.patient, specimen: row.specimen || 'Not Entered', slides: row.slides,
     received: formatIntakeDate(row.created_at), history: row.history,
     version: row.version, assignedTo: row.assigned_to, candidates: row.candidates, audit: row.audit };
 }

@@ -40,7 +40,7 @@ export class TileViewer {
     private onView: (viewport: Viewport) => void, private onTileStatus: (state: 'loading' | 'ok' | 'partial' | 'unavailable') => void,
     private readonly limits = singleViewerLimits) {
     const context = canvas.getContext('2d', { alpha: false });
-    if (!context) throw new Error('이 브라우저에서 슬라이드 화면을 열 수 없습니다.');
+    if (!context) throw new Error('This browser cannot open the slide canvas.');
     this.context = context;
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(canvas);

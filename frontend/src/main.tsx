@@ -20,7 +20,7 @@ import { caseView, emptyResult, states } from './worklist-api';
 import type { Result, WorklistEntry, WorklistQuery } from './worklist-api';
 import './style.css';
 
-const emrLabels = { unconfigured: '미설정', disabled: '사용 중지', connected: '연결됨', unavailable: '연결 장애', unknown: '확인 불가' };
+const emrLabels = { unconfigured: 'Not Configured', disabled: 'Disabled', connected: 'Connected', unavailable: 'Connection Unavailable', unknown: 'Unavailable' };
 type Health = { status: 'ok' | 'degraded'; database: 'connected' | 'unavailable'; emr: keyof typeof emrLabels };
 type Page = { view: 'worklist'; scope: Scope } | { view: 'case'; id: string; files: boolean; tab?: 'requests' | 'report' } | { view: 'request'; id: string }
   | { view: 'viewer'; id: string; slide?: string; snapshot?: string; files: boolean } | { view: 'scans' } | { view: 'settings' };
@@ -48,7 +48,7 @@ function ModalWindow({ title, onClose, children }: { title: string; onClose: () 
     return () => element?.close();
   }, []);
   return <dialog ref={dialog} aria-labelledby="dialog-title" onCancel={onClose}>
-    <div className="panel-title"><h2 id="dialog-title">{title}</h2><button className="icon-button" aria-label="닫기" onClick={onClose}><X size={19} /></button></div>
+    <div className="panel-title"><h2 id="dialog-title">{title}</h2><button className="icon-button" aria-label="Close" onClick={onClose}><X size={19} /></button></div>
     <div className="dialog-content">{children}</div>
   </dialog>;
 }
@@ -92,10 +92,10 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
   const detailKey = detailId ? `${casePage?.view}/${detailId}` : undefined;
   const current = casePage?.files ? buildFileCases(files).find(({ id }) => id === casePage.id)
     : detail?.key === detailKey ? detail?.item : undefined;
-  const mayAssign = user.role === 'admin' && current?.recordId && current.status !== '검토 완료';
+  const mayAssign = user.role === 'admin' && current?.recordId && current.status !== 'Review Complete';
   const mayReview = user.role === 'doctor' && current?.assignedTo === user.id &&
-    (current.status === '배정됨' || current.status === '검토 중');
-  const emr = integration ? integrationLabel(integration.emr) : health ? emrLabels[health.emr] : serviceError ? '확인 불가' : '확인 중';
+    (current.status === 'Assigned' || current.status === 'In Review');
+  const emr = integration ? integrationLabel(integration.emr) : health ? emrLabels[health.emr] : serviceError ? 'Unavailable' : 'Checking…';
   const lis = integrationLabel(integration?.lis);
   const refreshIntegration = useCallback(() => {
     api<IntegrationStatus>(integrationPath(user.organization) + '/status').then(setIntegration).catch(() => {});
@@ -112,10 +112,10 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
     refreshIntegration();
   }
   const worklistTabs = [
-    { id: 'all', href: '#worklist/all', label: '전체 케이스', count: result.counts.all, icon: LayoutList },
-    { id: 'mine', href: '#worklist/mine', label: '내 배정 건', count: result.counts.mine, icon: UserRoundCheck },
-    { id: 'unassigned', href: '#worklist/unassigned', label: '미배정', count: result.counts.unassigned, icon: ClipboardList },
-    ...(intakeAllowed ? [{ id: 'scans', href: '#scans', label: '슬라이드 등록', count: files.filter(({ entry }) => !entry).length, icon: ScanLine }] : []),
+    { id: 'all', href: '#worklist/all', label: 'All Cases', count: result.counts.all, icon: LayoutList },
+    { id: 'mine', href: '#worklist/mine', label: 'Assigned to Me', count: result.counts.mine, icon: UserRoundCheck },
+    { id: 'unassigned', href: '#worklist/unassigned', label: 'Unassigned', count: result.counts.unassigned, icon: ClipboardList },
+    ...(intakeAllowed ? [{ id: 'scans', href: '#scans', label: 'Slide Registration', count: files.filter(({ entry }) => !entry).length, icon: ScanLine }] : []),
   ];
 
   useEffect(() => {
@@ -128,7 +128,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
     setListError('');
     api<Result>('/api/worklist?' + params, { signal: controller.signal })
       .then((data) => { if (!controller.signal.aborted) setResult(data); })
-      .catch(() => { if (!controller.signal.aborted) { setResult(emptyResult); setListError('Worklist를 불러오지 못했습니다.'); } })
+      .catch(() => { if (!controller.signal.aborted) { setResult(emptyResult); setListError('Unable to load the Worklist.'); } })
       .finally(() => { if (!controller.signal.aborted) setListLoading(false); });
     return () => controller.abort();
   }, [scope, query, revision]);
@@ -138,7 +138,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
     const controller = new AbortController();
     api<WorklistEntry>('/api/worklist/' + encodeURIComponent(detailId), { signal: controller.signal })
       .then((data) => { if (!controller.signal.aborted) setDetail({ key: detailKey, item: caseView(data) }); })
-      .catch(() => { if (!controller.signal.aborted) setDetail({ key: detailKey, error: '케이스를 불러올 수 없습니다.' }); });
+      .catch(() => { if (!controller.signal.aborted) setDetail({ key: detailKey, error: 'Unable to load the case.' }); });
     return () => controller.abort();
   }, [detailId, detailKey, revision]);
 
@@ -161,7 +161,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
       const result = await requestIntake<SourceFile[]>('/slides', 'GET', undefined, signal);
       if (!signal?.aborted) { setFiles(result); if (!signal) setRevision((value) => value + 1); }
     } catch {
-      if (!signal?.aborted) setFileProblem('스캔 파일 목록을 불러오지 못했습니다. 목록 갱신을 눌러 다시 시도하세요.');
+      if (!signal?.aborted) setFileProblem('Unable to load scan files. Select Refresh List to retry.');
     } finally { if (!signal?.aborted) setFilesLoading(false); }
   }, []);
 
@@ -223,15 +223,15 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
         location.hash = `case/${id}`;
       } else {
         const reason = String(fields.get('reason') ?? '').trim();
-        if (!reason) { setWorkflowError('변경 사유를 입력하세요.'); return; }
+        if (!reason) { setWorkflowError('Enter a reason for the change.'); return; }
         const data = action === 'assignment' ? { assignee_id: fields.get('assignee') }
-          : { status: item.status === '검토 중' ? 'reviewed' : 'in_review', note: String(fields.get('note') ?? '') };
+          : { status: item.status === 'In Review' ? 'reviewed' : 'in_review', note: String(fields.get('note') ?? '') };
         await api(`${prefix}/cases/${item.recordId}/${action}`, jsonBody('PATCH', { ...data, reason, version: item.version }));
       }
       setWorkflow(undefined);
       setRevision((value) => value + 1);
     } catch (failure) {
-      setWorkflowError(failure instanceof Error ? failure.message : '케이스 변경을 저장할 수 없습니다.');
+      setWorkflowError(failure instanceof Error ? failure.message : 'Unable to save the case changes.');
     } finally { setSaving(false); }
   }
 
@@ -239,7 +239,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
     event.preventDefault();
     const id = String(new FormData(event.currentTarget).get('case-number')).trim().toUpperCase();
     if (!/^[A-Z0-9][A-Z0-9._-]{0,39}$/.test(id)) {
-      setFormError('Case ID에 영문, 숫자, 점, 하이픈, 밑줄을 사용할 수 있습니다.');
+      setFormError('Case IDs can contain letters, numbers, periods, hyphens, and underscores.');
       return;
     }
     if (registration.current?.id !== id) {
@@ -256,33 +256,33 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
       showModal(null);
       location.hash = `case/${record.id}`;
     } catch (failure) {
-      setFormError(failure instanceof Error ? failure.message : '케이스를 등록할 수 없습니다.');
+      setFormError(failure instanceof Error ? failure.message : 'Unable to register the case.');
     } finally { setSaving(false); }
   }
 
   return <div className="app-shell">
     <aside className="sidebar">
       <a className="brand" href="#worklist/all"><span className="brand-icon"><Microscope size={23} /></span><span>MeDIAuto<strong>Studio</strong></span></a>
-      <nav aria-label="업무 목록" className="side-nav">
-        <p>워크스페이스</p>
+      <nav aria-label="Workspace Navigation" className="side-nav">
+        <p>Workspace</p>
         <a href="#worklist/all" aria-current={page.view !== 'settings' ? 'location' : undefined}><LayoutList size={19} /> <span>Worklist</span><small>{result.counts.all}</small></a>
-        {settingsAllowed && <a href="#settings" aria-current={page.view === 'settings' ? 'page' : undefined}><Settings2 size={19} /> <span>설정</span></a>}
+        {settingsAllowed && <a href="#settings" aria-current={page.view === 'settings' ? 'page' : undefined}><Settings2 size={19} /> <span>Settings</span></a>}
       </nav>
-      <div className="side-footer"><button onClick={() => showModal('system')}><Activity size={18} /><span>서비스 상태</span><i className={health?.status === 'ok' ? 'online' : ''} /></button></div>
+      <div className="side-footer"><button onClick={() => showModal('system')}><Activity size={18} /><span>Service Status</span><i className={health?.status === 'ok' ? 'online' : ''} /></button></div>
     </aside>
     <div className="workspace">
-      <header className="topbar"><div className="breadcrumbs"><span>병리 워크스페이스</span><ChevronRight size={15} /><strong>{{ viewer: 'WSI 뷰어', case: '케이스 상세', request: '분석·자문 요청', scans: '슬라이드 등록', settings: '설정', worklist: 'Worklist' }[page.view]}</strong></div>
-        <div className="header-actions">{requestAllowed && <RequestInbox organization={user.organization} />}<span className="demo-label"><FlaskConical size={15} /> 시연 환경</span><button className="emr-chip" onClick={() => showModal('system')}><span /> EMR {emr} · LIS {lis}</button><span className="identity"><UserRound size={17} />{user.display_name}</span><button className="button secondary" onClick={logout}>로그아웃</button></div>
+      <header className="topbar"><div className="breadcrumbs"><span>Pathology Workspace</span><ChevronRight size={15} /><strong>{{ viewer: 'WSI Viewer', case: 'Case Details', request: 'Analysis and Consultation Requests', scans: 'Slide Registration', settings: 'Settings', worklist: 'Worklist' }[page.view]}</strong></div>
+        <div className="header-actions">{requestAllowed && <RequestInbox organization={user.organization} />}<span className="demo-label"><FlaskConical size={15} /> Demo Environment</span><button className="emr-chip" onClick={() => showModal('system')}><span /> EMR {emr} · LIS {lis}</button><span className="identity"><UserRound size={17} />{user.display_name}</span><button className="button secondary" onClick={logout}>Sign Out</button></div>
       </header>
       <main className="workspace-main">
-        {(page.view === 'worklist' || page.view === 'scans') && <nav aria-label="Worklist 하위 메뉴" className="worklist-nav">
+        {(page.view === 'worklist' || page.view === 'scans') && <nav aria-label="Worklist Navigation" className="worklist-nav">
           {worklistTabs.map(({ id, href, label, count, icon: Icon }) => <a key={id} href={href}
             aria-current={(page.view === 'scans' ? id === 'scans' : id === page.scope) ? 'page' : undefined}>
             <Icon size={16} />{label}<small>{count}</small>
           </a>)}
         </nav>}
         <div hidden={page.view !== 'worklist'}>
-          {listError && <div className="notice" role="alert">{listError}<button className="button secondary" onClick={() => setRevision((value) => value + 1)}>다시 시도</button></div>}
+          {listError && <div className="notice" role="alert">{listError}<button className="button secondary" onClick={() => setRevision((value) => value + 1)}>Retry</button></div>}
           <Worklist onScope={setWorklistScope} mayShare={user.role === 'admin'} cases={worklistCases} loading={listLoading} scope={scope} current={selectedCase} onSelect={setSelected}
             total={result.total} counts={result.counts} assignees={result.assignees} onQuery={setQuery}
             onOpen={(id) => { const item = worklistCases.find((row) => row.id === id); if (item) navigateCase(item); }}
@@ -294,13 +294,13 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
           <IntegrationSettings org={user.organization} status={integration} onRefresh={refreshIntegration} />
         </>}
         {page.view === 'scans' && intakeAllowed && <IntakePage files={files} loading={filesLoading} problem={fileProblem} refresh={refreshFiles} />}
-        {((page.view === 'settings' && !settingsAllowed) || (page.view === 'scans' && !intakeAllowed)) && <div className="panel empty"><strong>이 화면을 열 권한이 없습니다.</strong><button className="button secondary" onClick={goBack}>Worklist 돌아가기</button></div>}
+        {((page.view === 'settings' && !settingsAllowed) || (page.view === 'scans' && !intakeAllowed)) && <div className="panel empty"><strong>You do not have permission to open this page.</strong><button className="button secondary" onClick={goBack}>Back to Worklist</button></div>}
         {page.view === 'request' && <RequestPage key={page.id} id={page.id} organization={user.organization} />}
         {casePage && (!current ? <div className="panel empty"><CircleHelp size={28} /><strong>{casePage.files
-          ? (intakeAllowed && filesLoading ? '케이스를 불러오는 중입니다.' : '케이스를 불러올 수 없습니다.')
-          : detail?.key === detailKey ? detail?.error : '케이스를 불러오는 중입니다.'}</strong><button className="button secondary" onClick={goBack}>Worklist 돌아가기</button></div>
+          ? (intakeAllowed && filesLoading ? 'Loading case…' : 'Unable to load the case.')
+          : detail?.key === detailKey ? detail?.error : 'Loading case…'}</strong><button className="button secondary" onClick={goBack}>Back to Worklist</button></div>
           : casePage.view === 'case' ? <CaseDetail key={current.id + '/' + (casePage.tab ?? '')} item={current}
-            initialTab={requestAllowed && current.recordId ? casePage.tab === 'requests' ? '요청' : casePage.tab === 'report' ? '보고 초안' : undefined : undefined}
+            initialTab={requestAllowed && current.recordId ? casePage.tab === 'requests' ? 'Requests' : casePage.tab === 'report' ? 'Report Draft' : undefined : undefined}
             requests={requestAllowed && current.recordId ? <CaseRequests organization={user.organization} item={current} /> : undefined}
             report={requestAllowed && current.recordId ? <ReportDraftReferences organization={user.organization} caseId={current.recordId} /> : undefined} emr={emr} onBack={goBack} onViewer={(slide) => navigateViewer(current, slide)}
             patientIntegration={current.recordId ? <PatientIntegration item={current} org={user.organization}
@@ -312,44 +312,44 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
             onReview={mayReview ? () => openWorkflow(current, 'review') : undefined} />)}
       </main>
     </div>
-    {modal === 'register' && <ModalWindow title="케이스 등록" onClose={() => showModal(null)}><form onSubmit={(event) => void register(event)}>
+    {modal === 'register' && <ModalWindow title="Register Case" onClose={() => showModal(null)}><form onSubmit={(event) => void register(event)}>
       <label className="form-field">Case ID<input name="case-number" placeholder="IMS-26-0149" required maxLength={40} /></label>
       {formError && <p className="form-error" role="alert">{formError}</p>}
-      <div className="dialog-actions"><button type="button" className="button secondary" onClick={() => showModal(null)}>취소</button><button className="button primary" type="submit" disabled={saving}>등록</button></div>
+      <div className="dialog-actions"><button type="button" className="button secondary" onClick={() => showModal(null)}>Cancel</button><button className="button primary" type="submit" disabled={saving}>Register</button></div>
     </form></ModalWindow>}
-    {workflow && <ModalWindow title={workflow.action === 'confirm' ? '등록 파일로 케이스 확정'
-      : workflow.action === 'assignment' ? (workflow.item.assignedTo ? '담당자 재배정' : '담당자 배정')
-      : workflow.item.status === '검토 중' ? '검토 완료' : '검토 시작'}
+    {workflow && <ModalWindow title={workflow.action === 'confirm' ? 'Confirm Case from Registered Files'
+      : workflow.action === 'assignment' ? (workflow.item.assignedTo ? 'Reassign Case' : 'Assign Case')
+      : workflow.item.status === 'In Review' ? 'Review Complete' : 'Start Review'}
       onClose={() => { if (!saving) setWorkflow(undefined); }}>
       <form onSubmit={(event) => void saveWorkflow(event)}>
-        {workflow.action === 'confirm' ? <p>{workflow.item.id}의 등록 스캔 {workflow.item.slides.length}개를 케이스에 연결합니다.</p> : <>
-          {workflow.action === 'assignment' && <label className="form-field">담당 병리의
+        {workflow.action === 'confirm' ? <p>{workflow.item.id} has {workflow.item.slides.length} registered scans to link to this case.</p> : <>
+          {workflow.action === 'assignment' && <label className="form-field">Assigned Pathologist
             <select name="assignee" required defaultValue="">
-              <option value="">담당 병리의 선택</option>
+              <option value="">Select the assigned pathologist</option>
               {workflow.item.candidates?.filter(({ id }) => id !== workflow.item.assignedTo)
                 .map(({ id, name, username }) => <option key={id} value={id}>{name} ({username})</option>)}
             </select>
           </label>}
           {workflow.action === 'assignment' && !workflow.item.candidates?.some(({ id }) => id !== workflow.item.assignedTo) &&
-            <p className="muted">선택할 수 있는 활성 병리의 계정이 없습니다.</p>}
-          {workflow.action === 'assignment' && workflow.item.status === '검토 중' &&
-            <p>재배정하면 새 담당자가 검토를 시작할 수 있도록 상태가 ‘배정됨’으로 돌아갑니다.</p>}
-          {workflow.action === 'review' && workflow.item.status === '검토 중' &&
-            <p>IMS 업무 상태를 ‘검토 완료’로 저장합니다.</p>}
-          <label className="form-field">변경 사유<textarea name="reason" required maxLength={240} rows={2} /></label>
-          {workflow.action === 'review' && <label className="form-field">검토 메모 (선택)<textarea name="note" maxLength={2000} rows={3} /></label>}
+            <p className="muted">No active pathologists are available.</p>}
+          {workflow.action === 'assignment' && workflow.item.status === 'In Review' &&
+            <p>Reassigning returns the case to Assigned so the new pathologist can start the review.</p>}
+          {workflow.action === 'review' && workflow.item.status === 'In Review' &&
+            <p>This sets the IMS review status to Review Complete.</p>}
+          <label className="form-field">Reason for Change<textarea name="reason" required maxLength={240} rows={2} /></label>
+          {workflow.action === 'review' && <label className="form-field">Review Note (Optional)<textarea name="note" maxLength={2000} rows={3} /></label>}
         </>}
         {workflowError && <p className="form-error" role="alert">{workflowError}</p>}
         <div className="dialog-actions">
-          {workflowError && <button type="button" className="button secondary" onClick={refreshWorkflow}>최신 상태 불러오기</button>}
-          <button type="button" className="button secondary" disabled={saving} onClick={() => setWorkflow(undefined)}>취소</button>
-          <button className="button primary" type="submit" disabled={saving}>{workflow.action === 'confirm' ? '확정' : '저장'}</button>
+          {workflowError && <button type="button" className="button secondary" onClick={refreshWorkflow}>Reload Latest Status</button>}
+          <button type="button" className="button secondary" disabled={saving} onClick={() => setWorkflow(undefined)}>Cancel</button>
+          <button className="button primary" type="submit" disabled={saving}>{workflow.action === 'confirm' ? 'Confirm' : 'Save'}</button>
         </div>
       </form>
     </ModalWindow>}
-    {modal === 'system' && <ModalWindow title="서비스 상태" onClose={() => showModal(null)}>
-      <dl className="key-values" aria-live="polite"><div><dt>FastAPI</dt><dd>{health ? '응답 정상' : serviceError ? '응답 없음' : '확인 중'}</dd></div><div><dt>PostgreSQL</dt><dd>{health ? health.database === 'connected' ? '연결됨' : '연결 장애' : '—'}</dd></div><div><dt>EMR</dt><dd>{emr}</dd></div><div><dt>LIS</dt><dd>{lis}</dd></div></dl>
-      <div className="dialog-actions"><button className="button secondary" disabled={!health && !serviceError} onClick={() => { setHealth(null); setServiceError(false); setCheckAttempt(checkAttempt + 1); }}>다시 확인</button></div>
+    {modal === 'system' && <ModalWindow title="Service Status" onClose={() => showModal(null)}>
+      <dl className="key-values" aria-live="polite"><div><dt>FastAPI</dt><dd>{health ? 'Responding' : serviceError ? 'No Response' : 'Checking…'}</dd></div><div><dt>PostgreSQL</dt><dd>{health ? health.database === 'connected' ? 'Connected' : 'Connection Unavailable' : '—'}</dd></div><div><dt>EMR</dt><dd>{emr}</dd></div><div><dt>LIS</dt><dd>{lis}</dd></div></dl>
+      <div className="dialog-actions"><button className="button secondary" disabled={!health && !serviceError} onClick={() => { setHealth(null); setServiceError(false); setCheckAttempt(checkAttempt + 1); }}>Check Again</button></div>
     </ModalWindow>}
   </div>;
 }

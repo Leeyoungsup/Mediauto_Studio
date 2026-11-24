@@ -47,7 +47,7 @@ class PatientCreate(ClinicalInput):
     @model_validator(mode="after")
     def minimum_identity(self):
         if not (self.display_name or self.local_reference):
-            raise ValueError("환자명 또는 로컬 환자 식별자를 입력하세요.")
+            raise ValueError("Enter a patient name or local patient ID.")
         return self
 
 
@@ -106,7 +106,7 @@ async def write(session: AsyncSession, roles=WRITERS):
         async with session.begin():
             yield
     except IntegrityError as exc:
-        raise HTTPException(409, "같은 식별자 또는 파일이 이미 등록되었거나 연결 관계가 바뀌었습니다.") from exc
+        raise HTTPException(409, "This identifier or file is already registered, or a record link has changed.") from exc
 
 
 def public_fields(record) -> dict:
@@ -123,7 +123,7 @@ async def find(session: AsyncSession, model, organization: str, record_id: UUID,
         statement = statement.with_for_update()
     record = await session.scalar(statement)
     if record is None:
-        raise HTTPException(404, "기관에서 해당 레코드를 찾을 수 없습니다.")
+        raise HTTPException(404, "Record not found in this organization.")
     return record
 
 
@@ -163,22 +163,22 @@ def relationship_state(record) -> dict:
 def scan_metadata(storage_key: str, data_root: Path | None = None) -> dict:
     path = Path(storage_key)
     if path.is_absolute() or "\\" in storage_key or "\0" in storage_key or ".." in path.parts:
-        raise HTTPException(422, "WSI 위치는 data/ 아래의 상대 경로로 입력하세요.")
+        raise HTTPException(422, "Enter a WSI path relative to the data/ directory.")
     if path.suffix.lower() not in {".ndpi", ".svs"}:
-        raise HTTPException(422, "NDPI 또는 SVS 파일을 지정하세요.")
+        raise HTTPException(422, "Select an NDPI or SVS file.")
     root = (data_root or DATA_ROOT).resolve()
     candidate = root / path
     try:
         resolved = candidate.resolve(strict=True)
         if candidate != resolved or not resolved.is_relative_to(root):
-            raise HTTPException(422, "파일은 data/ 아래에 있어야 하며 심볼릭 링크를 사용할 수 없습니다.")
+            raise HTTPException(422, "Files must be located under data/. Symbolic links are unsupported.")
         metadata = resolved.stat()
     except (FileNotFoundError, NotADirectoryError) as exc:
-        raise HTTPException(404, "WSI 파일을 찾을 수 없습니다.") from exc
+        raise HTTPException(404, "WSI file not found.") from exc
     except (OSError, RuntimeError) as exc:
-        raise HTTPException(422, "WSI 파일 경로를 확인하세요.") from exc
+        raise HTTPException(422, "Check the WSI file path.") from exc
     if not stat.S_ISREG(metadata.st_mode):
-        raise HTTPException(422, "WSI 파일을 지정하세요.")
+        raise HTTPException(422, "Select a WSI file.")
     return {
         "storage_key": path.as_posix(), "format": path.suffix[1:].upper(),
         "size_bytes": metadata.st_size, "modified_ns": metadata.st_mtime_ns,
@@ -198,7 +198,7 @@ async def register(session: AsyncSession, organization: str, model, key: str, da
         if await session.scalar(reservation) is None:
             existing = await session.get(RegistrationRequest, (organization, operation, key))
             if existing.request_hash != request_hash:
-                raise HTTPException(409, "같은 Idempotency-Key를 다른 요청에 사용할 수 없습니다.")
+                raise HTTPException(409, "This Idempotency-Key was already used for a different request.")
             return public_fields(await find(session, model, organization, existing.record_id))
 
         if parent is not None and parent[1] is not None:
@@ -253,7 +253,7 @@ async def list_records(
     if parent_id is not None or unlinked:
         parent_field = PARENT_FIELDS.get(category)
         if parent_field is None or (unlinked and (category not in {"cases", "slides"} or parent_id is not None)):
-            raise HTTPException(422, "이 목록에 적용할 수 없는 연결 필터입니다.")
+            raise HTTPException(422, "This relationship filter does not apply to the list.")
         statement = statement.where(parent_field == parent_id)
     records = await session.scalars(statement.order_by(model.created_at.desc(), model.id).offset(offset).limit(limit))
     return [public_fields(record) for record in records]
@@ -266,7 +266,7 @@ async def get_record(organization: Organization, category: Category, record_id: 
 
 def require_version(record, version: int) -> None:
     if record.version != version:
-        raise HTTPException(409, "레코드가 변경되었습니다. 최신 버전을 조회한 뒤 다시 시도하세요.")
+        raise HTTPException(409, "The record has changed. Reload the latest version and try again.")
 
 
 async def change_link(session: AsyncSession, organization: str, model, parent, field: str, record_id: UUID, data: LinkChange):
@@ -319,7 +319,7 @@ async def lookup_identifier(organization: Organization, category: IdentityCatego
     identifier = await registered_identifier(session, organization, data)
     record_id = getattr(identifier, category.removesuffix("s") + "_id", None)
     if record_id is None:
-        raise HTTPException(404, "이 기관에서 연결된 외부 식별자를 찾을 수 없습니다.")
+        raise HTTPException(404, "No matching external identifier is linked in this organization.")
     await find(session, MODELS[category], organization, record_id)
     return {"record_id": record_id, "identifier": public_fields(identifier)}
 
@@ -333,7 +333,7 @@ async def link_identifier(organization: Organization, category: IdentityCategory
         existing = await registered_identifier(session, organization, data)
         if existing:
             if getattr(existing, field) != record_id:
-                raise HTTPException(409, "외부 식별자가 이미 다른 레코드에 연결되어 있습니다. 기관과 식별자를 대조하세요.")
+                raise HTTPException(409, "This external identifier is linked to another record. Check the organization and identifier.")
             return {"record_version": record.version, "identifier": public_fields(existing)}
 
         identifier = ExternalIdentifier(

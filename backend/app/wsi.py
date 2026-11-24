@@ -29,12 +29,12 @@ async def registered_file(source, scan_id, user, session) -> tuple[Path, UUID]:
         require_intake(user)
         entry = await session.get(ApplicationSetting, INTAKE_PREFIX + str(scan_id))
         if entry is None:
-            raise HTTPException(404, "등록된 WSI를 찾을 수 없습니다.")
+            raise HTTPException(404, "Registered WSI not found.")
         await session.rollback()
         files = await asyncio.to_thread(scan_files, DATA_ROOT)
         match = next((item for item in files if item.id == str(scan_id)), None)
         if match is None:
-            raise HTTPException(404, "스캔 파일이 이동되었거나 변경되었습니다.")
+            raise HTTPException(404, "The scan file was moved or changed.")
         key = match.filename
         expected = None
     else:
@@ -47,7 +47,7 @@ async def registered_file(source, scan_id, user, session) -> tuple[Path, UUID]:
                    Case.organization == user.organization, case_visibility(Case, user))
         )).one_or_none()
         if record is None:
-            raise HTTPException(404, "등록된 WSI를 찾을 수 없습니다.")
+            raise HTTPException(404, "Registered WSI not found.")
         key, size, modified = record
         expected = (size, modified)
         await session.rollback()
@@ -59,7 +59,7 @@ async def registered_file(source, scan_id, user, session) -> tuple[Path, UUID]:
 async def verified_scan_path(key, expected):
     meta = await asyncio.to_thread(scan_metadata, key, DATA_ROOT)
     if expected and expected != (meta["size_bytes"], meta["modified_ns"]):
-        raise HTTPException(409, "등록 후 스캔 파일이 변경되었습니다. 등록 정보를 확인하세요.")
+        raise HTTPException(409, "The scan file changed after registration. Check the registration details.")
     return DATA_ROOT.resolve() / meta["storage_key"], meta
 
 
@@ -75,7 +75,7 @@ async def lock_scan_case(session, user, scan_id):
         .where(SlideScan.id == scan_id, Case.organization == user.organization, case_visibility(Case, user))
         .with_for_update(read=True, of=Case))
     if case is None:
-        raise HTTPException(404, "등록된 WSI를 찾을 수 없습니다.")
+        raise HTTPException(404, "Registered WSI not found.")
 
 
 def positive_number(value):
@@ -120,7 +120,7 @@ def read_scan(path, operation, cancelled, coords=None):
                 level = slide.level_count - 1
                 size = slide.level_dimensions[level]
             if math.prod(size) > 16_000_000:
-                raise HTTPException(422, "이 스캔의 저해상도 미리보기를 만들 수 없습니다.")
+                raise HTTPException(422, "This scan has no low-resolution preview available.")
             origin = (0, 0)
         else:
             stage, x, y = coords
@@ -128,7 +128,7 @@ def read_scan(path, operation, cancelled, coords=None):
             scene_size = TILE_SIZE * downsample
             origin = (x * scene_size, y * scene_size)
             if origin[0] >= width or origin[1] >= height:
-                raise HTTPException(404, "타일이 이미지 범위 밖입니다.")
+                raise HTTPException(404, "The tile is outside the image.")
             level = slide.get_best_level_for_downsample(downsample)
             size = (round(scene_size / slide.level_downsamples[level]),) * 2
             output_size = (TILE_SIZE, TILE_SIZE)
@@ -152,10 +152,10 @@ async def scan_response(request, path, operation, coords=None):
         while not job.done():
             await asyncio.wait((job,), timeout=0.15)
             if not job.done() and await request.is_disconnected():
-                raise HTTPException(499, "슬라이드 요청이 취소되었습니다.")
+                raise HTTPException(499, "The slide request was canceled.")
         data = job.result()
     except (openslide.OpenSlideError, OSError, ValueError) as exc:
-        raise HTTPException(422, "스캔을 읽을 수 없습니다. 파일 상태와 형식을 확인하세요.") from exc
+        raise HTTPException(422, "Unable to read the scan. Check the file format and condition.") from exc
     finally:
         cancelled.set()
         if not job.done():
@@ -186,6 +186,6 @@ async def overview(source: Source, scan_id: UUID, request: Request, user: Curren
 async def tile(source: Source, scan_id: UUID, stage: int, x: int, y: int,
                request: Request, user: CurrentUser, session: Session):
     if not 0 <= stage < len(STAGE_DOWNSAMPLES) or min(x, y) < 0:
-        raise HTTPException(400, "타일 좌표를 확인하세요.")
+        raise HTTPException(400, "Check the tile coordinates.")
     path = await registered_path(source, scan_id, user, session)
     return await scan_response(request, path, "tile", (stage, x, y))

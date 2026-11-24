@@ -103,15 +103,15 @@ async def find_view(session, user, view_id, lock=False):
     query = readable(user).where(WorklistView.id == view_id)
     view = await session.scalar(query.with_for_update() if lock else query)
     if view is None:
-        raise HTTPException(404, "저장 View를 찾을 수 없습니다.")
+        raise HTTPException(404, "Saved view not found.")
     return view
 
 
 def check_edit(view, user, expected):
     if not can_edit(view, user):
-        raise HTTPException(403, "공유 View를 변경할 권한이 없습니다.")
+        raise HTTPException(403, "You do not have permission to change shared views.")
     if view.version != expected:
-        raise HTTPException(409, "다른 세션에서 View를 변경했습니다. 목록을 갱신하세요.")
+        raise HTTPException(409, "The view changed in another session. Refresh the list.")
 
 
 @router.get("/views")
@@ -173,7 +173,7 @@ async def save_preferences(data: PreferenceUpdate, user: CurrentUser, session: S
             view = await session.scalar(readable(user).where(WorklistView.id == data.default_view_id)
                                         .with_for_update(read=True, key_share=True))
             if view is None:
-                raise HTTPException(404, "기본으로 사용할 View를 찾을 수 없습니다.")
+                raise HTTPException(404, "The view you selected as a default could not be found.")
         values = {"default_view_id": data.default_view_id, "version": data.version + 1,
                   "columns": [item.model_dump() for item in data.columns] if data.columns is not None else None}
         identity = {"organization": user.organization, "user_id": user.id}
@@ -183,5 +183,5 @@ async def save_preferences(data: PreferenceUpdate, user: CurrentUser, session: S
             statement = update(WorklistPreference).filter_by(**identity, version=data.version).values(**values)
         result = await session.scalar(statement.returning(WorklistPreference))
         if result is None:
-            raise HTTPException(409, "다른 세션에서 기본 설정을 변경했습니다. 목록을 갱신하세요.")
+            raise HTTPException(409, "Default settings changed in another session. Refresh the list.")
         return preference_view(result)

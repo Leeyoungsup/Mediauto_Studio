@@ -5,7 +5,7 @@ import { codipaiRule, emptyFields, fieldLabels, formatIntakeDate, requestIntake 
 import type { Entry, FilenameRule, Match, RuleSet, SlideFields, SourceFile } from './intake-api';
 
 function message(error: unknown) {
-  return error instanceof Error ? error.message : '요청을 처리하지 못했습니다.';
+  return error instanceof Error ? error.message : 'Unable to process the request.';
 }
 
 export function IntakePage({ files, loading, problem, refresh }: {
@@ -38,39 +38,39 @@ export function IntakePage({ files, loading, problem, refresh }: {
       await requestIntake<Entry>(`/slides/${edited.id}`, 'PUT', { fields: draft, version: opened.version });
       await refresh();
       setOpened(null);
-      setNotice('슬라이드 정보를 저장했습니다.');
+      setNotice('Slide details saved.');
     } catch (error) {
       setProblemForm(message(error));
     } finally { setSaving(false); }
   }
 
   return <>
-    <div className="page-heading"><div><h1>슬라이드 등록</h1><p>data/ 폴더의 NDPI·SVS 파일을 확인하고 케이스에 연결합니다.</p></div>
-      <div className="actions"><button className="button secondary" onClick={() => void refresh()} disabled={loading}><RefreshCw size={16} /> 목록 갱신</button><a className="button primary" href="#settings"><Settings2 size={16} /> 파일명 규칙</a></div>
+    <div className="page-heading"><div><h1>Slide Registration</h1><p>Review NDPI and SVS files in the data/ folder and link them to cases.</p></div>
+      <div className="actions"><button className="button secondary" onClick={() => void refresh()} disabled={loading}><RefreshCw size={16} /> Refresh List</button><a className="button primary" href="#settings"><Settings2 size={16} /> Filename Rules</a></div>
     </div>
     {problem && <p className="notice" role="alert">{problem}</p>}
     {notice && <p className="success-note" role="status">{notice}</p>}
     <section className="panel">
-      <div className="panel-title"><div className="title-inline"><h2>스캔 파일</h2><span className="count">{files.length}</span></div></div>
+      <div className="panel-title"><div className="title-inline"><h2>Scan Files</h2><span className="count">{files.length}</span></div></div>
       <div className="filters intake-filters">
-        <div className="actions" aria-label="슬라이드 등록 상태">
-          {[['pending', `미입력 슬라이드 (${pending})`], ['registered', `등록됨 (${files.length - pending})`], ['all', '모든 파일']].map(([value, label]) =>
+        <div className="actions" aria-label="Slide Registration Status">
+          {[['pending', `Unregistered Slides (${pending})`], ['registered', `Registered (${files.length - pending})`], ['all', 'All Files']].map(([value, label]) =>
             <button key={value} className={filter === value ? 'button primary' : 'button secondary'} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>)}
         </div>
-        <label className="search-field"><input aria-label="스캔 파일 검색" placeholder="파일명 또는 Case ID" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+        <label className="search-field"><input aria-label="Search Scan Files" placeholder="Filename or Case ID" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
       </div>
-      <div className="table-scroll"><table className="file-table"><thead><tr><th scope="col">파일명</th><th scope="col">형식</th><th scope="col">Case ID</th><th scope="col">Slide ID</th><th scope="col">등록 출처</th><th scope="col">수정</th></tr></thead>
+      <div className="table-scroll"><table className="file-table"><thead><tr><th scope="col">Filename</th><th scope="col">Format</th><th scope="col">Case ID</th><th scope="col">Slide ID</th><th scope="col">Registration Source</th><th scope="col">Edit</th></tr></thead>
         <tbody>{matching.map((file) => <tr key={file.id}>
-          <td><strong className="file-name"><FileImage size={15} />{file.filename}</strong><small className="muted">{(file.size / 2 ** 20).toLocaleString('ko-KR', { maximumFractionDigits: 1 })} MB · {formatIntakeDate(file.modified)}</small></td>
+          <td><strong className="file-name"><FileImage size={15} />{file.filename}</strong><small className="muted">{(file.size / 2 ** 20).toLocaleString('en-US', { maximumFractionDigits: 1 })} MB · {formatIntakeDate(file.modified)}</small></td>
           <td>{file.format}</td><td>{file.entry?.fields.case_id || '—'}</td><td>{file.entry?.fields.slide_id || '—'}</td>
-          <td><span className={file.entry ? 'status-pill status-3' : 'status-pill status-0'}>{file.entry ? file.entry.source === 'rule' ? '파일명 규칙' : '직접 입력' : '미입력'}</span></td>
-          <td><button className="button secondary" onClick={() => edit(file)} aria-label={`${file.filename} ${file.entry ? '정보 수정' : '직접 입력'}`}>{file.entry ? '정보 수정' : '직접 입력'}</button></td>
+          <td><span className={file.entry ? 'status-pill status-3' : 'status-pill status-0'}>{file.entry ? file.entry.source === 'rule' ? 'Filename Rules' : 'Enter Manually' : 'Not Entered'}</span></td>
+          <td><button className="button secondary" onClick={() => edit(file)} aria-label={`${file.filename} ${file.entry ? 'Edit Details' : 'Enter Manually'}`}>{file.entry ? 'Edit Details' : 'Enter Manually'}</button></td>
         </tr>)}</tbody>
       </table></div>
-      {!matching.length && <div className="empty" role="status"><FolderOpen size={24} /><p>{loading ? '파일 목록을 불러오는 중입니다.' : '이 조건의 스캔 파일이 없습니다.'}</p></div>}
+      {!matching.length && <div className="empty" role="status"><FolderOpen size={24} /><p>{loading ? 'Loading files…' : 'No scan files match these filters.'}</p></div>}
     </section>
-    {edited && <section className="panel intake-editor" aria-label="슬라이드 정보 입력">
-      <div className="panel-title"><h2>슬라이드 정보 입력</h2><button className="button secondary" onClick={() => setOpened(null)} disabled={saving}>닫기</button></div>
+    {edited && <section className="panel intake-editor" aria-label="Enter Slide Details">
+      <div className="panel-title"><h2>Enter Slide Details</h2><button className="button secondary" onClick={() => setOpened(null)} disabled={saving}>Close</button></div>
       <form className="detail-content" onSubmit={(event) => void submit(event)}>
         <p className="file-name">{edited.filename}</p>
         <div className="form-grid">
@@ -80,19 +80,19 @@ export function IntakePage({ files, loading, problem, refresh }: {
               onChange={(event) => setDraft({ ...draft, [key]: event.target.value })} /></label>)}
         </div>
         {problemForm && <p className="form-error" role="alert">{problemForm}</p>}
-        <div className="actions"><button className="button primary" type="submit" disabled={saving}>{saving ? '저장 중' : '슬라이드 정보 저장'}</button></div>
+        <div className="actions"><button className="button primary" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save Slide Details'}</button></div>
       </form>
     </section>}
   </>;
 }
 
 const ruleFields: { key: keyof FilenameRule; label: string; hint?: string }[] = [
-  { key: 'name', label: '규칙 이름' },
-  { key: 'pattern', label: '파일명 패턴 (확장자 제외)', hint: '예: 병원-{case}-{block}-{slide}' },
-  { key: 'case_id', label: 'Case ID 형식', hint: '{case}' },
-  { key: 'slide_id', label: 'Slide ID 형식', hint: '{block}-{slide}' },
-  { key: 'specimen', label: '검체 형식' }, { key: 'stain', label: '염색 코드 형식' },
-  { key: 'patient_number', label: '환자번호 형식' },
+  { key: 'name', label: 'Rule Name' },
+  { key: 'pattern', label: 'Filename Pattern (without extension)', hint: 'e.g., hospital-{case}-{block}-{slide}' },
+  { key: 'case_id', label: 'Case ID Format', hint: '{case}' },
+  { key: 'slide_id', label: 'Slide ID Format', hint: '{block}-{slide}' },
+  { key: 'specimen', label: 'Specimen Format' }, { key: 'stain', label: 'Stain Code Format' },
+  { key: 'patient_number', label: 'Patient ID Format' },
 ];
 
 export function IntakeSettings({ refresh, emrConnected }: { refresh: () => Promise<void>; emrConnected: boolean }) {
@@ -127,50 +127,53 @@ export function IntakeSettings({ refresh, emrConnected }: { refresh: () => Promi
         setPreview(await requestIntake<Match[]>('/rules/preview', 'POST', { rules }));
       } else if (action === 'save') {
         const result = await requestIntake<RuleSet>('/rules', 'PUT', { rules, version: saved.version });
-        setSaved(result); setRules(result.rules); setNotice('파일명 규칙을 저장했습니다.');
+        setSaved(result); setRules(result.rules); setNotice('Filename rules saved.');
       } else {
         const result = await requestIntake<{ applied: number; unchanged: number; unmatched: number }>('/rules/apply', 'POST', { version: saved.version });
         await refresh();
-        setNotice(`신규 등록 ${result.applied}건 · 기존 등록 유지 ${result.unchanged}건 · 미입력 유지 ${result.unmatched}건`);
+        setNotice(`Newly registered: ${result.applied} · Previously registered: ${result.unchanged} · Still unregistered: ${result.unmatched}`);
       }
     } catch (error) { setProblem(message(error)); }
     finally { setWorking(false); }
   }
 
+  const hasExample = rules.some((rule) => rule.name === codipaiRule.name
+    || ruleFields.every(({ key }) => key === 'name' || rule[key] === codipaiRule[key]));
+
   return <>
-    <div className="page-heading"><div><h1>설정</h1><p>EMR 연결 없이 사용할 파일명 규칙을 정의합니다.</p></div><a className="button secondary" href="#scans">슬라이드 등록으로</a></div>
+    <div className="page-heading"><div><h1>Settings</h1><p>Define filename rules to use when EMR is disconnected.</p></div><a className="button secondary" href="#scans">Go to Slide Registration</a></div>
     {problem && <p className="notice" role="alert">{problem}</p>}
     {notice && <p className="success-note" role="status">{notice}</p>}
-    <section className="panel" aria-label="파일명 규칙">
-      <div className="panel-title"><div className="title-inline"><h2>파일명 규칙</h2><span className="count">{rules.length}</span></div>
-        <div className="actions"><button className="button secondary" disabled={!saved || working || rules.length >= 20 || rules.some(({ name }) => name === codipaiRule.name)} onClick={() => update([...rules, codipaiRule])}>CODIPAI 예제 불러오기</button>
-          <button className="button secondary" disabled={!saved || working || rules.length >= 20} onClick={() => update([...rules, { name: '', pattern: '', case_id: '', slide_id: '', specimen: '', stain: '', patient_number: '' }])}><Plus size={15} /> 규칙 추가</button></div>
+    <section className="panel" aria-label="Filename Rules">
+      <div className="panel-title"><div className="title-inline"><h2>Filename Rules</h2><span className="count">{rules.length}</span></div>
+        <div className="actions"><button className="button secondary" disabled={!saved || working || rules.length >= 20 || hasExample} onClick={() => update([...rules, codipaiRule])}>Load CODIPAI Example</button>
+          <button className="button secondary" disabled={!saved || working || rules.length >= 20} onClick={() => update([...rules, { name: '', pattern: '', case_id: '', slide_id: '', specimen: '', stain: '', patient_number: '' }])}><Plus size={15} /> Add Rule</button></div>
       </div>
       <div className="detail-content">
-        <p className="muted">파일명의 일부를 중괄호로 지정한 뒤 출력 형식에 넣으세요. 위쪽 규칙부터 미입력 파일에 적용합니다. 기존 등록 정보는 유지됩니다.</p>
-        {saved && !rules.length && <p className="empty-inline">저장한 규칙이 없습니다. 예제를 불러오거나 규칙을 추가하세요.</p>}
+        <p className="muted">Wrap filename tokens in braces and use them in the output fields. Rules run from top to bottom on unregistered files. Existing registrations are preserved.</p>
+        {saved && !rules.length && <p className="empty-inline">No saved rules. Load the example or add a rule.</p>}
         {rules.map((rule, index) => <fieldset className="rule-card" key={index} disabled={working}>
-          <legend>{rule.name || '새 파일명 규칙'}</legend>
+          <legend>{rule.name || 'New Filename Rule'}</legend>
           <div className="actions rule-order">
-            <button type="button" className="icon-button" aria-label={`규칙 ${index + 1} 위로`} disabled={index === 0} onClick={() => move(index, -1)}><ArrowUp size={16} /></button>
-            <button type="button" className="icon-button" aria-label={`규칙 ${index + 1} 아래로`} disabled={index === rules.length - 1} onClick={() => move(index, 1)}><ArrowDown size={16} /></button>
-            <button type="button" className="icon-button" aria-label={`규칙 ${index + 1} 삭제`} onClick={() => update(rules.filter((_, position) => position !== index))}><Trash2 size={16} /></button>
+            <button type="button" className="icon-button" aria-label={`Rule ${index + 1} up`} disabled={index === 0} onClick={() => move(index, -1)}><ArrowUp size={16} /></button>
+            <button type="button" className="icon-button" aria-label={`Rule ${index + 1} down`} disabled={index === rules.length - 1} onClick={() => move(index, 1)}><ArrowDown size={16} /></button>
+            <button type="button" className="icon-button" aria-label={`Rule ${index + 1} Delete`} onClick={() => update(rules.filter((_, position) => position !== index))}><Trash2 size={16} /></button>
           </div>
           <div className="form-grid">{ruleFields.map(({ key, label, hint }) => <label className={`form-field ${key === 'pattern' ? 'pattern-field' : ''}`} key={key}>{label}
             <input value={rule[key]} placeholder={hint} maxLength={120} onChange={(event) => update(rules.map((item, position) => position === index ? { ...item, [key]: event.target.value } : item))} />
           </label>)}</div>
         </fieldset>)}
         <div className="actions">
-          <button className="button secondary" disabled={working || !rules.length} onClick={() => void act('preview')}>미리보기</button>
-          <button className="button secondary" disabled={working || !dirty} onClick={() => void act('save')}>규칙 저장</button>
-          <button className="button primary" disabled={working || dirty || emrConnected || !saved?.rules.length} onClick={() => void act('apply')}>미입력 슬라이드에 적용</button>
+          <button className="button secondary" disabled={working || !rules.length} onClick={() => void act('preview')}>Preview</button>
+          <button className="button secondary" disabled={working || !dirty} onClick={() => void act('save')}>Save Rules</button>
+          <button className="button primary" disabled={working || dirty || emrConnected || !saved?.rules.length} onClick={() => void act('apply')}>Apply to Unregistered Slides</button>
         </div>
-        {emrConnected && <p className="muted">파일명 규칙은 EMR 미연결 상태에서 적용할 수 있습니다.</p>}
+        {emrConnected && <p className="muted">Filename rules are available when EMR is disconnected.</p>}
       </div>
     </section>
-    {preview && <section className="panel intake-editor"><div className="panel-title"><h2>파일명 규칙 미리보기</h2><span className="count">{preview.filter(({ match }) => match).length}/{preview.length} 일치</span></div>
-      <div className="table-scroll"><table className="file-table"><thead><tr><th scope="col">파일명</th><th scope="col">적용될 규칙</th><th scope="col">Case ID</th><th scope="col">Slide ID</th></tr></thead>
-        <tbody>{preview.map(({ id, filename, match }) => <tr key={id}><td>{filename}</td><td>{match?.rule ?? '규칙 불일치'}</td><td>{match?.fields.case_id ?? '—'}</td><td>{match?.fields.slide_id ?? '—'}</td></tr>)}</tbody></table></div>
+    {preview && <section className="panel intake-editor"><div className="panel-title"><h2>Preview Filename Rules</h2><span className="count">{preview.filter(({ match }) => match).length}/{preview.length} Matched</span></div>
+      <div className="table-scroll"><table className="file-table"><thead><tr><th scope="col">Filename</th><th scope="col">Matching Rule</th><th scope="col">Case ID</th><th scope="col">Slide ID</th></tr></thead>
+        <tbody>{preview.map(({ id, filename, match }) => <tr key={id}><td>{filename}</td><td>{match?.rule ?? 'No matching rule'}</td><td>{match?.fields.case_id ?? '—'}</td><td>{match?.fields.slide_id ?? '—'}</td></tr>)}</tbody></table></div>
     </section>}
   </>;
 }

@@ -1,11 +1,11 @@
 export const columns = [
-  { id: 'specimen', label: '검체' }, { id: 'assignee', label: '담당자' },
-  { id: 'status', label: '검토 상태' }, { id: 'slides', label: '슬라이드' }, { id: 'received', label: '접수 시각' },
-  { id: 'patient', label: '환자명' }, { id: 'mrn', label: '환자번호 (MRN)' },
-  { id: 'sex', label: '성별' }, { id: 'birth', label: '생년월일' }, { id: 'age', label: '채취 시 나이' },
-  { id: 'slideState', label: '슬라이드 상태' }, { id: 'group', label: '그룹' }, { id: 'lis', label: 'LIS 케이스 상태' },
-  { id: 'storage', label: '보관 상태' }, { id: 'tags', label: '태그' }, { id: 'created', label: '등록 시각' },
-  { id: 'comments', label: '댓글' }, { id: 'requests', label: '요청' }, { id: 'notes', label: '케이스 메모' },
+  { id: 'specimen', label: 'Specimen' }, { id: 'assignee', label: 'Assignee' },
+  { id: 'status', label: 'Review Status' }, { id: 'slides', label: 'Slides' }, { id: 'received', label: 'Received At' },
+  { id: 'patient', label: 'Patient Name' }, { id: 'mrn', label: 'Medical Record Number (MRN)' },
+  { id: 'sex', label: 'Sex' }, { id: 'birth', label: 'Date of Birth' }, { id: 'age', label: 'Age at Collection' },
+  { id: 'slideState', label: 'Slide Status' }, { id: 'group', label: 'Group' }, { id: 'lis', label: 'LIS Case Status' },
+  { id: 'storage', label: 'Storage Status' }, { id: 'tags', label: 'Tags' }, { id: 'created', label: 'Registered At' },
+  { id: 'comments', label: 'Comments' }, { id: 'requests', label: 'Requests' }, { id: 'notes', label: 'Case Notes' },
 ] as const;
 export type ColumnId = typeof columns[number]['id'];
 export type ColumnSetting = { id: ColumnId; visible: boolean };
@@ -34,7 +34,7 @@ export function normalizeColumns(saved: ColumnSetting[]): ColumnSetting[] {
 export type Scope = 'all' | 'mine' | 'unassigned';
 
 export const sortFields = {
-  created_at: '등록 시각', case_number: 'Case ID', status: '검토 상태', assignee: '담당자', slide_count: '슬라이드 수',
+  created_at: 'Registered At', case_number: 'Case ID', status: 'Review Status', assignee: 'Assignee', slide_count: 'Slide Count',
 } as const;
 export type SortField = keyof typeof sortFields;
 export type SortTerm = { field: SortField; direction: 'asc' | 'desc' };

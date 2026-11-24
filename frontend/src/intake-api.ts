@@ -17,10 +17,10 @@ export type Match = Pick<SourceFile, 'id' | 'filename' | 'format'> & { match: { 
 
 export const emptyFields: SlideFields = { case_id: '', slide_id: '', specimen: '', stain: '', patient_number: '', patient_name: '' };
 export const fieldLabels: Record<keyof SlideFields, string> = {
-  case_id: 'Case ID', slide_id: 'Slide ID', specimen: '검체', stain: '염색 코드', patient_number: '환자번호 (MRN)', patient_name: '환자명',
+  case_id: 'Case ID', slide_id: 'Slide ID', specimen: 'Specimen', stain: 'Stain Code', patient_number: 'Medical Record Number (MRN)', patient_name: 'Patient Name',
 };
 export const codipaiRule: FilenameRule = {
-  name: 'CODIPAI 예제', pattern: 'CODIPAI-{organ}-{series}-{case_no}-{prep}-{stain}-{slide_no}',
+  name: 'CODIPAI Example', pattern: 'CODIPAI-{organ}-{series}-{case_no}-{prep}-{stain}-{slide_no}',
   case_id: '{organ}-{series}-{case_no}', slide_id: '{prep}-{stain}-{slide_no}', specimen: '', stain: '{stain}', patient_number: '',
 };
 
@@ -31,8 +31,8 @@ export async function requestIntake<T>(path: string, method = 'GET', body?: unkn
   });
 }
 
-const dateLabel = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-export const formatIntakeDate = (date: string) => dateLabel.format(new Date(date)).replace('-', '.');
+const dateLabel = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+export const formatIntakeDate = (date: string) => dateLabel.format(new Date(date));
 
 type FileCaseGroup = { item: DemoCase; patients: Map<string, DemoCase['patient']>; specimens: Set<string> };
 
@@ -43,7 +43,7 @@ export function buildFileCases(files: SourceFile[]): DemoCase[] {
     if (!entry) continue;
     const input = entry.fields;
     const group: FileCaseGroup = groups.get(input.case_id) ?? {
-      item: { id: input.case_id, specimen: '미입력', status: '배정 대기', assignee: '', patient: null,
+      item: { id: input.case_id, specimen: 'Not Entered', status: 'Awaiting Assignment', assignee: '', patient: null,
         received: formatIntakeDate(entry.updated_at), slides: [], history: [], source: 'files' } satisfies DemoCase,
       patients: new Map(), specimens: new Set<string>(),
     };
@@ -53,13 +53,13 @@ export function buildFileCases(files: SourceFile[]): DemoCase[] {
       group.patients.set(JSON.stringify([input.patient_number, input.patient_name]), { number: input.patient_number, name: input.patient_name, birth: '' });
     }
     group.item.slides.push({
-      id: file.id, label: input.slide_id, stain: input.stain || '미입력', specimen: input.specimen || '미입력', state: '열람 가능',
+      id: file.id, label: input.slide_id, stain: input.stain || 'Not Entered', specimen: input.specimen || 'Not Entered', state: 'Viewable',
       wsi: { id: file.id, source: 'files', format: file.format }, intakeVersion: entry.version,
     });
-    group.item.history.push(`${entry.source === 'manual' ? '수기 등록' : '파일명 규칙 등록'} · ${input.slide_id} (${file.format})`);
+    group.item.history.push(`${entry.source === 'manual' ? 'Manual Registration' : 'Filename Rule Registration'} · ${input.slide_id} (${file.format})`);
   }
   return [...groups.values()].map(({ item, specimens, patients }) => {
-    if (patients.size > 1) item.history.push('파일별 환자 정보가 다릅니다. 슬라이드 목록에서 확인하세요.');
-    return { ...item, specimen: [...specimens].join(', ') || '미입력', patient: patients.size === 1 ? [...patients.values()][0] : null };
+    if (patients.size > 1) item.history.push('Patient details differ between files. Check the slide list.');
+    return { ...item, specimen: [...specimens].join(', ') || 'Not Entered', patient: patients.size === 1 ? [...patients.values()][0] : null };
   });
 }

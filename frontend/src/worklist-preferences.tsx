@@ -36,7 +36,7 @@ export function useSavedViews(scope: Scope, apply: (configuration: ViewConfig | 
       if (initial && applied) setSelected(initial.id);
       setReady(true);
     }).catch(() => {
-      if (!controller.signal.aborted) setError('저장한 Worklist 설정을 불러오지 못했습니다.');
+      if (!controller.signal.aborted) setError('Unable to load saved Worklist settings.');
     });
     return () => controller.abort();
   }, [apply]);
@@ -55,7 +55,7 @@ export function useSavedViews(scope: Scope, apply: (configuration: ViewConfig | 
     setError('');
     setNotice('');
     try { await task(); }
-    catch (failure) { setError(failure instanceof Error ? failure.message : '저장 설정을 처리하지 못했습니다.'); }
+    catch (failure) { setError(failure instanceof Error ? failure.message : 'Unable to update saved settings.'); }
     finally { setBusy(false); }
   }
 
@@ -75,7 +75,7 @@ export function useSavedViews(scope: Scope, apply: (configuration: ViewConfig | 
         : api<SavedView>(path + '/views', jsonBody('POST', { ...payload, visibility })));
       setCatalog((current) => ({ ...current, views: [...current.views.filter(({ id }) => id !== view.id), view] }));
       setSelected(view.id);
-      setNotice('View를 저장했습니다.');
+      setNotice('View saved.');
     });
   }
 
@@ -85,7 +85,7 @@ export function useSavedViews(scope: Scope, apply: (configuration: ViewConfig | 
         default_view_id: defaultView, columns, version: preferences.version,
       }));
       setCatalog((current) => ({ ...current, preferences: value }));
-      setNotice('내 Worklist 기본 설정을 저장했습니다.');
+      setNotice('Worklist defaults saved.');
     });
   }
 
@@ -94,7 +94,7 @@ export function useSavedViews(scope: Scope, apply: (configuration: ViewConfig | 
     void perform(async () => {
       await api(`${path}/views/${active.id}?version=${active.version}`, { method: 'DELETE' });
       await refresh();
-      setNotice('View를 삭제했습니다.');
+      setNotice('View deleted.');
     });
   }
 
@@ -123,20 +123,20 @@ export function SavedViewControls({ controller, configuration, mayShare }: {
     setEditing(next);
   }
 
-  return <section className="panel saved-views" aria-label="저장 View 관리">
+  return <section className="panel saved-views" aria-label="Manage Saved Views">
     <div className="actions">
-      <label className="saved-view-select">저장 View<select aria-label="저장 View" value={active?.id ?? ''} disabled={!ready || busy}
+      <label className="saved-view-select">Saved View<select aria-label="Saved View" value={active?.id ?? ''} disabled={!ready || busy}
         onChange={(event) => { setEditing(undefined); controller.choose(event.target.value); }}>
-        <option value="">기본 Worklist</option>
+        <option value="">Default Worklist</option>
         {views.map((view) => <option value={view.id} key={view.id}>
-          {view.name} · {view.visibility === 'shared' ? '기관 공유' : '개인'}{view.id === preferences.default_view_id ? ' · 시작' : ''}
+          {view.name} · {view.visibility === 'shared' ? 'Organization' : 'Private'}{view.id === preferences.default_view_id ? ' · Startup' : ''}
         </option>)}
       </select></label>
-      <button className="button secondary" disabled={!ready || busy} onClick={() => open('new')}>새 View 저장</button>
-      {active?.can_edit && <button className="button secondary" disabled={busy} onClick={() => open('current')}>선택 View 편집</button>}
+      <button className="button secondary" disabled={!ready || busy} onClick={() => open('new')}>Save New View</button>
+      {active?.can_edit && <button className="button secondary" disabled={busy} onClick={() => open('current')}>Edit Selected View</button>}
       <button className="button secondary" disabled={!ready || busy || (active?.id ?? null) === preferences.default_view_id}
-        onClick={controller.setDefault}>시작 View로 지정</button>
-      <button className="button secondary" disabled={busy} onClick={controller.refresh}>View 목록 갱신</button>
+        onClick={controller.setDefault}>Set as Startup View</button>
+      <button className="button secondary" disabled={busy} onClick={controller.refresh}>Refresh Views</button>
     </div>
     {controller.error && <p className="form-error" role="alert">{controller.error}</p>}
     {controller.notice && <p role="status">{controller.notice}</p>}
@@ -145,18 +145,18 @@ export function SavedViewControls({ controller, configuration, mayShare }: {
       if (!name.trim()) return;
       controller.save(name, { ...configuration, columns: saveColumns ? configuration.columns : null }, visibility, editing === 'current');
     }}>
-      <label className="form-field">View 이름<input required value={name} maxLength={80} onChange={(event) => setName(event.target.value)} /></label>
-      {editing === 'new' && <label className="form-field">저장 범위<select value={visibility}
+      <label className="form-field">View Name<input required value={name} maxLength={80} onChange={(event) => setName(event.target.value)} /></label>
+      {editing === 'new' && <label className="form-field">Visibility<select value={visibility}
         onChange={(event) => setVisibility(event.target.value === 'shared' ? 'shared' : 'private')}>
-        <option value="private">개인</option>
-        {mayShare && <option value="shared">기관 공유</option>}
+        <option value="private">Private</option>
+        {mayShare && <option value="shared">Organization</option>}
       </select></label>}
-      <label><input type="checkbox" checked={saveColumns} onChange={(event) => setSaveColumns(event.target.checked)} /> 현재 열 구성 포함</label>
+      <label><input type="checkbox" checked={saveColumns} onChange={(event) => setSaveColumns(event.target.checked)} /> Include current columns</label>
       <div className="actions">
-        <button className="button primary" disabled={busy}>View 저장</button>
-        <button className="button secondary" type="button" disabled={busy} onClick={() => setEditing(undefined)}>닫기</button>
+        <button className="button primary" disabled={busy}>Save View</button>
+        <button className="button secondary" type="button" disabled={busy} onClick={() => setEditing(undefined)}>Close</button>
         {editing === 'current' && active?.can_edit && <button className="button secondary" type="button" disabled={busy}
-          onClick={() => { if (window.confirm('이 저장 View를 삭제하시겠습니까?')) { controller.remove(); setEditing(undefined); } }}>View 삭제</button>}
+          onClick={() => { if (window.confirm('Delete this saved view?')) { controller.remove(); setEditing(undefined); } }}>Delete View</button>}
       </div>
     </form>}
   </section>;
@@ -168,24 +168,24 @@ export function SortControls({ order, onChange }: { order: SortTerm[]; onChange:
     onChange(order.map((term, row) => row === index ? { ...term, ...changes } : term));
   }
   return <details className="column-menu sort-menu">
-    <summary className="button secondary"><ArrowDownWideNarrow size={15} /> 다단계 정렬</summary>
+    <summary className="button secondary"><ArrowDownWideNarrow size={15} /> Multi-Level Sort</summary>
     <div className="column-options">
       {order.map(({ field, direction }, index) => <div className="sort-row" key={index}>
-        <select aria-label={`${index + 1}순위 정렬 기준`} value={field} onChange={(event) => update(index, { field: event.target.value as SortField })}>
+        <select aria-label={`${index + 1}: Sort Field`} value={field} onChange={(event) => update(index, { field: event.target.value as SortField })}>
           {keys.filter((key) => key === field || !order.some((term) => term.field === key))
             .map((key) => <option key={key} value={key}>{sortFields[key]}</option>)}
         </select>
-        <select aria-label={`${index + 1}순위 정렬 방향`} value={direction}
+        <select aria-label={`${index + 1}: Sort Direction`} value={direction}
           onChange={(event) => update(index, { direction: event.target.value === 'desc' ? 'desc' : 'asc' })}>
-          <option value="asc">오름차순</option><option value="desc">내림차순</option>
+          <option value="asc">Ascending</option><option value="desc">Descending</option>
         </select>
-        <button className="icon-button" aria-label={`${index + 1}순위 제거`} disabled={order.length === 1}
+        <button className="icon-button" aria-label={`${index + 1}: Remove Sort Level`} disabled={order.length === 1}
           onClick={() => onChange(order.filter((_, row) => index !== row))}>×</button>
       </div>)}
       <button className="button secondary" disabled={order.length >= 3} onClick={() => {
         const next = keys.find((key) => !order.some((term) => term.field === key));
         if (next) onChange([...order, { field: next, direction: 'asc' }]);
-      }}>정렬 기준 추가</button>
+      }}>Add Sort Level</button>
     </div>
   </details>;
 }

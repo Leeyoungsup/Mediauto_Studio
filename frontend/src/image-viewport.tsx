@@ -12,12 +12,12 @@ import { slideEndpoint } from './worklist';
 
 function ScaleBar({ mpp, zoom }: { mpp: number | null; zoom?: number }) {
   if (!zoom) return null;
-  if (!mpp) return <span className="scale-bar">픽셀 크기 정보 없음</span>;
+  if (!mpp) return <span className="scale-bar">Pixel size unavailable</span>;
   const target = 120 * mpp / zoom;
   const power = 10 ** Math.floor(Math.log10(target));
   const length = (target >= 5 * power ? 5 : target >= 2 * power ? 2 : 1) * power;
   const label = length >= 1000 ? `${length / 1000} mm` : `${Number(length.toPrecision(3))} µm`;
-  return <div className="scale-bar" aria-label={`스케일바 ${label}`}><span>{label}</span><i style={{ width: length * zoom / mpp }} /></div>;
+  return <div className="scale-bar" aria-label={`Scale bar ${label}`}><span>{label}</span><i style={{ width: length * zoom / mpp }} /></div>;
 }
 
 function Navigator({ src, info, view, onMove }: { src: string; info: SlideInfo; view: Viewport; onMove: (x: number, y: number) => void }) {
@@ -32,7 +32,7 @@ function Navigator({ src, info, view, onMove }: { src: string; info: SlideInfo; 
     onMove((event.clientX - rect.left) / rect.width * width, (event.clientY - rect.top) / rect.height * height);
   }
 
-  return <button className="minimap" aria-label="미니맵에서 이동"
+  return <button className="minimap" aria-label="Pan using minimap"
     style={{ width: Math.min(160, 116 * width / height), aspectRatio: width / height }}
     onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); move(event); }}
     onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) move(event); }}
@@ -124,7 +124,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         }, setTileStatus, compareMode ? { loads: 2, tiles: 24 } : undefined);
         setInfo(metadata);
       } catch (error) {
-        if (!signal.aborted) setFailure(error instanceof Error ? error.message : '슬라이드를 열 수 없습니다.');
+        if (!signal.aborted) setFailure(error instanceof Error ? error.message : 'Unable to open the slide.');
         return;
       }
       try {
@@ -151,21 +151,21 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     };
   }, [endpoint, attempt, compareMode]);
 
-  return <section className="image-panel" aria-label="슬라이드 영상"
+  return <section className="image-panel" aria-label="Slide Image"
     data-view-center-x={view && view.x + view.width / 2} data-view-center-y={view && view.y + view.height / 2}
     data-view-zoom={view?.zoom}>
     <div className="image-toolbar"><span><ScanLine size={17} /> {label} <span className="image-stain">{stain} · {scan.format}</span></span>
       <div className="image-actions">
-        <button className="icon-button" title="축소" aria-label="축소" disabled={!info} onClick={() => navigate((viewer) => viewer.magnify(0.7))}><Minus size={18} /></button>
-        <output aria-label="스캔 대비 화면 배율" className="zoom-value">{view ? `${(view.zoom * 100).toFixed(view.zoom < 0.1 ? 1 : 0)}%` : '—'}</output>
-        <button className="icon-button" title="확대" aria-label="확대" disabled={!info} onClick={() => navigate((viewer) => viewer.magnify(1.4))}><Plus size={18} /></button>
-        <button className="icon-button" title="화면 맞춤" aria-label="화면 맞춤" disabled={!info} onClick={() => navigate((viewer) => viewer.fitToWindow())}><LocateFixed size={17} /></button>
-        <button className="icon-button" title="미니맵" aria-label="미니맵" aria-pressed={showNavigator} disabled={!overview} onClick={() => setShowNavigator(!showNavigator)}><Map size={17} /></button>
+        <button className="icon-button" title="Zoom Out" aria-label="Zoom Out" disabled={!info} onClick={() => navigate((viewer) => viewer.magnify(0.7))}><Minus size={18} /></button>
+        <output aria-label="Zoom relative to scan" className="zoom-value">{view ? `${(view.zoom * 100).toFixed(view.zoom < 0.1 ? 1 : 0)}%` : '—'}</output>
+        <button className="icon-button" title="Zoom In" aria-label="Zoom In" disabled={!info} onClick={() => navigate((viewer) => viewer.magnify(1.4))}><Plus size={18} /></button>
+        <button className="icon-button" title="Fit to Window" aria-label="Fit to Window" disabled={!info} onClick={() => navigate((viewer) => viewer.fitToWindow())}><LocateFixed size={17} /></button>
+        <button className="icon-button" title="Minimap" aria-label="Minimap" aria-pressed={showNavigator} disabled={!overview} onClick={() => setShowNavigator(!showNavigator)}><Map size={17} /></button>
       </div>
     </div>
     {info && !compareMode && !readOnlyEndpoint && <ViewerToolsBar state={viewerRecords} view={view} />}
     <div className="image-surface">
-      <canvas className={viewerRecords.tool === 'pan' ? 'wsi-canvas' : 'wsi-canvas drawing-tool'} ref={canvas} tabIndex={0} aria-label="WSI 캔버스"
+      <canvas className={viewerRecords.tool === 'pan' ? 'wsi-canvas' : 'wsi-canvas drawing-tool'} ref={canvas} tabIndex={0} aria-label="WSI Canvas"
         onPointerDown={(event) => {
           if (event.button !== 0 || !info || drag.current || drawing.current) return;
           if (viewerRecords.tool !== 'pan') {
@@ -219,17 +219,17 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       <Pdl1Overlay view={view} result={pdl1.result} cells={pdl1.cells} />
       <AnnotationOverlay view={view} annotations={viewerRecords.records?.annotations ?? []} draft={viewerRecords.draft} drawing={preview} />
       {info && !readOnlyEndpoint && <Pdl1Badge state={pdl1} />}
-      {tileStatus === 'loading' && !failure && <div className="wsi-overlay image-empty" role="status">슬라이드를 여는 중입니다.</div>}
+      {tileStatus === 'loading' && !failure && <div className="wsi-overlay image-empty" role="status">Opening slide…</div>}
       {(failure || tileStatus === 'unavailable') && <div className="wsi-overlay image-empty" role="alert"><AlertTriangle size={25} />
-        <strong>슬라이드를 열 수 없습니다.</strong><p>{failure || '타일을 불러오지 못했습니다.'}</p>
-        <button className="button secondary" onClick={() => setAttempt((value) => value + 1)}>다시 시도</button>
+        <strong>Unable to open the slide.</strong><p>{failure || 'Unable to load tiles.'}</p>
+        <button className="button secondary" onClick={() => setAttempt((value) => value + 1)}>Retry</button>
       </div>}
       {info && view && showNavigator && overview && <Navigator src={overview} info={info} view={view} onMove={(x, y) => navigate((viewer) => viewer.centerAt(x, y))} />}
       {info && <ScaleBar mpp={info.mpp_x} zoom={view?.zoom} />}
     </div>
     <footer className="image-footer">
       <span>{info ? `${info.dimensions[0].toLocaleString()} × ${info.dimensions[1].toLocaleString()} px` : scan.format}</span>
-      {tileStatus === 'partial' && <span className="tile-warning" role="status">일부 타일을 불러오지 못했습니다. <button className="button secondary" onClick={() => renderer.current?.retryTiles()}>다시 시도</button></span>}
+      {tileStatus === 'partial' && <span className="tile-warning" role="status">Some tiles could not be loaded. <button className="button secondary" onClick={() => renderer.current?.retryTiles()}>Retry</button></span>}
     </footer>
     {info && !compareMode && !readOnlyEndpoint && <ViewerRecordsPanel state={viewerRecords} info={info} move={([[x1, y1], [x2, y2]]) => {
       if (!view) return;

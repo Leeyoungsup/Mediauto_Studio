@@ -73,7 +73,7 @@ async def request_context(session, user, request_id, lock=False):
         query = query.with_for_update(of=(Case, CaseRequest))
     row = (await session.execute(query)).one_or_none()
     if row is None:
-        raise HTTPException(404, "요청을 찾을 수 없습니다.")
+        raise HTTPException(404, "Request not found.")
     return row
 
 
@@ -85,7 +85,7 @@ async def case_scan(session, case, scan_id):
         .where(SlideScan.id == scan_id, SlideScan.organization == case.organization,
                SlideScan.status == "registered", Specimen.case_id == case.id))).one_or_none()
     if scan is None:
-        raise HTTPException(404, "케이스에 연결된 스캔을 찾을 수 없습니다.")
+        raise HTTPException(404, "No matching scan is linked to this case.")
     return scan
 
 
@@ -96,7 +96,7 @@ async def eligible(session, user, kind, assignee_id=None):
     if assignee_id is not None:
         account = await session.scalar(query.where(AuthUser.id == assignee_id).with_for_update(read=True))
         if account is None:
-            raise HTTPException(422, "기관의 활성 담당자 계정을 선택하세요.")
+            raise HTTPException(422, "Select an active assignee in your organization.")
         return account.id
     return [{"id": account.id, "name": account.display_name, "username": account.username}
             for account in await session.scalars(query.order_by(AuthUser.display_name, AuthUser.username))]
@@ -170,7 +170,7 @@ async def create_request(organization: Organization, case_id: UUID, data: Create
             CaseRequest.organization == organization, CaseRequest.requested_by == user.id, CaseRequest.request_key == key))
         if existing is not None:
             if existing.request_hash != digest:
-                raise HTTPException(409, "같은 요청 키를 다른 내용에 사용할 수 없습니다.")
+                raise HTTPException(409, "This request key was already used with different details.")
             return (await show_requests(session, [existing], user))[0]
         await case_scan(session, case, data.scan_id)
         if data.assignee_id:
@@ -222,7 +222,7 @@ async def request_detail(organization: Organization, request_id: UUID, user: Cur
 async def request_results(organization: Organization, request_id: UUID, user: CurrentUser, session: Session):
     row, case = await request_context(session, user, request_id)
     if row.kind != "ai" or row.assigned_to != user.id or row.status != "in_progress":
-        raise HTTPException(404, "연결할 AI 결과를 조회할 수 없습니다.")
+        raise HTTPException(404, "Unable to retrieve AI results to link.")
     return await snapshot_choices(session, row, case, user)
 
 
@@ -232,10 +232,10 @@ async def change_request(organization: Organization, request_id: UUID, data: Cha
         row, case = await request_context(session, user, request_id, lock=True)
         manages = data.action in ("assign", "retry", "cancel")
         if not (can_manage(row, case, user) if manages else row.assigned_to == user.id):
-            raise HTTPException(403, "요청을 변경할 권한이 없습니다.")
+            raise HTTPException(403, "You do not have permission to modify this request.")
         require_version(row, data.version)
         if data.action not in allowed_actions(row, case, user):
-            raise HTTPException(409, "현재 요청 상태에서 해당 처리를 할 수 없습니다.")
+            raise HTTPException(409, "This action is unavailable in the current request status.")
         before = state(row)
         previous = None
         if data.action == "assign":
@@ -254,18 +254,18 @@ async def change_request(organization: Organization, request_id: UUID, data: Cha
             if data.action == "complete":
                 if row.kind == "ai":
                     if not data.snapshot_id:
-                        raise HTTPException(422, "해당 스캔의 보관 AI 결과를 선택하세요.")
+                        raise HTTPException(422, "Select an archived AI result for this scan.")
                     snapshot = next((item for item in await snapshot_choices(session, row, case, user)
                                      if item["id"] == data.snapshot_id), None)
                     if snapshot is None:
-                        raise HTTPException(422, "해당 스캔의 보관 AI 결과를 선택하세요.")
+                        raise HTTPException(422, "Select an archived AI result for this scan.")
                     row.snapshot = snapshot
                 elif not data.note or data.snapshot_id:
-                    raise HTTPException(422, "자문 답변을 입력하세요.")
+                    raise HTTPException(422, "Enter a consultation response.")
                 row.result_note = data.note or None
             elif data.action == "fail":
                 if not data.note:
-                    raise HTTPException(422, "처리 실패 사유를 입력하세요.")
+                    raise HTTPException(422, "Enter a reason for the failure.")
                 row.result_note = data.note
             elif data.action == "retry":
                 previous, row.assigned_to = row.assigned_to, None
@@ -309,7 +309,7 @@ async def mark_read(organization: Organization, notice_id: UUID, user: CurrentUs
             RequestNotification.organization == organization, RequestNotification.id == notice_id,
             RequestNotification.recipient_id == user.id).with_for_update())
         if row is None:
-            raise HTTPException(404, "알림을 찾을 수 없습니다.")
+            raise HTTPException(404, "Notification not found.")
         row.read_at = row.read_at or datetime.now(timezone.utc)
     return {"ok": True}
 
@@ -318,7 +318,7 @@ async def scoped_wsi(session, user, request_id):
     row, case = await request_context(session, user, request_id)
     if not row.scan_id or (user.role != "admin" and case.assigned_to != user.id
                            and (row.assigned_to != user.id or row.status not in WSI_STATUSES)):
-        raise HTTPException(404, "요청의 스캔을 열 수 없습니다.")
+        raise HTTPException(404, "Unable to open the requested scan.")
     scan = (await case_scan(session, case, row.scan_id))[0]
     path, _ = await verified_scan_path(scan.storage_key, (scan.size_bytes, scan.modified_ns))
     await session.rollback()
@@ -342,5 +342,5 @@ async def request_overview(organization: Organization, request_id: UUID, request
 async def request_tile(organization: Organization, request_id: UUID, stage: int, x: int, y: int,
                        request: Request, user: CurrentUser, session: Session):
     if not 0 <= stage < len(STAGE_DOWNSAMPLES) or min(x, y) < 0:
-        raise HTTPException(400, "타일 좌표를 확인하세요.")
+        raise HTTPException(400, "Check the tile coordinates.")
     return await scan_response(request, await scoped_wsi(session, user, request_id), "tile", (stage, x, y))

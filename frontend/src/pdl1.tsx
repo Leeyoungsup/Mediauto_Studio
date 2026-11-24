@@ -19,9 +19,9 @@ type Result = {
   saved_at: string | null; audit: Audit[]; checkpoint_sha256?: string | null;
 };
 
-const typeLabel = { original: '원본', edited: '사용자 수정본' };
-const number = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 2 });
-const date = new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short' });
+const typeLabel = { original: 'Original', edited: 'User Edit' };
+const number = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
+const date = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' });
 const rangeSize = 512;
 
 export function usePdl1(endpoint: string, ready: boolean, view: Viewport | undefined, initialSnapshot?: string) {
@@ -108,16 +108,16 @@ export function Pdl1Overlay({ view, result, cells }: { view?: Viewport; result?:
   }, [x, y, width, height, zoom, result, cells]);
 
   if (!result || !cells) return null;
-  return <canvas className="pdl1-overlay" ref={canvas} aria-label="PD-L1 세포 오버레이" />;
+  return <canvas className="pdl1-overlay" ref={canvas} aria-label="PD-L1 Cell Overlay" />;
 }
 
 const scoreStatusLabel: Record<ScoreStatus, string> = {
-  archived: '보관 점수 · 입력 정보 미확인',
-  native: '원본 저장 점수',
-  validated_pair: '검증 자료에 연결된 저장 점수',
-  input_unverified: '입력 또는 조합 검증 필요',
-  invalid_saved_score: '저장 점수 확인 불가',
-  edited_score_unverified: '수정본 점수 확인 불가',
+  archived: 'Archived Score · Input Details Unverified',
+  native: 'Original Saved Score',
+  validated_pair: 'Saved Score Linked to Validation Evidence',
+  input_unverified: 'Input or Combination Requires Validation',
+  invalid_saved_score: 'Saved Score Unavailable',
+  edited_score_unverified: 'Edited Score Unverified',
 };
 
 export function Pdl1Badge({ state }: { state: Pdl1State }) {
@@ -128,7 +128,7 @@ export function Pdl1Badge({ state }: { state: Pdl1State }) {
   const pairResults = ids.map((id) => results?.find((item) => item.id === id));
   const shown = ids.includes(result.id) && pairResults.every((item) => item?.score != null)
     ? pairResults as Result[] : [result];
-  return <aside className="pdl1-score" aria-label="PD-L1 점수 카드">
+  return <aside className="pdl1-score" aria-label="PD-L1 Score Card">
     {shown.map((item) => <div key={item.id}>
       <span>PD-L1 · {item.score_type} · {typeLabel[item.kind]}</span>
       <strong>{item.score == null ? '—' : number.format(item.score) + (item.score_type === 'TPS' ? '%' : '')}</strong>
@@ -139,43 +139,43 @@ export function Pdl1Badge({ state }: { state: Pdl1State }) {
 
 export function Pdl1Panel({ state }: { state: Pdl1State }) {
   const { results, result, selected, setSelected, enabled, setEnabled, error, overlayError, retry, cells, comparison, referenceMissing } = state;
-  return <section className="pdl1-panel" aria-label="PD-L1 결과">
+  return <section className="pdl1-panel" aria-label="PD-L1 Results">
     <div className="pdl1-heading"><h2>PD-L1</h2>
-      {result && <label className="pdl1-toggle"><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} /> 세포 오버레이</label>}
+      {result && <label className="pdl1-toggle"><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} /> Cell Overlay</label>}
     </div>
-    {error ? <div role="alert">PD-L1 결과를 불러올 수 없습니다. <button className="button secondary" onClick={retry}>다시 불러오기</button></div>
-      : !results ? <p role="status">PD-L1 결과 확인 중</p>
-      : referenceMissing ? <div role="alert">참조한 PD-L1 결과를 열 수 없습니다.
-        {results[0] && <button className="button secondary" onClick={() => setSelected(results[0].id)}>다른 결과 보기</button>}</div>
-      : !result ? <p>이 스캔에 연결된 PD-L1 결과가 없습니다.</p>
+    {error ? <div role="alert">Unable to load PD-L1 results. <button className="button secondary" onClick={retry}>Reload</button></div>
+      : !results ? <p role="status">Checking PD-L1 results…</p>
+      : referenceMissing ? <div role="alert">Unable to open the referenced PD-L1 result.
+        {results[0] && <button className="button secondary" onClick={() => setSelected(results[0].id)}>View Other Results</button>}</div>
+      : !result ? <p>There are no PD-L1 results linked to this scan.</p>
       : <>
-        <label className="form-field">결과 버전<select value={selected} onChange={(event) => setSelected(event.target.value)}>
+        <label className="form-field">Result Version<select value={selected} onChange={(event) => setSelected(event.target.value)}>
           {results.map((entry) => <option key={entry.id} value={entry.id}>{entry.score_type} · {typeLabel[entry.kind]}{entry.editor ? ` · ${entry.editor}` : ''} · {entry.id.slice(0, 8)}</option>)}
         </select></label>
-        {comparison?.status === 'validation_required' && <p role="status">이 스캔의 CPS·TPS 동시 표시에는 입력 조건과 검증 근거 확인이 필요합니다.</p>}
-        {comparison?.status === 'insufficient_scores' && <p>동시 표시 조건을 충족하는 두 결과가 없습니다.</p>}
-        {comparison?.pair && <p>동시 표시 검증 근거 {comparison.pair.reference} · 세포 표식은 선택한 결과 기준</p>}
+        {comparison?.status === 'validation_required' && <p role="status">Displaying CPS and TPS together requires verified input conditions and validation evidence for this scan.</p>}
+        {comparison?.status === 'insufficient_scores' && <p>No pair of results meets the requirements for combined display.</p>}
+        {comparison?.pair && <p>Combined Display Validation Evidence {comparison.pair.reference} · Cell markers follow the selected result</p>}
         <div className="pdl1-metadata">
-          <dl className="key-values"><div><dt>모델</dt><dd>{result.model ?? '기록 없음'}</dd></div>
-            <div><dt>모델 버전</dt><dd>{result.model_version ?? '기록 없음'}</dd></div>
-            {result.architecture && <div><dt>아키텍처</dt><dd>{result.architecture}</dd></div>}
-            {result.model_mtime_ns && <div><dt>가중치 파일 기록</dt><dd title={result.model_mtime_ns}>{date.format(new Date(Number(result.model_mtime_ns) / 1e6))}{result.model_bytes ? ` · ${number.format(result.model_bytes)} B` : ''}</dd></div>}
-            {result.checkpoint_sha256 && <div><dt>체크포인트 SHA-256</dt><dd title={result.checkpoint_sha256}>{result.checkpoint_sha256.slice(0, 12)}</dd></div>}
-            <div><dt>저장된 분석 버전</dt><dd>{result.analysis_version ?? '기록 없음'}</dd></div>
-            <div><dt>결과 지문</dt><dd title={result.source_digest}>{result.source_digest.slice(0, 12)}</dd></div>
-            {result.original_id && <div><dt>연결된 원본</dt><dd>{result.original_id.slice(0, 12)}</dd></div>}
-            {result.editor && <div><dt>수정자 · 저장 시각</dt><dd>{result.editor} · {result.saved_at ? date.format(new Date(result.saved_at)) : '기록 없음'}</dd></div>}
+          <dl className="key-values"><div><dt>Model</dt><dd>{result.model ?? 'No record'}</dd></div>
+            <div><dt>Model Version</dt><dd>{result.model_version ?? 'No record'}</dd></div>
+            {result.architecture && <div><dt>Architecture</dt><dd>{result.architecture}</dd></div>}
+            {result.model_mtime_ns && <div><dt>Weights File Record</dt><dd title={result.model_mtime_ns}>{date.format(new Date(Number(result.model_mtime_ns) / 1e6))}{result.model_bytes ? ` · ${number.format(result.model_bytes)} B` : ''}</dd></div>}
+            {result.checkpoint_sha256 && <div><dt>Checkpoint SHA-256</dt><dd title={result.checkpoint_sha256}>{result.checkpoint_sha256.slice(0, 12)}</dd></div>}
+            <div><dt>Saved Analysis Version</dt><dd>{result.analysis_version ?? 'No record'}</dd></div>
+            <div><dt>Result Fingerprint</dt><dd title={result.source_digest}>{result.source_digest.slice(0, 12)}</dd></div>
+            {result.original_id && <div><dt>Linked Original</dt><dd>{result.original_id.slice(0, 12)}</dd></div>}
+            {result.editor && <div><dt>Edited By · Saved At</dt><dd>{result.editor} · {result.saved_at ? date.format(new Date(result.saved_at)) : 'No record'}</dd></div>}
           </dl>
         </div>
         <ul className="pdl1-legend">{Object.entries(result.classes).map(([key, item]) => <li key={key}><i style={{ background: item.color }} />
           <span>{item.label}{key in result.counts && ` · ${number.format(result.counts[key])}`}</span>
         </li>)}</ul>
-        {enabled && cells?.truncated && <p role="status">현재 영역의 세포 표식은 일부만 표시됩니다. 확대하면 해당 영역의 표식을 더 볼 수 있습니다.</p>}
-        {enabled && overlayError && <p role="alert">세포 표식을 불러올 수 없습니다. <button className="button secondary" onClick={retry}>다시 불러오기</button></p>}
-        <details className="pdl1-audit"><summary>감사 이력</summary>
-          {result.audit.filter((entry) => entry.source === 'exported').length === 0 && <p>원천 감사 이력 자료 없음</p>}
+        {enabled && cells?.truncated && <p role="status">Only some cell markers are visible in this area. Zoom in to see more.</p>}
+        {enabled && overlayError && <p role="alert">Unable to load cell markers. <button className="button secondary" onClick={retry}>Reload</button></p>}
+        <details className="pdl1-audit"><summary>Audit History</summary>
+          {result.audit.filter((entry) => entry.source === 'exported').length === 0 && <p>No source audit history is available.</p>}
           <ul className="timeline">{result.audit.map((entry, index) => <li key={`${entry.occurred_at}-${index}`}>
-            <strong>{entry.action === 'snapshot_imported' ? 'IMS 읽기 전용 가져오기' : entry.action}</strong>
+            <strong>{entry.action === 'snapshot_imported' ? 'IMS Read-Only Import' : entry.action}</strong>
             <span> · {entry.actor} · {date.format(new Date(entry.occurred_at))}{entry.reference ? ` · ${entry.reference}` : ''}</span>
           </li>)}</ul>
         </details>

@@ -120,7 +120,7 @@ def visible_cells(folder, snapshot_id, role, left, top, right, bottom):
     snapshot = folder / snapshot_id if folder else None
     result = read_summary(snapshot / "summary.json", role) if snapshot else None
     if result is None:
-        raise HTTPException(404, "PD-L1 결과를 찾을 수 없습니다.")
+        raise HTTPException(404, "PD-L1 result not found.")
     width, height = result["dimensions"]
     right, bottom = min(right, width), min(bottom, height)
     if left >= right or top >= bottom:
@@ -143,6 +143,6 @@ async def cells(source: Source, scan_id: UUID, snapshot_id: SnapshotId, user: Cu
                 response: Response, left: Coordinate, top: Coordinate, right: Coordinate, bottom: Coordinate):
     response.headers.update(PRIVATE)
     if left >= right or top >= bottom:
-        raise HTTPException(422, "표시 영역을 확인하세요.")
+        raise HTTPException(422, "Check the display area.")
     folder = await directory_for(source, scan_id, user, session)
     return await asyncio.to_thread(visible_cells, folder, snapshot_id, user.role, left, top, right, bottom)

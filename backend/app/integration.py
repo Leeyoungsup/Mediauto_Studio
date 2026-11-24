@@ -91,7 +91,7 @@ async def configure(organization: Organization, channel: Channel, data: Config, 
     async with write(session, ("admin",)):
         row = await session.get(IntegrationConnection, (organization, channel), with_for_update=True)
         if (row.version if row else 0) != data.version:
-            raise HTTPException(409, "연동 설정이 변경되었습니다. 갱신 후 다시 시도하세요.")
+            raise HTTPException(409, "Integration settings have changed. Refresh and try again.")
         if row is None:
             row = IntegrationConnection(organization=organization, channel=channel, version=0)
             session.add(row)
@@ -105,7 +105,7 @@ async def configure(organization: Organization, channel: Channel, data: Config, 
 async def online_config(session, organization, channel):
     row = await session.get(IntegrationConnection, (organization, channel))
     if row is None or row.mode != "mock":
-        raise HTTPException(409, "연동이 미설정이거나 사용 중지 상태입니다.")
+        raise HTTPException(409, "This integration is disabled or not configured.")
     return SimpleNamespace(**{key: getattr(row, key) for key in ("organization", "channel", "mode", "scenario", "version")})
 
 
@@ -121,9 +121,9 @@ async def request_adapter(session, config, operation, *args):
     async with session.begin():
         current = await set_connection_state(session, config, error)
     if not current:
-        raise HTTPException(409, "연동 설정이 변경되었습니다. 갱신 후 다시 시도하세요.")
+        raise HTTPException(409, "Integration settings have changed. Refresh and try again.")
     if error:
-        raise HTTPException(503, "외부 시스템이 응답하지 않습니다. 로컬 등록은 계속할 수 있습니다.")
+        raise HTTPException(503, "The external system is not responding. You can continue registering records locally.")
     return result
 
 
@@ -139,7 +139,7 @@ async def probe(organization: Organization, channel: Channel, session: Session):
 async def receive(organization: Organization, channel: Channel, data: Envelope, session: Session):
     if (channel == "emr" and (data.resource != "patient" or not isinstance(data.data, PatientPayload))
             or channel == "lis" and (data.resource == "patient" or not isinstance(data.data, LisPayload))):
-        raise HTTPException(422, "채널에서 지원하지 않는 메시지입니다.")
+        raise HTTPException(422, "This message type is unsupported for the channel.")
     payload = data.model_dump(mode="json")
     fingerprint = digest(payload)
     conflict = False
@@ -162,7 +162,7 @@ async def receive(organization: Organization, channel: Channel, data: Envelope, 
             conflict = True
         result = {**message_view(row), "duplicate": record_id is None}
     if conflict:
-        raise HTTPException(409, "같은 메시지 ID에 다른 내용이 도착했습니다.")
+        raise HTTPException(409, "A message with the same ID arrived with different content.")
     return result
 
 
@@ -180,9 +180,9 @@ async def retry(organization: Organization, record_id: UUID, session: Session):
     async with write(session, ("admin",)):
         row = await session.get(IntegrationMessage, record_id, with_for_update=True)
         if row is None or row.organization != organization:
-            raise HTTPException(404, "수신 메시지를 찾을 수 없습니다.")
+            raise HTTPException(404, "Incoming message not found.")
         if row.state not in ("dead_letter", "retry_wait"):
-            raise HTTPException(409, "재처리할 수 없는 상태입니다.")
+            raise HTTPException(409, "This message cannot be reprocessed in its current status.")
         await online_config(session, organization, row.channel)
         row.state, row.attempts, row.error, row.finished_at = "queued", 0, None, None
         row.next_attempt_at = now()
@@ -212,7 +212,7 @@ async def manual_patient(organization: Organization, case_id: UUID, data: Manual
         case = await find(session, Case, organization, case_id, lock=True)
         require_version(case, data.case_version)
         if case.patient_id:
-            raise HTTPException(409, "이미 환자 기록이 연결된 케이스입니다.")
+            raise HTTPException(409, "This case already has a linked patient record.")
         patient = Patient(organization=organization, created_by=str(session.info["user"].id), source="manual",
                           **data.model_dump(exclude={"case_version"}))
         session.add(patient)
@@ -253,19 +253,19 @@ async def confirm_patient(organization: Organization, case_id: UUID, data: Patie
         case = await find(session, Case, organization, case_id, lock=True)
         require_version(case, data.case_version)
         if case.patient_id is None:
-            raise HTTPException(409, "케이스에 수기 환자 기록을 먼저 등록하세요.")
+            raise HTTPException(409, "Register a patient record manually for the case first.")
         key = snapshot_key(organization, "emr", "patient", data.external_id)
         candidate = await session.get(ExternalSnapshot, key, with_for_update=True)
         if candidate is None or candidate.revision != data.source_revision:
-            raise HTTPException(409, "외부 기록이 변경되었습니다. 다시 대조하세요.")
+            raise HTTPException(409, "The external record has changed. Reconcile it again.")
         patient = await find(session, Patient, organization, case.patient_id, lock=True)
         require_version(patient, data.patient_version)
         differences = patient_differences(patient, candidate.payload)
         if differences and not data.confirm_differences:
-            raise HTTPException(409, "일치하지 않는 항목을 검토한 뒤 연결을 확인하세요.")
+            raise HTTPException(409, "Review the differences before confirming the link.")
         existing = await session.scalar(identifier_query(*key).with_for_update())
         if existing is not None and existing.patient_id != patient.id:
-            raise HTTPException(409, "외부 식별자가 이미 다른 기록에 연결되어 있습니다.")
+            raise HTTPException(409, "This external identifier is linked to another record.")
         # An external snapshot can be reviewed while offline; the UI labels its receive time.
         if existing is None:
             existing = ExternalIdentifier(organization=organization, system=SYSTEM["emr"], kind=KIND["patient"],

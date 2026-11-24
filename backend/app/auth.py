@@ -67,7 +67,7 @@ def same_origin(request: Request) -> None:
         return
     origin = request.headers.get("origin")
     if origin and origin != f"{request.url.scheme}://{request.url.netloc}":
-        raise HTTPException(403, "다른 출처에서 보낸 요청입니다.")
+        raise HTTPException(403, "This request came from a different origin.")
 
 
 async def session_for(request: Request):
@@ -79,7 +79,7 @@ Session = Annotated[AsyncSession, Depends(session_for)]
 
 
 def access_error() -> HTTPException:
-    return HTTPException(401, "로그인이 필요합니다.", headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"})
+    return HTTPException(401, "Sign in to continue.", headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"})
 
 
 async def current_user(request: Request, response: Response) -> AuthUser:
@@ -113,12 +113,12 @@ CurrentUser = Annotated[AuthUser, Depends(current_user)]
 
 def require_organization(user: AuthUser, organization: str) -> None:
     if user.organization != organization:
-        raise HTTPException(403, "이 기관에 대한 권한이 없습니다.")
+        raise HTTPException(403, "You do not have access to this organization.")
 
 
 def require_roles(user: AuthUser, roles: tuple[str, ...]) -> None:
     if user.role not in roles:
-        raise HTTPException(403, "이 작업에 대한 권한이 없습니다.")
+        raise HTTPException(403, "You do not have permission to perform this action.")
 
 
 @router.post("/login")
@@ -154,7 +154,7 @@ async def login(data: Login, request: Request, response: Response, session: Sess
                 if user.failed_attempts >= 5:
                     user.locked_until = now + timedelta(minutes=30)
     if identity is None:
-        raise HTTPException(401, "계정 또는 비밀번호를 확인하세요.", headers={"Cache-Control": "no-store"})
+        raise HTTPException(401, "Check your username and password.", headers={"Cache-Control": "no-store"})
     response.set_cookie(COOKIE, token, max_age=SESSION_SECONDS, httponly=True, samesite="strict",
                         secure=os.environ.get("MEDIAUTO_COOKIE_SECURE") == "1")
     return identity
