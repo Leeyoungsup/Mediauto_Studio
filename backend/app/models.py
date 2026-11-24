@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, String, UniqueConstraint, Uuid, func
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, ForeignKeyConstraint, Index, Integer, String, UniqueConstraint, Uuid, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -187,3 +187,173 @@ class RegistrationRequest(Base):
     request_key: Mapped[str] = mapped_column(String(128), primary_key=True)
     request_hash: Mapped[str] = mapped_column(String(64))
     record_id: Mapped[UUID] = mapped_column(Uuid)
+
+
+class IntegrationConnection(Base):
+    __tablename__ = "integration_connections"
+
+    organization: Mapped[str] = mapped_column(String(64), primary_key=True)
+    channel: Mapped[str] = mapped_column(String(8), primary_key=True)
+    mode: Mapped[str] = mapped_column(String(16))
+    scenario: Mapped[str] = mapped_column(String(16))
+    state: Mapped[str] = mapped_column(String(24))
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class IntegrationMessage(Base):
+    __tablename__ = "integration_messages"
+    __table_args__ = (
+        UniqueConstraint("organization", "channel", "message_id"),
+        Index("ix_integration_due", "state", "next_attempt_at"),
+        Index("ix_integration_inbox", "organization", "received_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    organization: Mapped[str] = mapped_column(String(64))
+    channel: Mapped[str] = mapped_column(String(8))
+    message_id: Mapped[str] = mapped_column(String(128))
+    payload: Mapped[dict] = mapped_column(JSONB)
+    digest: Mapped[str] = mapped_column(String(64))
+    state: Mapped[str] = mapped_column(String(24))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    delivery_conflicts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error: Mapped[str | None] = mapped_column(String(48))
+
+
+class ExternalSnapshot(Base):
+    __tablename__ = "integration_snapshots"
+
+    organization: Mapped[str] = mapped_column(String(64), primary_key=True)
+    channel: Mapped[str] = mapped_column(String(8), primary_key=True)
+    resource: Mapped[str] = mapped_column(String(12), primary_key=True)
+    external_id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    revision: Mapped[int] = mapped_column(BigInteger)
+    payload: Mapped[dict] = mapped_column(JSONB)
+    digest: Mapped[str] = mapped_column(String(64))
+    first_received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ViewerPosition(Base):
+    __tablename__ = "viewer_positions"
+    __table_args__ = (
+        ForeignKeyConstraint(("organization", "user_id"), ("auth_users.organization", "auth_users.id"), ondelete="CASCADE"),
+    )
+
+    organization: Mapped[str] = mapped_column(String(64), primary_key=True)
+    scan_key: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    x: Mapped[float] = mapped_column(Float)
+    y: Mapped[float] = mapped_column(Float)
+    zoom: Mapped[float] = mapped_column(Float)
+    version: Mapped[int] = mapped_column(Integer)
+    saved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ViewerAnnotation(Base):
+    __tablename__ = "viewer_annotations"
+    __table_args__ = (
+        ForeignKeyConstraint(("organization", "author_id"), ("auth_users.organization", "auth_users.id")),
+        CheckConstraint("kind IN ('rectangle', 'distance')", name="viewer_annotation_kind"),
+        Index("ix_viewer_annotations_scan", "organization", "scan_key", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    organization: Mapped[str] = mapped_column(String(64))
+    scan_key: Mapped[UUID] = mapped_column(Uuid)
+    author_id: Mapped[UUID] = mapped_column(Uuid)
+    kind: Mapped[str] = mapped_column(String(16))
+    points: Mapped[list] = mapped_column(JSONB)
+    label: Mapped[str] = mapped_column(String(160))
+    version: Mapped[int] = mapped_column(Integer)
+    length: Mapped[float | None] = mapped_column(Float)
+    unit: Mapped[str | None] = mapped_column(String(4))
+    mpp_x: Mapped[float | None] = mapped_column(Float)
+    mpp_y: Mapped[float | None] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WorklistView(Base):
+    __tablename__ = "worklist_views"
+    __table_args__ = (
+        ForeignKeyConstraint(("organization", "owner_id"), ("auth_users.organization", "auth_users.id")),
+        CheckConstraint("visibility IN ('private', 'shared')", name="worklist_view_visibility"),
+        Index("ix_worklist_views_org_visibility", "organization", "visibility"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    organization: Mapped[str] = mapped_column(String(64))
+    owner_id: Mapped[UUID] = mapped_column(Uuid)
+    name: Mapped[str] = mapped_column(String(80))
+    visibility: Mapped[str] = mapped_column(String(12))
+    configuration: Mapped[dict] = mapped_column(JSONB)
+    version: Mapped[int] = mapped_column(Integer)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WorklistPreference(Base):
+    __tablename__ = "worklist_preferences"
+    __table_args__ = (
+        ForeignKeyConstraint(("organization", "user_id"), ("auth_users.organization", "auth_users.id"), ondelete="CASCADE"),
+    )
+
+    organization: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    default_view_id: Mapped[UUID | None] = mapped_column(Uuid, ForeignKey("worklist_views.id", ondelete="SET NULL"))
+    columns: Mapped[list | None] = mapped_column(JSONB)
+    version: Mapped[int] = mapped_column(Integer)
+
+
+class CaseRequest(ClinicalRecord, Base):
+    __tablename__ = "case_requests"
+    __table_args__ = (
+        UniqueConstraint("organization", "id"),
+        UniqueConstraint("organization", "requested_by", "request_key"),
+        ForeignKeyConstraint(("organization", "case_id"), ("cases.organization", "cases.id")),
+        ForeignKeyConstraint(("scan_id",), ("slide_scans.id",)),
+        ForeignKeyConstraint(("organization", "requested_by"), ("auth_users.organization", "auth_users.id")),
+        ForeignKeyConstraint(("organization", "assigned_to"), ("auth_users.organization", "auth_users.id")),
+        CheckConstraint("kind IN ('ai', 'consult')", name="case_request_kind"),
+        CheckConstraint("status IN ('open','assigned','in_progress','completed','failed','cancelled')",
+                        name="case_request_status"),
+        CheckConstraint("kind <> 'ai' OR scan_id IS NOT NULL", name="case_request_ai_scan"),
+        Index("ix_case_requests_case", "organization", "case_id", "created_at"),
+    )
+
+    case_id: Mapped[UUID] = mapped_column(Uuid)
+    scan_id: Mapped[UUID | None] = mapped_column(Uuid)
+    requested_by: Mapped[UUID] = mapped_column(Uuid)
+    assigned_to: Mapped[UUID | None] = mapped_column(Uuid)
+    request_key: Mapped[str] = mapped_column(String(128))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    kind: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(16))
+    question: Mapped[str] = mapped_column(String(2000))
+    result_note: Mapped[str | None] = mapped_column(String(2000))
+    snapshot: Mapped[dict | None] = mapped_column(JSONB)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RequestNotification(Base):
+    __tablename__ = "request_notifications"
+    __table_args__ = (
+        UniqueConstraint("request_id", "event_version", "recipient_id"),
+        ForeignKeyConstraint(("organization", "request_id"), ("case_requests.organization", "case_requests.id")),
+        ForeignKeyConstraint(("organization", "recipient_id"), ("auth_users.organization", "auth_users.id")),
+        Index("ix_request_notifications_recipient", "organization", "recipient_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    organization: Mapped[str] = mapped_column(String(64))
+    request_id: Mapped[UUID] = mapped_column(Uuid)
+    recipient_id: Mapped[UUID] = mapped_column(Uuid)
+    event_version: Mapped[int] = mapped_column(Integer)
+    action: Mapped[str] = mapped_column(String(40))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

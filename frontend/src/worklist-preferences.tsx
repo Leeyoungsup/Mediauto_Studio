@@ -1,0 +1,191 @@
+import { useEffect, useRef, useState } from 'react';
+import { ArrowDownWideNarrow } from 'lucide-react';
+import { api, jsonBody } from './session';
+import { initialPreferences, sortFields } from './worklist-config';
+import type { ColumnSetting, Preferences, SavedView, Scope, SortField, SortTerm, ViewConfig } from './worklist-config';
+
+const path = '/api/worklist';
+type Catalog = { views: SavedView[]; preferences: Preferences };
+
+async function loadCatalog(signal?: AbortSignal): Promise<Catalog> {
+  const [views, preferences] = await Promise.all([
+    api<SavedView[]>(path + '/views', { signal }), api<Preferences>(path + '/preferences', { signal }),
+  ]);
+  return { views, preferences };
+}
+
+export function useSavedViews(scope: Scope, apply: (configuration: ViewConfig | undefined, columns: ColumnSetting[] | null, restoreScope?: boolean, startup?: boolean) => boolean | undefined) {
+  const [catalog, setCatalog] = useState<Catalog>({ views: [], preferences: initialPreferences });
+  const [selected, setSelected] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const startupScope = useRef(location.hash ? scope : undefined);
+  const { views, preferences } = catalog;
+  const active = views.find((view) => view.id === selected);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    loadCatalog(controller.signal).then((result) => {
+      if (controller.signal.aborted) return;
+      setCatalog(result);
+      const initial = result.views.find(({ id, configuration }) =>
+        id === result.preferences.default_view_id && (!startupScope.current || configuration.scope === startupScope.current));
+      const applied = apply(initial?.configuration, result.preferences.columns, Boolean(initial), true);
+      if (initial && applied) setSelected(initial.id);
+      setReady(true);
+    }).catch(() => {
+      if (!controller.signal.aborted) setError('저장한 Worklist 설정을 불러오지 못했습니다.');
+    });
+    return () => controller.abort();
+  }, [apply]);
+
+  function choose(id: string) {
+    const view = views.find((entry) => entry.id === id);
+    setSelected(view?.id ?? '');
+    apply(view?.configuration, preferences.columns);
+    setNotice('');
+    setError('');
+  }
+
+  async function perform(task: () => Promise<void>) {
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try { await task(); }
+    catch (failure) { setError(failure instanceof Error ? failure.message : '저장 설정을 처리하지 못했습니다.'); }
+    finally { setBusy(false); }
+  }
+
+  async function refresh() {
+    const fresh = await loadCatalog();
+    setCatalog(fresh);
+    setReady(true);
+    if (selected && !fresh.views.some(({ id }) => id === selected)) setSelected('');
+  }
+
+  function save(name: string, configuration: ViewConfig, visibility: SavedView['visibility'], overwrite: boolean) {
+    if (overwrite && !active?.can_edit) return;
+    void perform(async () => {
+      const payload = { name, configuration };
+      const view = await (overwrite && active
+        ? api<SavedView>(`${path}/views/${active.id}`, jsonBody('PUT', { ...payload, version: active.version }))
+        : api<SavedView>(path + '/views', jsonBody('POST', { ...payload, visibility })));
+      setCatalog((current) => ({ ...current, views: [...current.views.filter(({ id }) => id !== view.id), view] }));
+      setSelected(view.id);
+      setNotice('View를 저장했습니다.');
+    });
+  }
+
+  function changePreference(defaultView: string | null, columns: ColumnSetting[] | null) {
+    void perform(async () => {
+      const value = await api<Preferences>(path + '/preferences', jsonBody('PUT', {
+        default_view_id: defaultView, columns, version: preferences.version,
+      }));
+      setCatalog((current) => ({ ...current, preferences: value }));
+      setNotice('내 Worklist 기본 설정을 저장했습니다.');
+    });
+  }
+
+  function remove() {
+    if (!active?.can_edit) return;
+    void perform(async () => {
+      await api(`${path}/views/${active.id}?version=${active.version}`, { method: 'DELETE' });
+      await refresh();
+      setNotice('View를 삭제했습니다.');
+    });
+  }
+
+  return { views, preferences, active, choose, save, remove, error, notice, busy, ready,
+    refresh: () => void perform(refresh),
+    setDefault: () => changePreference(active?.id ?? null, preferences.columns),
+    saveColumns: (value: ColumnSetting[]) => changePreference(preferences.default_view_id, value),
+  };
+}
+
+type Controller = ReturnType<typeof useSavedViews>;
+
+export function SavedViewControls({ controller, configuration, mayShare }: {
+  controller: Controller; configuration: ViewConfig; mayShare: boolean;
+}) {
+  const { views, preferences, active, busy, ready } = controller;
+  const [editing, setEditing] = useState<'new' | 'current'>();
+  const [name, setName] = useState('');
+  const [visibility, setVisibility] = useState<SavedView['visibility']>('private');
+  const [saveColumns, setSaveColumns] = useState(true);
+
+  function open(next: 'new' | 'current') {
+    setName(next === 'current' ? active?.name ?? '' : '');
+    setSaveColumns(next === 'new' || active?.configuration.columns != null);
+    setVisibility('private');
+    setEditing(next);
+  }
+
+  return <section className="panel saved-views" aria-label="저장 View 관리">
+    <div className="actions">
+      <label className="saved-view-select">저장 View<select aria-label="저장 View" value={active?.id ?? ''} disabled={!ready || busy}
+        onChange={(event) => { setEditing(undefined); controller.choose(event.target.value); }}>
+        <option value="">기본 Worklist</option>
+        {views.map((view) => <option value={view.id} key={view.id}>
+          {view.name} · {view.visibility === 'shared' ? '기관 공유' : '개인'}{view.id === preferences.default_view_id ? ' · 시작' : ''}
+        </option>)}
+      </select></label>
+      <button className="button secondary" disabled={!ready || busy} onClick={() => open('new')}>새 View 저장</button>
+      {active?.can_edit && <button className="button secondary" disabled={busy} onClick={() => open('current')}>선택 View 편집</button>}
+      <button className="button secondary" disabled={!ready || busy || (active?.id ?? null) === preferences.default_view_id}
+        onClick={controller.setDefault}>시작 View로 지정</button>
+      <button className="button secondary" disabled={busy} onClick={controller.refresh}>View 목록 갱신</button>
+    </div>
+    {controller.error && <p className="form-error" role="alert">{controller.error}</p>}
+    {controller.notice && <p role="status">{controller.notice}</p>}
+    {editing && <form className="saved-view-form" onSubmit={(event) => {
+      event.preventDefault();
+      if (!name.trim()) return;
+      controller.save(name, { ...configuration, columns: saveColumns ? configuration.columns : null }, visibility, editing === 'current');
+    }}>
+      <label className="form-field">View 이름<input required value={name} maxLength={80} onChange={(event) => setName(event.target.value)} /></label>
+      {editing === 'new' && <label className="form-field">저장 범위<select value={visibility}
+        onChange={(event) => setVisibility(event.target.value === 'shared' ? 'shared' : 'private')}>
+        <option value="private">개인</option>
+        {mayShare && <option value="shared">기관 공유</option>}
+      </select></label>}
+      <label><input type="checkbox" checked={saveColumns} onChange={(event) => setSaveColumns(event.target.checked)} /> 현재 열 구성 포함</label>
+      <div className="actions">
+        <button className="button primary" disabled={busy}>View 저장</button>
+        <button className="button secondary" type="button" disabled={busy} onClick={() => setEditing(undefined)}>닫기</button>
+        {editing === 'current' && active?.can_edit && <button className="button secondary" type="button" disabled={busy}
+          onClick={() => { if (window.confirm('이 저장 View를 삭제하시겠습니까?')) { controller.remove(); setEditing(undefined); } }}>View 삭제</button>}
+      </div>
+    </form>}
+  </section>;
+}
+
+export function SortControls({ order, onChange }: { order: SortTerm[]; onChange: (value: SortTerm[]) => void }) {
+  const keys = Object.keys(sortFields) as SortField[];
+  function update(index: number, changes: Partial<SortTerm>) {
+    onChange(order.map((term, row) => row === index ? { ...term, ...changes } : term));
+  }
+  return <details className="column-menu sort-menu">
+    <summary className="button secondary"><ArrowDownWideNarrow size={15} /> 다단계 정렬</summary>
+    <div className="column-options">
+      {order.map(({ field, direction }, index) => <div className="sort-row" key={index}>
+        <select aria-label={`${index + 1}순위 정렬 기준`} value={field} onChange={(event) => update(index, { field: event.target.value as SortField })}>
+          {keys.filter((key) => key === field || !order.some((term) => term.field === key))
+            .map((key) => <option key={key} value={key}>{sortFields[key]}</option>)}
+        </select>
+        <select aria-label={`${index + 1}순위 정렬 방향`} value={direction}
+          onChange={(event) => update(index, { direction: event.target.value === 'desc' ? 'desc' : 'asc' })}>
+          <option value="asc">오름차순</option><option value="desc">내림차순</option>
+        </select>
+        <button className="icon-button" aria-label={`${index + 1}순위 제거`} disabled={order.length === 1}
+          onClick={() => onChange(order.filter((_, row) => index !== row))}>×</button>
+      </div>)}
+      <button className="button secondary" disabled={order.length >= 3} onClick={() => {
+        const next = keys.find((key) => !order.some((term) => term.field === key));
+        if (next) onChange([...order, { field: next, direction: 'asc' }]);
+      }}>정렬 기준 추가</button>
+    </div>
+  </details>;
+}

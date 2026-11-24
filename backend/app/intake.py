@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, StringConstraints, ValidationError
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
-from app.models import ApplicationSetting
+from app.models import ApplicationSetting, IntegrationConnection
 from app.auth import CurrentUser, WRITERS, require_organization, require_roles
 
 def require_intake(user: CurrentUser):
@@ -81,6 +81,10 @@ class SourceFile:
     modified: str
 
 
+def source_id(relative: str, size: int, modified_ns: int) -> str:
+    return str(uuid5(NAMESPACE_URL, f"mediauto-intake:{relative}\0{size}\0{modified_ns}"))
+
+
 def scan_files(root: Path) -> list[SourceFile]:
     sources = []
     for path in sorted(root.rglob("*")):
@@ -91,9 +95,8 @@ def scan_files(root: Path) -> list[SourceFile]:
         except FileNotFoundError:
             continue
         relative = path.relative_to(root).as_posix()
-        name = f"{relative}\0{stat.st_size}\0{stat.st_mtime_ns}"
         sources.append(SourceFile(
-            id=str(uuid5(NAMESPACE_URL, f"mediauto-intake:{name}")),
+            id=source_id(relative, stat.st_size, stat.st_mtime_ns),
             filename=relative,
             format=path.suffix[1:].upper(),
             size=stat.st_size,
@@ -149,11 +152,10 @@ async def saved_rules(connection) -> RuleUpdate:
     return RuleUpdate.model_validate(stored or {"rules": [], "version": 0})
 
 
-async def slide_entries(connection, sources: list[SourceFile]) -> dict[str, dict]:
+async def slide_entries(connection, sources: list[SourceFile], *, lock: bool = False) -> dict[str, dict]:
     keys = [INTAKE_PREFIX + source.id for source in sources]
-    rows = await connection.execute(
-        select(ApplicationSetting.key, ApplicationSetting.value).where(ApplicationSetting.key.in_(keys))
-    )
+    query = select(ApplicationSetting.key, ApplicationSetting.value).where(ApplicationSetting.key.in_(keys))
+    rows = await connection.execute(query.order_by(ApplicationSetting.key).with_for_update() if lock else query)
     return {key.removeprefix(INTAKE_PREFIX): value for key, value in rows}
 
 
@@ -226,7 +228,10 @@ async def apply_rules(data: RuleApplication, request: Request):
     sources = await asyncio.to_thread(scan_files, DATA_ROOT)
     async with request.app.state.engine.begin() as connection:
         emr = await connection.scalar(select(ApplicationSetting.value).where(ApplicationSetting.key == "emr"))
-        if (emr or {}).get("state") == "connected":
+        mode = await connection.scalar(select(IntegrationConnection.state).where(
+            IntegrationConnection.organization == "local", IntegrationConnection.channel == "emr",
+        ))
+        if mode == "connected" or (mode is None and (emr or {}).get("state") == "connected"):
             raise HTTPException(409, "파일명 규칙은 EMR 미연결 상태에서 적용할 수 있습니다.")
         current = await saved_rules(connection)
         if current.version != data.version:

@@ -100,8 +100,8 @@ Session = Annotated[AsyncSession, Depends(scoped_session)]
 
 
 @asynccontextmanager
-async def write(session: AsyncSession):
-    require_roles(session.info["user"], WRITERS)
+async def write(session: AsyncSession, roles=WRITERS):
+    require_roles(session.info["user"], roles)
     try:
         async with session.begin():
             yield
@@ -142,17 +142,18 @@ def case_visibility(model, user):
     return Slide.id.in_(slides) if model is Slide else SlideScan.slide_id.in_(slides)
 
 
-def add_event(session: AsyncSession, record, action: str, before: dict, after: dict, reason: str | None = None) -> None:
+def add_event(session: AsyncSession, record, action: str, before: dict, after: dict, reason: str | None = None,
+              *, source: str = SOURCE, transaction_id: UUID | None = None) -> None:
     session.add(ClinicalEvent(
         organization=record.organization, record_type=record.__tablename__, record_id=record.id,
-        version=record.version, action=action, actor=str(session.info["user"].id), source=SOURCE, before=before, after=after,
-        reason=reason, transaction_id=uuid4(),
+        version=record.version, action=action, actor=str(session.info["user"].id), source=source, before=before, after=after,
+        reason=reason, transaction_id=transaction_id or uuid4(),
     ))
 
 
 def relationship_state(record) -> dict:
     state = {}
-    for field in ("status", "patient_id", "case_id", "specimen_id", "slide_id"):
+    for field in ("status", "assigned_to", "patient_id", "case_id", "specimen_id", "slide_id"):
         if hasattr(record, field):
             value = getattr(record, field)
             state[field] = str(value) if isinstance(value, UUID) else value

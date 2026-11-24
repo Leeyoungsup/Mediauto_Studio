@@ -1,4 +1,6 @@
+import argparse
 import asyncio
+import json
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -15,6 +17,7 @@ from app.auth import hash_password
 from app.models import AuthUser
 from app.database import database_url
 from app.main import app
+from app.import_pdl1 import import_snapshot
 
 
 PASSWORD = "synthetic-test-password"
@@ -48,6 +51,9 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         override = patch("app.clinical.DATA_ROOT", self.root)
         override.start()
         self.addCleanup(override.stop)
+        root_override = patch("app.wsi.DATA_ROOT", self.root)
+        root_override.start()
+        self.addCleanup(root_override.stop)
         context = app.router.lifespan_context(app)
         await context.__aenter__()
         self.addAsyncCleanup(context.__aexit__, None, None, None)
@@ -208,3 +214,524 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.post("/api/auth/logout")).status_code, 200)
         self.assertEqual((await self.client.get("/api/worklist")).status_code, 401)
         self.assertEqual((await self.client.get("/api/worklist", headers={"Authorization": f"Bearer {cookie}"})).status_code, 401)
+
+    async def test_wsi_scan_scope_and_source_errors(self):
+        case = await self.create("cases", {"case_number": "WSI-TEST"})
+        specimen = await self.create("specimens", {"case_id": case["id"], "specimen_number": "A"})
+        slide = await self.create("slides", {"specimen_id": specimen["id"], "slide_number": "S-01"})
+        source = self.root / "corrupt.svs"
+        source.write_bytes(b"not a slide")
+        scan = await self.create("scans", {"slide_id": slide["id"], "storage_key": source.name})
+        worklist = (await self.client.get(f"/api/worklist/{case['id']}")).json()
+        self.assertEqual(worklist["slides"][0]["wsi"], {"id": scan["id"], "source": "clinical", "format": "SVS"})
+        path = f"/api/wsi/clinical/{scan['id']}"
+        # Use separately authenticated clients for sensitive endpoints and the parent case.
+        viewer = await create_account(self.org, "wsi-viewer", "viewer")
+        await login(self.client, self.org, viewer.username)
+        for suffix in ("", "/overview.jpeg", "/2/0/0.jpeg"):
+            self.assertEqual((await self.client.get(path + suffix)).status_code, 404)
+        async with app.state.engine.begin() as connection:
+            await connection.execute(text("UPDATE cases SET assigned_to = :user WHERE id = CAST(:case AS uuid)"),
+                                     {"user": viewer.id, "case": case["id"]})
+        self.assertEqual((await self.client.get(path)).status_code, 422)
+        self.assertEqual((await self.client.get(path + "/7/0/0.jpeg")).status_code, 400)
+        source.write_bytes(b"the registered file changed")
+        self.assertEqual((await self.client.get(path + "/overview.jpeg")).status_code, 409)
+        source.unlink()
+        self.assertEqual((await self.client.get(path)).status_code, 404)
+        self.assertEqual((await self.client.post("/api/auth/logout")).status_code, 200)
+        self.assertEqual((await self.client.get(path + "/2/0/0.jpeg")).status_code, 401)
+
+    async def test_case_assign_reassign_and_review_audit(self):
+        doctors = [await create_account(self.org, f"reviewer-{i}", "doctor") for i in range(2)]
+        staff = await create_account(self.org, "intake-staff", "labeler")
+        off_site = await create_account(self.org + "-other", "foreign-doctor", "doctor")
+        case = await self.create("cases", {"case_number": "WORKFLOW-TEST"})
+        specimen = await self.create("specimens", {"case_id": case["id"], "specimen_number": "A"})
+        slide = await self.create("slides", {"specimen_id": specimen["id"], "slide_number": "WF-1"})
+        assignment = f"{self.url}/cases/{case['id']}/assignment"
+        review = f"{self.url}/cases/{case['id']}/review"
+
+        async def change(url, version, expected=200, **fields):
+            response = await self.client.patch(url, json={"version": version, "reason": "Synthetic reason", **fields})
+            self.assertEqual(response.status_code, expected, response.text)
+            return response.json()
+
+        await change(assignment, 1, 422, assignee_id=str(off_site.id))
+        await change(assignment, 1, 422, assignee_id=str(staff.id))
+        await login(self.client, self.org, staff.username)
+        await change(assignment, 1, 403, assignee_id=str(doctors[0].id))
+        await login(self.client, self.org, self.user.username)
+        candidates = (await self.client.get(f"/api/worklist/{case['id']}")).json()["candidates"]
+        self.assertEqual({candidate["id"] for candidate in candidates}, {str(doctor.id) for doctor in doctors})
+        one, two = await asyncio.gather(*[
+            self.client.patch(assignment, json={"version": 1, "assignee_id": str(doctors[0].id), "reason": "Initial assignment"})
+            for _ in range(2)
+        ])
+        self.assertEqual(sorted([one.status_code, two.status_code]), [200, 409])
+        await change(review, 2, 403, status="in_review")
+        await login(self.client, self.org, doctors[0].username)
+        await change(review, 2, 409, status="in_review")
+        await login(self.client, self.org, self.user.username)
+        (self.root / "workflow.ndpi").write_bytes(b"synthetic scan path")
+        await self.create("scans", {"slide_id": slide["id"], "storage_key": "workflow.ndpi"})
+        await login(self.client, self.org, doctors[0].username)
+        await change(review, 2, 409, status="reviewed")
+        self.assertEqual((await change(review, 2, status="in_review"))["status"], "in_review")
+        await login(self.client, self.org, self.user.username)
+        reassigned = await change(assignment, 3, assignee_id=str(doctors[1].id))
+        self.assertEqual(reassigned["status"], "assigned")
+        await login(self.client, self.org, doctors[0].username)
+        await change(review, 4, 404, status="in_review")
+        self.assertEqual((await self.client.get("/api/worklist?scope=mine")).json()["rows"], [])
+        await login(self.client, self.org, doctors[1].username)
+        self.assertEqual((await self.client.get("/api/worklist?scope=mine")).json()["rows"][0]["record_id"], case["id"])
+        await change(review, 4, status="in_review")
+        await change(review, 5, status="reviewed", note="  Synthetic review note  ")
+        await change(review, 6, 409, status="in_review")
+        await login(self.client, self.org, self.user.username)
+        await change(assignment, 6, 409, assignee_id=str(doctors[0].id))
+        details = (await self.client.get(f"/api/worklist/{case['id']}")).json()
+        self.assertEqual((details["status"], details["version"]), ("reviewed", 6))
+        events = (await self.client.get(f"{self.url}/cases/{case['id']}/history")).json()
+        self.assertEqual([event["action"] for event in events],
+                         ["review_completed", "review_started", "reassigned", "review_started", "assigned", "registered"])
+        self.assertEqual([event["id"] for event in details["audit"]], [event["id"] for event in events])
+        self.assertEqual(events[0]["actor"], str(doctors[1].id))
+        self.assertEqual(events[0]["after"]["review_note"], "Synthetic review note")
+        self.assertEqual(details["audit"][0]["after"]["review_note"], "Synthetic review note")
+        self.assertEqual(events[2]["before"]["assigned_to"], str(doctors[0].id))
+        self.assertEqual(events[2]["after"]["assigned_to"], str(doctors[1].id))
+        self.assertEqual(events[2]["source"], "ims")
+        self.assertEqual(events[2]["reason"], "Synthetic reason")
+        self.assertTrue(events[2]["occurred_at"])
+        self.assertTrue(events[2]["transaction_id"])
+
+    async def test_file_intake_confirmation_links_scans_atomically(self):
+        organization = "local"
+        writer = await create_account(organization, "intake-" + uuid4().hex, "labeler")
+        await login(self.client, organization, writer.username)
+        case_number = "CASE-" + uuid4().hex
+        payload = []
+        with patch("app.intake.DATA_ROOT", self.root):
+            for ext in ("ndpi", "svs"):
+                (self.root / f"{case_number}.{ext}").write_bytes(b"synthetic scan path")
+            for file in (await self.client.get("/api/intake/slides")).json():
+                result = await self.client.put(f"/api/intake/slides/{file['id']}", json={
+                    "version": 0, "fields": {"case_id": case_number, "slide_id": "A-1", "stain": "HE"},
+                })
+                self.assertEqual(result.status_code, 200)
+                payload.append({"id": file["id"], "version": 1})
+            url = f"/api/clinical/local/files/{case_number}/case"
+            self.assertEqual((await self.client.post(url, json={"files": [{**payload[0], "version": 2}, payload[1]]})).status_code, 409)
+            result = await self.client.post(url, json={"files": payload})
+            self.assertEqual(result.status_code, 201, result.text)
+            case_id = result.json()["id"]
+            self.assertEqual((await self.client.post(url, json={"files": payload})).status_code, 409)
+            details = (await self.client.get(f"/api/worklist/{case_id}")).json()
+            self.assertEqual({item["wsi"]["format"] for item in details["slides"]}, {"SVS", "NDPI"})
+            self.assertEqual(details["audit"][0]["source"], "file_intake")
+            scans = (await self.client.get("/api/clinical/local/scans")).json()
+            for scan in scans:
+                audit = (await self.client.get(f"/api/clinical/local/scans/{scan['id']}/history")).json()
+                self.assertEqual(audit[0]["transaction_id"], details["audit"][0]["transaction_id"])
+            self.assertEqual(len((await self.client.get("/api/intake/slides")).json()), 2)
+
+    async def test_pdl1_snapshots_are_scan_and_role_scoped(self):
+        case = await self.create("cases", {"case_number": "PDL1-TEST"})
+        specimen = await self.create("specimens", {"case_id": case["id"], "specimen_number": "A"})
+        slide = await self.create("slides", {"specimen_id": specimen["id"], "slide_number": "SYNTH-PD"})
+        source = self.root / "synthetic-pd.ndpi"
+        source.write_bytes(b"synthetic scan")
+        scan = await self.create("scans", {"slide_id": slide["id"], "storage_key": source.name})
+        signature = {"filename": source.name, "size": source.stat().st_size, "quickhash": "synthetic", "dimensions": [100, 80]}
+        raw = {"source": signature, "tissue_type": "Stomach", "pd_score": {"score_type": "CPS", "score": 25, "class_counts": {"0": 3, "2": 1, "3": 0}},
+               "class_names": {"0": "Synthetic negative"}, "class_colors": {"0": "#112233"},
+               "cells": [[20, 25, 0, 0.9], {"x": 60, "y": 60, "class_id": 0, "hidden": True}],
+               "model_runtime": {"filename": "PDL1_ST_CPS_detection.pt", "version": "1"},
+               "global_dedup_version": "synthetic-analysis"}
+        file = self.root / "result.json"
+        file.write_text(json.dumps(raw))
+        export = self.root / "audit.json"
+        export.write_text(json.dumps([{"action": "Cell corrected", "actor": "synthetic-editor",
+                                       "occurred_at": "2026-01-01T00:00:00+00:00"}]))
+        options = argparse.Namespace(
+            organization=self.org, slide=source.name, result=file, original=None,
+            editor=None, saved_at=None, audit=None, importer="fixture",
+        )
+        url = f"/api/wsi/clinical/{scan['id']}/pdl1"
+        args = "?left=0&top=0&right=40&bottom=40"
+        with patch.dict(os.environ, {"MEDIAUTO_PDL1_ROOT": str(self.root / "catalog")}), \
+             patch("app.import_pdl1.DATA_ROOT", self.root), patch("app.import_pdl1.slide_signature", return_value=signature), \
+             patch("app.pdl1.slide_signature", return_value=signature):
+            original = import_snapshot(options)["id"]
+            self.assertEqual(import_snapshot(options)["id"], original)
+            raw["cells"] = [[30, 32, 0, 0.9]]
+            file.write_text(json.dumps(raw))
+            options.original, options.editor, options.audit = original, "synthetic-editor", export
+            edited = import_snapshot(options)["id"]
+            response = await self.client.get(url)
+            self.assertEqual(response.status_code, 200, response.text)
+            entries = response.json()["results"]
+            self.assertEqual([record["id"] for record in entries], [original, edited])
+            self.assertEqual(entries[0]["score"], 25)
+            self.assertIsNone(entries[1]["score"])
+            self.assertEqual(entries[1]["audit"][0]["action"], "Cell corrected")
+            self.assertEqual(entries[1]["original_id"], original)
+            request_create = f"{self.url}/cases/{case['id']}/requests"
+            request = await self.client.post(request_create, json={"kind": "ai", "question": "Synthetic check",
+                "scan_id": scan["id"], "assignee_id": str(self.user.id)}, headers={"Idempotency-Key": "synthetic-pd-link"})
+            self.assertEqual(request.status_code, 201, request.text)
+            request_path = f"{self.url}/requests/{request.json()['id']}"
+            self.assertEqual((await self.client.patch(request_path, json={"version": 1, "action": "start"})).status_code, 200)
+            self.assertEqual([item["id"] for item in (await self.client.get(request_path + "/results")).json()], [original, edited])
+            payload = {"version": 2, "action": "complete", "snapshot_id": "0" * 64}
+            self.assertEqual((await self.client.patch(request_path, json=payload)).status_code, 422)
+            response = await self.client.patch(request_path, json={**payload, "snapshot_id": original})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["snapshot"]["id"], original)
+            self.assertNotIn("score", response.json()["snapshot"])
+            self.assertEqual((await self.client.get(f"{url}/{original}/cells{args}")).json()["points"], [[20, 25, 0]])
+            self.assertEqual((await self.client.get(f"{url}/{edited}/cells{args}")).json()["points"], [[30, 32, 0]])
+            self.assertEqual((await self.client.get(f"{url}/{edited}/cells?left=85&top=85&right=90&bottom=90")).json()["points"], [])
+            raw["cells"] = [[100, 0, 0, 0.9]]
+            file.write_text(json.dumps(raw))
+            with self.assertRaisesRegex(ValueError, "outside"):
+                import_snapshot(options)
+            raw["source"] = {**signature, "quickhash": "wrong"}
+            file.write_text(json.dumps(raw))
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                import_snapshot(options)
+            labeler = await create_account(self.org, "pdl1-labeler", "labeler")
+            await login(self.client, self.org, labeler.username)
+            self.assertEqual([entry["id"] for entry in (await self.client.get(url)).json()["results"]], [original])
+            self.assertEqual((await self.client.get(f"{url}/{edited}/cells{args}")).status_code, 404)
+            doctor = await create_account(self.org, "pdl1-doctor", "doctor")
+            await login(self.client, self.org, doctor.username)
+            self.assertEqual((await self.client.get(url)).status_code, 404)
+            self.assertEqual((await self.client.post("/api/auth/logout")).status_code, 200)
+            self.assertEqual((await self.client.get(url)).status_code, 401)
+
+    async def wait_inbox(self, integration, message_id, state, attempts=None):
+        for _ in range(100):
+            response = await self.client.get(integration + "/messages")
+            self.assertEqual(response.status_code, 200, response.text)
+            row = next((row for row in response.json() if row["message_id"] == message_id), None)
+            if row and row["state"] == state and (attempts is None or row["attempts"] == attempts):
+                return row
+            await asyncio.sleep(0.06)
+        self.fail(f"Expected {state} for synthetic message {message_id}; last result was {row}")
+
+    async def test_emr_message_order_and_explicit_patient_reconciliation(self):
+        root = f"/api/integration/{self.org}"
+        case = await self.create("cases", {"case_number": "EMR-DEMO"})
+        actions = root + "/cases/" + case["id"]
+        self.assertEqual((await self.client.get(root + "/status")).json()["emr"]["state"], "not_configured")
+        self.assertEqual((await self.client.post(actions + "/patient-lookup", json={"external_id": "SYNTH-MRN"})).status_code, 409)
+        manual = await self.client.post(actions + "/manual-patient", json={
+            "case_version": 1, "display_name": "Synthetic local", "local_reference": "LOCAL-ONLY",
+        })
+        self.assertEqual(manual.status_code, 201, manual.text)
+        patient = manual.json()
+        self.assertEqual(patient["source"], "manual")
+        self.assertEqual((await self.client.put(root + "/connections/emr", json={"mode": "mock", "version": 0})).status_code, 200)
+        self.assertEqual((await self.client.post(root + "/connections/emr/probe")).json()["state"], "connected")
+        self.assertEqual((await self.client.post(actions + "/patient-lookup", json={"external_id": "missing"})).json(),
+                         {"match": "not_found"})
+        inbox = root + "/connections/emr/messages"
+        body = {"message_id": "EMR-2", "resource": "patient", "external_id": "SYNTH-MRN", "revision": 2,
+                "data": {"display_name": "Synthetic external"}}
+
+        async def send(data, expected=202):
+            result = await self.client.post(inbox, json=data)
+            self.assertEqual(result.status_code, expected, result.text)
+            return result.json()
+
+        original, duplicate = await asyncio.gather(send(body), send(body))
+        self.assertEqual(original["id"], duplicate["id"])
+        self.assertEqual(sorted((original["duplicate"], duplicate["duplicate"])), [False, True])
+        await send({**body, "revision": 3}, 409)
+        self.assertEqual((await self.wait_inbox(root, "EMR-2", "pending_link"))["delivery_conflicts"], 1)
+        await send({**body, "message_id": "OLDER", "revision": 1, "data": {"display_name": "Old"}})
+        await self.wait_inbox(root, "OLDER", "stale")
+        await send({**body, "message_id": "REPLAY"})
+        await self.wait_inbox(root, "REPLAY", "duplicate")
+        await send({**body, "message_id": "SAME-REV", "data": {"display_name": "Contradiction"}})
+        await self.wait_inbox(root, "SAME-REV", "conflict")
+        lookup = (await self.client.post(actions + "/patient-lookup", json={"external_id": body["external_id"]})).json()
+        self.assertEqual(lookup["data"]["display_name"], "Synthetic external")
+        self.assertEqual(lookup["differences"], ["display_name"])
+        confirm = {"external_id": body["external_id"], "case_version": 2, "patient_version": 1,
+                   "source_revision": 2, "reason": "Verified synthetic reconciliation"}
+        self.assertEqual((await self.client.post(actions + "/patient-confirm", json=confirm)).status_code, 409)
+        confirmed = await self.client.post(actions + "/patient-confirm", json={**confirm, "confirm_differences": True})
+        self.assertEqual(confirmed.status_code, 200, confirmed.text)
+        self.assertEqual(confirmed.json()["system"], "emr.mock")
+        local = (await self.client.get(f"{self.url}/patients/{patient['id']}")).json()
+        self.assertEqual(local["display_name"], "Synthetic local")
+        self.assertEqual(local["version"], 2)
+        history = (await self.client.get(f"{self.url}/patients/{patient['id']}/history")).json()
+        self.assertEqual(history[0]["source"], "emr")
+        self.assertEqual(history[0]["after"]["source_revision"], 2)
+        new_body = {**body, "message_id": "NEW", "revision": 3, "data": {"display_name": "Changed external"}}
+        await send(new_body)
+        await self.wait_inbox(root, "NEW", "conflict")
+        link = (await self.client.get(root + "/sources/patient/" + patient["id"])).json()[0]
+        self.assertEqual((link["state"], link["source_revision"]), ("needs_review", 3))
+        self.assertEqual((await self.client.post(actions + "/patient-confirm",
+                          json={**confirm, "patient_version": 2, "confirm_differences": True})).status_code, 409)
+
+        other = await self.create("cases", {"case_number": "EMR-OTHER"})
+        other_url = root + "/cases/" + other["id"]
+        other_patient = await self.client.post(other_url + "/manual-patient", json={
+            "case_version": 1, "display_name": "Different local",
+        })
+        self.assertEqual(other_patient.status_code, 201)
+        self.assertEqual((await self.client.post(other_url + "/patient-lookup",
+                          json={"external_id": body["external_id"]})).json()["match"], "conflict")
+        self.assertEqual((await self.client.post(other_url + "/patient-confirm",
+                          json={**confirm, "source_revision": 3, "confirm_differences": True})).status_code, 409)
+
+    async def test_lis_timeout_retry_dead_letter_and_local_independence(self):
+        root = f"/api/integration/{self.org}"
+        config = root + "/connections/lis"
+        self.assertEqual((await self.client.put(config, json={"version": 0, "mode": "mock", "scenario": "timeout"})).status_code, 200)
+        failure = asyncio.create_task(self.client.post(config + "/probe"))
+        case = await self.create("cases", {"case_number": "LIS-DEMO"})
+        self.assertEqual((await self.client.get("/api/worklist")).status_code, 200)
+        self.assertEqual((await self.client.get("/api/health")).status_code, 200)
+        self.assertEqual((await failure).status_code, 503)
+        self.assertEqual((await self.client.get(root + "/status")).json()["lis"]["state"], "degraded")
+        target = f"{self.url}/cases/{case['id']}/external-identifiers"
+        linked = await self.client.post(target, json={"system": "lis.mock", "kind": "ACCESSION", "value": "SYNTH-ACC",
+                                                       "version": 1, "reason": "Verified external accession"})
+        self.assertEqual(linked.status_code, 200, linked.text)
+        envelope = {"message_id": "LIS-TIMEOUT", "resource": "case", "external_id": "SYNTH-ACC", "revision": 7,
+                    "data": {"external_state": "released"}}
+        submitted = await self.client.post(config + "/messages", json=envelope)
+        self.assertEqual(submitted.status_code, 202, submitted.text)
+        record_id = submitted.json()["id"]
+        for attempt in range(1, 4):
+            row = await self.wait_inbox(root, "LIS-TIMEOUT", "retry_wait", attempt)
+            self.assertEqual(row["error"], "timeout")
+            async with app.state.engine.begin() as connection:
+                await connection.execute(text("UPDATE integration_messages SET next_attempt_at=now() WHERE id=CAST(:id AS uuid)"),
+                                         {"id": record_id})
+        await self.wait_inbox(root, "LIS-TIMEOUT", "dead_letter", 4)
+        self.assertEqual((await self.client.put(config, json={"version": 1, "mode": "mock"})).status_code, 200)
+        self.assertEqual((await self.client.post(root + f"/messages/{record_id}/retry")).status_code, 200)
+        await self.wait_inbox(root, "LIS-TIMEOUT", "applied", 1)
+        source = (await self.client.get(root + "/sources/case/" + case["id"])).json()
+        self.assertEqual((source[0]["external_state"], source[0]["source_revision"]), ("released", 7))
+        self.assertEqual((await self.client.get(f"/api/worklist/{case['id']}")).json()["status"], "registered")
+        specimen = await self.create("specimens", {"case_id": case["id"], "specimen_number": "A"})
+        slide = await self.create("slides", {"specimen_id": specimen["id"], "slide_number": "LIS-SLIDE"})
+        for resource, local, kind in (("specimen", specimen, "SPECIMEN_ID"), ("slide", slide, "SLIDE_ID")):
+            identifier = await self.client.post(f"{self.url}/{resource}s/{local['id']}/external-identifiers",
+                json={"system": "lis.mock", "kind": kind, "value": kind, "version": 1, "reason": "Synthetic source mapping"})
+            self.assertEqual(identifier.status_code, 200)
+            message = await self.client.post(config + "/messages",
+                json={"message_id": kind, "resource": resource, "external_id": kind, "revision": 1,
+                      "data": {"external_state": "available"}})
+            self.assertEqual(message.status_code, 202)
+            await self.wait_inbox(root, kind, "applied")
+            source_record = (await self.client.get(root + f"/sources/{resource}/{local['id']}")).json()[0]
+            self.assertEqual(source_record["external_state"], "available")
+        self.assertEqual((await self.client.put(config, json={"version": 2, "mode": "disabled"})).status_code, 200)
+        self.assertTrue((await self.client.post(config + "/messages", json=envelope)).json()["duplicate"])
+        self.assertEqual((await self.client.post(config + "/messages", json={**envelope, "message_id": "OTHER"})).status_code, 409)
+        staff = await create_account(self.org, "lis-labeler", "labeler")
+        await login(self.client, self.org, staff.username)
+        self.assertEqual((await self.client.get(root + "/messages")).status_code, 403)
+        self.assertEqual((await self.client.put(config, json={"version": 2, "mode": "disabled"})).status_code, 403)
+
+    async def test_viewer_persistence_distance_and_permission(self):
+        case = await self.create("cases", {"case_number": "VIEWER-TEST"})
+        specimen = await self.create("specimens", {"case_id": case["id"], "specimen_number": "A"})
+        slide = await self.create("slides", {"specimen_id": specimen["id"], "slide_number": "SYNTH-ROI"})
+        for name in ("viewer.ndpi", "other.svs"):
+            (self.root / name).write_bytes(b"synthetic scan path")
+        scan = await self.create("scans", {"slide_id": slide["id"], "storage_key": "viewer.ndpi"})
+        other = await self.create("scans", {"slide_id": slide["id"], "storage_key": "other.svs"})
+        url = f"/api/wsi/clinical/{scan['id']}/viewer-records"
+        second_url = f"/api/wsi/clinical/{other['id']}/viewer-records"
+        metadata = {"dimensions": [1000, 800], "mpp_x": 0.25, "mpp_y": 0.5}
+        camera = {"x": 201.5, "y": 186.25, "zoom": 0.2, "version": 0}
+        mark = {"id": str(uuid4()), "kind": "distance", "points": [[100, 100], [112, 108]], "label": "Synthetic distance"}
+        roi = {"id": str(uuid4()), "kind": "rectangle", "points": [[20, 25], [160, 198]]}
+        with patch("app.viewer_records.scan_response", return_value=metadata) as scan_info:
+            self.assertIsNone((await self.client.get(url)).json()["position"])
+            reply = await self.client.put(url + "/position", json=camera)
+            self.assertEqual(reply.status_code, 200, reply.text)
+            self.assertEqual((await self.client.put(url + "/position", json=camera)).status_code, 409)
+            self.assertEqual((await self.client.put(url + "/position", json={**camera, "x": 1000, "version": 1})).status_code, 422)
+            competing = await asyncio.gather(*[
+                self.client.put(url + "/position", json={**camera, "zoom": zoom, "version": 1}) for zoom in (0.4, 0.8)
+            ])
+            self.assertEqual(sorted(response.status_code for response in competing), [200, 409])
+            created = await self.client.post(url + "/annotations", json=mark)
+            self.assertEqual(created.status_code, 201, created.text)
+            self.assertEqual((created.json()["length"], created.json()["unit"]), (5.0, "um"))
+            self.assertEqual((await self.client.post(url + "/annotations", json=mark)).status_code, 201)
+            self.assertEqual((await self.client.post(url + "/annotations", json={**mark, "label": "new"})).status_code, 409)
+            self.assertEqual((await self.client.post(url + "/annotations", json=roi)).status_code, 201)
+            bad = {**roi, "id": str(uuid4()), "points": [[200, 300], [200, 350]]}
+            self.assertEqual((await self.client.post(url + "/annotations", json=bad)).status_code, 422)
+            scan_info.return_value = {**metadata, "mpp_y": None}
+            pixels = await self.client.post(second_url + "/annotations", json={
+                **mark, "id": str(uuid4()), "points": [[100, 100], [103, 104]],
+            })
+            self.assertEqual((pixels.json()["length"], pixels.json()["unit"]), (5.0, "px"))
+            self.assertEqual((await self.client.delete(second_url + "/annotations/" + roi["id"])).status_code, 404)
+            self.assertEqual((await self.client.post("/api/auth/logout")).status_code, 200)
+            self.assertEqual((await self.client.get(url)).status_code, 401)
+            await login(self.client, self.org, self.user.username)
+            records = (await self.client.get(url)).json()
+            self.assertEqual(records["position"]["x"], camera["x"])
+            self.assertEqual(records["position"]["version"], 2)
+            self.assertEqual(len(records["annotations"]), 2)
+            self.assertEqual(next(row["points"] for row in records["annotations"] if row["id"] == mark["id"]), mark["points"])
+            self.assertEqual((await self.client.get(second_url)).json()["position"], None)
+            doctor = await create_account(self.org, "roi-doctor", "doctor")
+            await login(self.client, self.org, doctor.username)
+            self.assertEqual((await self.client.get(url)).status_code, 404)
+            async with app.state.engine.begin() as connection:
+                await connection.execute(text("UPDATE cases SET assigned_to=:user WHERE id=CAST(:id AS uuid)"),
+                                         {"user": doctor.id, "id": case["id"]})
+            self.assertIsNone((await self.client.get(url)).json()["position"])
+            self.assertEqual((await self.client.delete(url + "/annotations/" + roi["id"])).status_code, 403)
+            self.assertEqual((await self.client.post(url + "/annotations", json={**roi, "id": str(uuid4())})).status_code, 201)
+            labeler = await create_account(self.org, "roi-labeler", "labeler")
+            await login(self.client, self.org, labeler.username)
+            self.assertFalse((await self.client.get(url)).json()["can_annotate"])
+            self.assertEqual((await self.client.post(url + "/annotations", json=roi)).status_code, 403)
+            await login(self.client, self.org, self.user.username)
+            self.assertEqual((await self.client.delete(url + "/annotations/" + roi["id"])).status_code, 200)
+            self.assertFalse(any(row["id"] == roi["id"] for row in (await self.client.get(url)).json()["annotations"]))
+            async with app.state.engine.begin() as connection:
+                actions = await connection.execute(text(
+                    "SELECT action FROM clinical_events WHERE record_id=CAST(:id AS uuid) ORDER BY version"
+                ), {"id": roi["id"]})
+                self.assertEqual(list(actions.scalars()), ["annotation_registered", "annotation_deleted"])
+
+    async def test_saved_worklist_preferences_and_shared_permissions(self):
+        views = '/api/worklist/views'
+        prefs = '/api/worklist/preferences'
+        doctor = await create_account(self.org, 'view-doctor', 'doctor')
+        admin = await create_account(self.org, 'view-admin', 'admin')
+        outsider = await create_account(self.org + '-outside', 'outside', 'admin')
+        columns = [{'id': 'created', 'visible': True}, {'id': 'specimen', 'visible': False}]
+        configuration = {'q': 'VIEW-', 'status': 'registered', 'columns': columns,
+                         'order': [{'field': 'slide_count', 'direction': 'desc'},
+                                   {'field': 'case_number', 'direction': 'asc'}]}
+
+        async def create_view(name, visibility):
+            return await self.client.post(views, json={
+                'name': name, 'visibility': visibility, 'configuration': configuration,
+            })
+
+        async def expect(response, status):
+            result = await response
+            self.assertEqual(result.status_code, status, result.text)
+            return result.json()
+
+        personal = await expect(create_view('Personal', 'private'), 201)
+        shared = await expect(create_view('Shared', 'shared'), 201)
+        default = {'default_view_id': personal['id'], 'columns': columns, 'version': 0}
+        stored = await expect(self.client.put(prefs, json=default), 200)
+        self.assertEqual(stored, {**default, 'version': 1})
+        await expect(self.client.put(prefs, json=default), 409)
+
+        await login(self.client, self.org, doctor.username)
+        self.assertEqual([view['id'] for view in await expect(self.client.get(views), 200)], [shared['id']])
+        self.assertFalse((await expect(self.client.get(views), 200))[0]['can_edit'])
+        await expect(create_view('Unauthorized', 'shared'), 403)
+        await expect(create_view('Doctor personal', 'private'), 201)
+        update = {'name': 'Change', 'configuration': configuration, 'version': 1}
+        for view, denied in ((personal, 404), (shared, 403)):
+            await expect(self.client.put(f"{views}/{view['id']}", json=update), denied)
+            await expect(self.client.delete(f"{views}/{view['id']}?version=1"), denied)
+        await expect(self.client.put(prefs, json=default), 404)
+
+        await login(self.client, outsider.organization, outsider.username)
+        self.assertEqual(await expect(self.client.get(views), 200), [])
+        await expect(self.client.put(prefs, json={**default, 'default_view_id': shared['id']}), 404)
+
+        await login(self.client, self.org, admin.username)
+        self.assertEqual([view['id'] for view in await expect(self.client.get(views), 200)], [shared['id']])
+        changed = await expect(self.client.put(f"{views}/{shared['id']}", json=update), 200)
+        self.assertEqual(changed['version'], 2)
+        await expect(self.client.put(f"{views}/{shared['id']}", json=update), 409)
+
+        await login(self.client, self.org, self.user.username)
+        self.assertEqual(await expect(self.client.get(prefs), 200), stored)
+        await expect(self.client.delete(f"{views}/{personal['id']}?version=1"), 200)
+        self.assertIsNone((await expect(self.client.get(prefs), 200))['default_view_id'])
+
+    async def test_case_request_permissions_retry_history_and_notification_deduplication(self):
+        doctor = await create_account(self.org, "request-doctor", "doctor")
+        other = await create_account(self.org, "request-other", "doctor")
+        outsider = await create_account(self.org + "-outside", "outside", "admin")
+        case = await self.create("cases", {"case_number": "REQUEST-01"})
+        url = f"{self.url}/cases/{case['id']}/requests"
+        inbox = self.url + "/request-notifications"
+        body = {"kind": "consult", "question": "Synthetic review", "assignee_id": str(doctor.id)}
+        headers = {"Idempotency-Key": "clinical-request-retry"}
+
+        async def expect(response, status):
+            result = await response
+            self.assertEqual(result.status_code, status, result.text)
+            return result.json()
+
+        first, replay = await asyncio.gather(
+            expect(self.client.post(url, json=body, headers=headers), 201),
+            expect(self.client.post(url, json=body, headers=headers), 201),
+        )
+        self.assertEqual(first["id"], replay["id"])
+        await expect(self.client.post(url, json={**body, "question": "Different"}, headers=headers), 409)
+        request_path = self.url + "/requests/" + first["id"]
+        draft = f"{self.url}/cases/{case['id']}/report-draft-references"
+
+        async def change(action, version, status=200, **fields):
+            return await expect(self.client.patch(request_path, json={"action": action, "version": version, **fields}), status)
+
+        await change("start", 1, 403)
+        await login(self.client, outsider.organization, outsider.username)
+        await expect(self.client.get(request_path), 403)
+        await expect(self.client.get(f"/api/clinical/{outsider.organization}/requests/{first['id']}"), 404)
+        await login(self.client, self.org, other.username)
+        await expect(self.client.get(request_path), 404)
+        await login(self.client, self.org, doctor.username)
+        info = await expect(self.client.get(request_path), 200)
+        self.assertEqual(info["actions"], ["start"])
+        self.assertIsNone(info["case_id"])
+        self.assertEqual((await expect(self.client.get(inbox), 200))["unread"], 1)
+        notice = (await expect(self.client.get(inbox), 200))["items"][0]
+        await expect(self.client.get(f"/api/worklist/{case['id']}"), 404)
+        await expect(self.client.get(draft), 404)
+        await change("assign", 1, 403, assignee_id=str(other.id))
+        await change("start", 1)
+        await change("start", 1, 409)
+        await change("complete", 2, 422)
+        await change("fail", 2, note="Temporary synthetic issue")
+        await login(self.client, self.org, self.user.username)
+        await expect(self.client.post(f"{inbox}/{notice['id']}/read"), 404)
+        self.assertEqual(await expect(self.client.get(draft), 200), [])
+        self.assertEqual((await expect(self.client.get(inbox), 200))["unread"], 2)
+        self.assertEqual((await change("retry", 3))["status"], "open")
+        await change("assign", 4, assignee_id=str(other.id))
+        await login(self.client, self.org, doctor.username)
+        await expect(self.client.get(request_path), 404)
+        items = (await expect(self.client.get(inbox), 200))["items"]
+        self.assertTrue(all(item["request_id"] is None for item in items))
+        for _ in range(2):
+            await expect(self.client.post(f"{inbox}/{notice['id']}/read"), 200)
+        await login(self.client, self.org, other.username)
+        await change("start", 5)
+        await change("complete", 6, note="Synthetic response")
+        await change("complete", 6, 409, note="Synthetic response")
+        await login(self.client, self.org, self.user.username)
+        references = await expect(self.client.get(draft), 200)
+        self.assertEqual([(row["id"], row["result_note"]) for row in references], [(first["id"], "Synthetic response")])
+        history = (await expect(self.client.get(request_path), 200))["history"]
+        self.assertEqual([item["version"] for item in history], list(range(7, 0, -1)))

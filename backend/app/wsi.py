@@ -5,17 +5,17 @@ import io
 import math
 from pathlib import Path
 from threading import Event
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 import openslide
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from PIL import Image, ImageCms
 from sqlalchemy import select
 
 from app.auth import CurrentUser, Session
 from app.clinical import case_visibility, scan_metadata
-from app.intake import DATA_ROOT, INTAKE_PREFIX, require_intake, scan_files
+from app.intake import DATA_ROOT, INTAKE_PREFIX, require_intake, scan_files, source_id
 from app.models import ApplicationSetting, Case, Slide, SlideScan, Specimen
 
 TILE_SIZE = 1024
@@ -24,7 +24,7 @@ PRIVATE = {"Cache-Control": "private, no-store"}
 router = APIRouter(prefix="/api/wsi", tags=["WSI"])
 
 
-async def registered_path(source, scan_id, user, session) -> Path:
+async def registered_file(source, scan_id, user, session) -> tuple[Path, UUID]:
     if source == "files":
         require_intake(user)
         entry = await session.get(ApplicationSetting, INTAKE_PREFIX + str(scan_id))
@@ -51,10 +51,31 @@ async def registered_path(source, scan_id, user, session) -> Path:
         key, size, modified = record
         expected = (size, modified)
         await session.rollback()
+    path, meta = await verified_scan_path(key, expected)
+    key = UUID(source_id(meta["storage_key"], meta["size_bytes"], meta["modified_ns"]))
+    return path, key
+
+
+async def verified_scan_path(key, expected):
     meta = await asyncio.to_thread(scan_metadata, key, DATA_ROOT)
     if expected and expected != (meta["size_bytes"], meta["modified_ns"]):
         raise HTTPException(409, "등록 후 스캔 파일이 변경되었습니다. 등록 정보를 확인하세요.")
-    return DATA_ROOT.resolve() / meta["storage_key"]
+    return DATA_ROOT.resolve() / meta["storage_key"], meta
+
+
+async def registered_path(source, scan_id, user, session) -> Path:
+    path, _ = await registered_file(source, scan_id, user, session)
+    return path
+
+
+async def lock_scan_case(session, user, scan_id):
+    # Share-lock the case so an annotation write cannot cross a concurrent reassignment.
+    case = await session.scalar(select(Case.id).join(Specimen, Specimen.case_id == Case.id)
+        .join(Slide, Slide.specimen_id == Specimen.id).join(SlideScan, SlideScan.slide_id == Slide.id)
+        .where(SlideScan.id == scan_id, Case.organization == user.organization, case_visibility(Case, user))
+        .with_for_update(read=True, of=Case))
+    if case is None:
+        raise HTTPException(404, "등록된 WSI를 찾을 수 없습니다.")
 
 
 def positive_number(value):
@@ -90,7 +111,7 @@ def read_scan(path, operation, cancelled, coords=None):
                     "mpp_x": positive_number(slide.properties.get("openslide.mpp-x")),
                     "mpp_y": positive_number(slide.properties.get("openslide.mpp-y"))}
         if operation == "overview":
-            scale = min(1, 960 / max(width, height))
+            scale = min(1, coords / max(width, height))
             output_size = (max(1, round(width * scale)), max(1, round(height * scale)))
             # Read the pyramid at origin (0, 0). Associated SVS thumbnails can have a different origin.
             level = slide.get_best_level_for_downsample(1 / scale)
@@ -155,9 +176,10 @@ async def metadata(source: Source, scan_id: UUID, request: Request, user: Curren
 
 
 @router.get("/{source}/{scan_id}/overview.jpeg")
-async def overview(source: Source, scan_id: UUID, request: Request, user: CurrentUser, session: Session):
+async def overview(source: Source, scan_id: UUID, request: Request, user: CurrentUser, session: Session,
+                   size: Annotated[int, Query(ge=64, le=960)] = 960):
     path = await registered_path(source, scan_id, user, session)
-    return await scan_response(request, path, "overview")
+    return await scan_response(request, path, "overview", size)
 
 
 @router.get("/{source}/{scan_id}/{stage}/{x}/{y}.jpeg")

@@ -1,14 +1,17 @@
 import asyncio
+from datetime import datetime, timezone
 from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.auth import CurrentUser, Session, WRITERS
 from app.clinical import case_visibility
 from app.intake import DATA_ROOT, scan_files, slide_entries
 from app.models import AuthUser, Case, ClinicalEvent, Patient, Slide, SlideScan, Specimen
+from app.workflow import eligible_assignees
+from app.worklist_views import CaseStatus, Scope, SortTerm, ensure_unique
 
 router = APIRouter(prefix="/api/worklist", tags=["Worklist"])
 
@@ -80,7 +83,7 @@ async def clinical_details(session, organization, references):
         patient = patients.get(record.patient_id)
         details[record.id] = {
             **reference_row(record), "source": "clinical", "assignee": staff.get(record.assigned_to),
-            "patient": {"name": patient.display_name or "", "number": "", "birth": patient.birth_date or ""} if patient else None,
+            "patient": {"id": patient.id, "name": patient.display_name or "", "number": "", "birth": patient.birth_date or "", "localRef": patient.local_reference or ""} if patient else None,
             "specimen": "", "slides": [], "history": [],
         }
     specimen_map = {item.id: item for item in specimens}
@@ -109,7 +112,7 @@ async def clinical_details(session, organization, references):
 def reference_row(record):
     return {
         "record_id": record.id, "case_number": record.case_number, "status": record.status,
-        "assigned_to": record.assigned_to, "created_at": record.created_at.isoformat(),
+        "assigned_to": record.assigned_to, "version": record.version, "created_at": record.created_at.isoformat(),
     }
 
 
@@ -117,17 +120,83 @@ def accessible_cases(user):
     return select(Case).where(Case.organization == user.organization, case_visibility(Case, user))
 
 
+LEGACY_ORDER = {
+    "recent": [SortTerm(field="created_at", direction="desc"), SortTerm(field="case_number", direction="desc")],
+    "oldest": [SortTerm(field="created_at", direction="asc"), SortTerm(field="case_number", direction="asc")],
+    "case": [SortTerm(field="case_number", direction="asc")],
+}
+STATUS_ORDER = {state: index for index, state in enumerate(("registered", "assigned", "in_review", "reviewed"))}
+
+
+def parse_order(order, legacy):
+    if not order:
+        return LEGACY_ORDER[legacy]
+    try:
+        if len(order) > 3:
+            raise ValueError("Maximum three sort keys")
+        terms = []
+        for item in order:
+            field, direction = item.split(":", 1)
+            terms.append(SortTerm(field=field, direction=direction))
+        return ensure_unique(terms, "field")
+    except ValueError as exc:
+        raise HTTPException(422, "서로 다른 정렬 기준을 최대 3개 지정하세요.") from exc
+
+
+def utc_timestamp(value):
+    try:
+        stamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return (stamp if stamp.tzinfo else stamp.replace(tzinfo=timezone.utc)).timestamp()
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+async def sorted_rows(session, organization, filtered, staff, terms):
+    names = {user.id: user.display_name.casefold() for user in staff}
+    counts = {}
+    if filtered and any(term.field == "slide_count" for term in terms):
+        ids = [row["record_id"] for row in filtered if row["record_id"]]
+        counts = dict((await session.execute(select(Specimen.case_id, func.count())
+            .join(Slide, Slide.specimen_id == Specimen.id)
+            .outerjoin(SlideScan, SlideScan.slide_id == Slide.id)
+            .where(Specimen.organization == organization, Specimen.case_id.in_(ids))
+            .group_by(Specimen.case_id))).all())
+
+    def slide_count(row):
+        return counts.get(row["record_id"], 0) if row["record_id"] else len(row["slides"])
+
+    keys = {"case_number": lambda row: row["case_number"].casefold(),
+            "created_at": lambda row: utc_timestamp(row["created_at"]),
+            "status": lambda row: STATUS_ORDER.get(row["status"]),
+            "assignee": lambda row: names.get(row["assigned_to"]),
+            "slide_count": slide_count}
+    ordered = sorted(filtered, key=lambda row: (row["case_number"].casefold(), row["case_number"], str(row["record_id"] or "")))
+    for term in reversed(terms):
+        values, missing = [], []
+        for row in ordered:
+            key = keys[term.field](row)
+            if key is None:
+                missing.append(row)
+            else:
+                values.append((key, row))
+        values.sort(key=lambda pair: pair[0], reverse=term.direction == "desc")
+        ordered = [row for _, row in values] + missing
+    return ordered
+
+
 @router.get("")
 async def worklist(
     user: CurrentUser, session: Session,
-    scope: Literal["all", "mine", "unassigned"] = "all",
+    scope: Scope = "all",
     q: Annotated[str, Query(max_length=80)] = "",
-    status: Literal["registered", "assigned", "in_review", "reviewed"] | None = None,
+    status: CaseStatus | None = None,
     assigned_to: UUID | None = None,
     sort: Literal["recent", "oldest", "case"] = "recent",
+    order: Annotated[list[str] | None, Query()] = None,
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ):
+    terms = parse_order(order, sort)
     records = (await session.scalars(accessible_cases(user))).all()
     lookup = {record.id: record for record in records}
     rows = [reference_row(record) for record in records]
@@ -149,10 +218,7 @@ async def worklist(
         and (assigned_to is None or row["assigned_to"] == assigned_to)
         and (not keyword or keyword in row["case_number"].casefold())
     ]
-    if sort == "case":
-        filtered.sort(key=lambda row: row["case_number"].casefold())
-    else:
-        filtered.sort(key=lambda row: (row["created_at"], row["case_number"]), reverse=sort == "recent")
+    filtered = await sorted_rows(session, user.organization, filtered, staff, terms)
     page = filtered[offset:offset + limit]
     details = await clinical_details(session, user.organization, [lookup[row["record_id"]] for row in page if row["record_id"]])
     return {"rows": [details.get(row["record_id"], row) for row in page], "total": len(filtered), "counts": counts,
@@ -165,11 +231,33 @@ async def worklist_case(case_id: UUID, user: CurrentUser, session: Session):
     if record is None:
         raise HTTPException(404, "케이스를 찾을 수 없습니다.")
     result = (await clinical_details(session, user.organization, [record]))[record.id]
-    events = await session.scalars(select(ClinicalEvent).where(
+    events = (await session.scalars(select(ClinicalEvent).where(
         ClinicalEvent.organization == user.organization, ClinicalEvent.record_type == "cases",
         ClinicalEvent.record_id == record.id,
-    ).order_by(ClinicalEvent.version.desc()))
-    result["history"] = [
-        f"{event.occurred_at.isoformat()} · {event.action}" for event in events
-    ]
+    ).order_by(ClinicalEvent.version.desc()).limit(50))).all()
+
+    def account_id(value):
+        try:
+            return UUID(value) if value else None
+        except ValueError:
+            return None
+
+    account_ids = {account_id(value) for event in events
+                   for value in (event.actor, event.before.get("assigned_to"), event.after.get("assigned_to"))} - {None}
+    names = {account.id: account.display_name for account in await session.scalars(select(AuthUser).where(
+        AuthUser.organization == user.organization, AuthUser.id.in_(account_ids),
+    ))}
+    result["history"] = [f"{event.occurred_at.isoformat()} · {event.action}" for event in events]
+    result["audit"] = [{
+        "id": event.id, "action": event.action, "version": event.version, "occurred_at": event.occurred_at,
+        "actor": event.actor, "actor_name": names.get(account_id(event.actor)), "source": event.source,
+        "reason": event.reason, "before": event.before, "after": event.after,
+        "before_assignee": names.get(account_id(event.before.get("assigned_to"))),
+        "after_assignee": names.get(account_id(event.after.get("assigned_to"))),
+        "transaction_id": event.transaction_id,
+    } for event in events]
+    if user.role == "admin" and record.status != "reviewed":
+        result["candidates"] = [{"id": doctor.id, "name": doctor.display_name, "username": doctor.username}
+                                for doctor in await session.scalars(eligible_assignees(user.organization)
+                                .order_by(AuthUser.display_name, AuthUser.username))]
     return result

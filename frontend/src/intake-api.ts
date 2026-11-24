@@ -10,7 +10,7 @@ export type SlideFields = {
   patient_name: string;
 };
 export type Entry = { fields: SlideFields; source: 'manual' | 'rule'; version: number; updated_at: string; rule?: string };
-export type SourceFile = { id: string; filename: string; format: string; size: number; modified: string; entry: Entry | null };
+export type SourceFile = { id: string; filename: string; format: 'NDPI' | 'SVS'; size: number; modified: string; entry: Entry | null };
 export type FilenameRule = Omit<SlideFields, 'patient_name'> & { name: string; pattern: string };
 export type RuleSet = { rules: FilenameRule[]; version: number };
 export type Match = Pick<SourceFile, 'id' | 'filename' | 'format'> & { match: { rule: string; fields: SlideFields } | null };
@@ -53,7 +53,8 @@ export function buildFileCases(files: SourceFile[]): DemoCase[] {
       group.patients.set(JSON.stringify([input.patient_number, input.patient_name]), { number: input.patient_number, name: input.patient_name, birth: '' });
     }
     group.item.slides.push({
-      id: file.id, label: input.slide_id, stain: input.stain || '미입력', specimen: input.specimen || '미입력', state: '뷰어 연동 전',
+      id: file.id, label: input.slide_id, stain: input.stain || '미입력', specimen: input.specimen || '미입력', state: '열람 가능',
+      wsi: { id: file.id, source: 'files', format: file.format }, intakeVersion: entry.version,
     });
     group.item.history.push(`${entry.source === 'manual' ? '수기 등록' : '파일명 규칙 등록'} · ${input.slide_id} (${file.format})`);
   }

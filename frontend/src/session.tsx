@@ -6,14 +6,18 @@ export type User = { id: string; organization: string; username: string; display
 export const canWrite = (user: User) => user.role === 'admin' || user.role === 'labeler';
 const expired = 'mediauto-session-expired';
 
-export async function api<T>(path: string, options?: RequestInit): Promise<T> {
+export async function request(path: string, options?: RequestInit): Promise<Response> {
   const response = await fetch(path, { cache: 'no-store', ...options });
   if (response.status === 401 && path !== '/api/auth/login') window.dispatchEvent(new Event(expired));
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error(typeof data.detail === 'string' ? data.detail : response.status === 422 ? '필수값과 입력 형식을 확인하세요.' : '요청을 처리하지 못했습니다.');
   }
-  return response.json();
+  return response;
+}
+
+export async function api<T>(path: string, options?: RequestInit): Promise<T> {
+  return (await request(path, options)).json();
 }
 
 export function jsonBody(method: string, data: unknown, headers: Record<string, string> = {}): RequestInit {
