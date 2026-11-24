@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -16,6 +17,7 @@ from app.database import database_url
 from app.intake import router as intake_router
 from app.models import ApplicationSetting
 from app.worklist import router as worklist_router
+from app.wsi import router as wsi_router
 
 logger = logging.getLogger(__name__)
 EmrState = Literal["unconfigured", "disabled", "connected", "unavailable", "unknown"]
@@ -30,6 +32,7 @@ class Health(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.auth_key = load_auth_key()
+    app.state.wsi_slots = asyncio.Semaphore(4)
     engine = create_async_engine(
         database_url(),
         pool_pre_ping=True,
@@ -48,6 +51,7 @@ app.include_router(auth_router)
 app.include_router(clinical_router)
 app.include_router(intake_router)
 app.include_router(worklist_router)
+app.include_router(wsi_router)
 
 
 @app.get("/api/health", responses={503: {"model": Health}})

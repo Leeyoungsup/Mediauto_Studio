@@ -1,0 +1,169 @@
+"""IMS adapter for the d3741bc Canvas viewer's level-0 coordinate and JPEG tile contract."""
+
+import asyncio
+import io
+import math
+from pathlib import Path
+from threading import Event
+from typing import Literal
+from uuid import UUID
+
+import openslide
+from fastapi import APIRouter, HTTPException, Request, Response
+from PIL import Image, ImageCms
+from sqlalchemy import select
+
+from app.auth import CurrentUser, Session
+from app.clinical import case_visibility, scan_metadata
+from app.intake import DATA_ROOT, INTAKE_PREFIX, require_intake, scan_files
+from app.models import ApplicationSetting, Case, Slide, SlideScan, Specimen
+
+TILE_SIZE = 1024
+STAGE_DOWNSAMPLES = (1, 4, 8)
+PRIVATE = {"Cache-Control": "private, no-store"}
+router = APIRouter(prefix="/api/wsi", tags=["WSI"])
+
+
+async def registered_path(source, scan_id, user, session) -> Path:
+    if source == "files":
+        require_intake(user)
+        entry = await session.get(ApplicationSetting, INTAKE_PREFIX + str(scan_id))
+        if entry is None:
+            raise HTTPException(404, "등록된 WSI를 찾을 수 없습니다.")
+        await session.rollback()
+        files = await asyncio.to_thread(scan_files, DATA_ROOT)
+        match = next((item for item in files if item.id == str(scan_id)), None)
+        if match is None:
+            raise HTTPException(404, "스캔 파일이 이동되었거나 변경되었습니다.")
+        key = match.filename
+        expected = None
+    else:
+        record = (await session.execute(
+            select(SlideScan.storage_key, SlideScan.size_bytes, SlideScan.modified_ns)
+            .join(Slide, SlideScan.slide_id == Slide.id)
+            .join(Specimen, Slide.specimen_id == Specimen.id)
+            .join(Case, Specimen.case_id == Case.id)
+            .where(SlideScan.id == scan_id, SlideScan.organization == user.organization,
+                   Case.organization == user.organization, case_visibility(Case, user))
+        )).one_or_none()
+        if record is None:
+            raise HTTPException(404, "등록된 WSI를 찾을 수 없습니다.")
+        key, size, modified = record
+        expected = (size, modified)
+        await session.rollback()
+    meta = await asyncio.to_thread(scan_metadata, key, DATA_ROOT)
+    if expected and expected != (meta["size_bytes"], meta["modified_ns"]):
+        raise HTTPException(409, "등록 후 스캔 파일이 변경되었습니다. 등록 정보를 확인하세요.")
+    return DATA_ROOT.resolve() / meta["storage_key"]
+
+
+def positive_number(value):
+    try:
+        number = float(value)
+    except (ValueError, TypeError):
+        return None
+    return number if math.isfinite(number) and number > 0 else None
+
+
+def jpeg(region, output_size):
+    # The base renderer composites OpenSlide's transparent padding onto white.
+    with region.convert("RGBA") as rgba, Image.new("RGB", region.size, "white") as rgb:
+        with rgba.getchannel("A") as alpha:
+            rgb.paste(rgba, mask=alpha)
+        profile = region.info.get("icc_profile")
+        if profile:
+            try:
+                ImageCms.profileToProfile(rgb, io.BytesIO(profile), ImageCms.createProfile("sRGB"), inPlace=True)
+            except (ImageCms.PyCMSError, OSError, ValueError):
+                pass
+        with rgb.resize(output_size, Image.Resampling.LANCZOS) as output:
+            buffer = io.BytesIO()
+            output.save(buffer, "JPEG", quality=85)
+            return buffer.getvalue()
+
+
+def read_scan(path, operation, cancelled, coords=None):
+    with openslide.OpenSlide(path) as slide:
+        width, height = slide.dimensions
+        if operation == "metadata":
+            return {"dimensions": [width, height], "format": path.suffix[1:].upper(),
+                    "mpp_x": positive_number(slide.properties.get("openslide.mpp-x")),
+                    "mpp_y": positive_number(slide.properties.get("openslide.mpp-y"))}
+        if operation == "overview":
+            scale = min(1, 960 / max(width, height))
+            output_size = (max(1, round(width * scale)), max(1, round(height * scale)))
+            # Read the pyramid at origin (0, 0). Associated SVS thumbnails can have a different origin.
+            level = slide.get_best_level_for_downsample(1 / scale)
+            size = slide.level_dimensions[level]
+            if math.prod(size) > 16_000_000:
+                level = slide.level_count - 1
+                size = slide.level_dimensions[level]
+            if math.prod(size) > 16_000_000:
+                raise HTTPException(422, "이 스캔의 저해상도 미리보기를 만들 수 없습니다.")
+            origin = (0, 0)
+        else:
+            stage, x, y = coords
+            downsample = STAGE_DOWNSAMPLES[stage]
+            scene_size = TILE_SIZE * downsample
+            origin = (x * scene_size, y * scene_size)
+            if origin[0] >= width or origin[1] >= height:
+                raise HTTPException(404, "타일이 이미지 범위 밖입니다.")
+            level = slide.get_best_level_for_downsample(downsample)
+            size = (round(scene_size / slide.level_downsamples[level]),) * 2
+            output_size = (TILE_SIZE, TILE_SIZE)
+        if cancelled.is_set():
+            return None
+        with slide.read_region(origin, level, size) as region:
+            return None if cancelled.is_set() else jpeg(region, output_size)
+
+
+async def scan_response(request, path, operation, coords=None):
+    cancelled = Event()
+
+    async def render():
+        async with request.app.state.wsi_slots:
+            if not cancelled.is_set():
+                return await asyncio.to_thread(read_scan, path, operation, cancelled, coords)
+        return None
+
+    job = asyncio.create_task(render())
+    try:
+        while not job.done():
+            await asyncio.wait((job,), timeout=0.15)
+            if not job.done() and await request.is_disconnected():
+                raise HTTPException(499, "슬라이드 요청이 취소되었습니다.")
+        data = job.result()
+    except (openslide.OpenSlideError, OSError, ValueError) as exc:
+        raise HTTPException(422, "스캔을 읽을 수 없습니다. 파일 상태와 형식을 확인하세요.") from exc
+    finally:
+        cancelled.set()
+        if not job.done():
+            # The native read can finish independently. The slot remains occupied until it returns.
+            job.add_done_callback(lambda task: None if task.cancelled() else task.exception())
+    if operation == "metadata":
+        return data
+    return Response(data, media_type="image/jpeg", headers=PRIVATE)
+
+
+Source = Literal["clinical", "files"]
+
+
+@router.get("/{source}/{scan_id}")
+async def metadata(source: Source, scan_id: UUID, request: Request, user: CurrentUser, session: Session):
+    path = await registered_path(source, scan_id, user, session)
+    return await scan_response(request, path, "metadata")
+
+
+@router.get("/{source}/{scan_id}/overview.jpeg")
+async def overview(source: Source, scan_id: UUID, request: Request, user: CurrentUser, session: Session):
+    path = await registered_path(source, scan_id, user, session)
+    return await scan_response(request, path, "overview")
+
+
+@router.get("/{source}/{scan_id}/{stage}/{x}/{y}.jpeg")
+async def tile(source: Source, scan_id: UUID, stage: int, x: int, y: int,
+               request: Request, user: CurrentUser, session: Session):
+    if not 0 <= stage < len(STAGE_DOWNSAMPLES) or min(x, y) < 0:
+        raise HTTPException(400, "타일 좌표를 확인하세요.")
+    path = await registered_path(source, scan_id, user, session)
+    return await scan_response(request, path, "tile", (stage, x, y))

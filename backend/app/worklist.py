@@ -8,7 +8,7 @@ from sqlalchemy import select
 from app.auth import CurrentUser, Session, WRITERS
 from app.clinical import case_visibility
 from app.intake import DATA_ROOT, scan_files, slide_entries
-from app.models import AuthUser, Case, ClinicalEvent, Patient, Slide, Specimen
+from app.models import AuthUser, Case, ClinicalEvent, Patient, Slide, SlideScan, Specimen
 
 router = APIRouter(prefix="/api/worklist", tags=["Worklist"])
 
@@ -45,7 +45,8 @@ async def legacy_rows(session, user, case_numbers):
         group["history"].append(f"{source_label} · {fields['slide_id']} ({source.format})")
         group["slides"].append({
             "id": source.id, "label": fields["slide_id"], "stain": fields.get("stain") or "미입력",
-            "specimen": fields.get("specimen") or "미입력", "state": "뷰어 연동 전",
+            "specimen": fields.get("specimen") or "미입력", "state": "열람 가능",
+            "wsi": {"id": source.id, "source": "files", "format": source.format},
         })
     for case_number, group in groups.items():
         group["specimen"] = ", ".join(specimens.get(case_number, {}))
@@ -87,12 +88,21 @@ async def clinical_details(session, organization, references):
         item = details[specimen.case_id]
         description = specimen.description or specimen.specimen_number
         item["specimen"] = f"{item['specimen']}, {description}" if item["specimen"] else description
+    scans_by_slide = {}
+    scans = await session.scalars(select(SlideScan).where(
+        SlideScan.organization == organization, SlideScan.slide_id.in_([slide.id for slide in slides]),
+    ).order_by(SlideScan.created_at, SlideScan.id))
+    for scan in scans:
+        scans_by_slide.setdefault(scan.slide_id, []).append(scan)
     for slide in slides:
         specimen = specimen_map[slide.specimen_id]
-        details[specimen.case_id]["slides"].append({
-            "id": slide.id, "label": slide.slide_number, "stain": slide.stain or "미입력",
-            "specimen": specimen.specimen_number, "state": "뷰어 연동 전",
-        })
+        base = {"label": slide.slide_number, "stain": slide.stain or "미입력", "specimen": specimen.specimen_number}
+        tray = details[specimen.case_id]["slides"]
+        if slide.id not in scans_by_slide:
+            tray.append({**base, "id": slide.id, "state": "스캔 미등록"})
+        for scan in scans_by_slide.get(slide.id, []):
+            tray.append({**base, "id": scan.id, "state": "열람 가능",
+                         "wsi": {"id": scan.id, "source": "clinical", "format": scan.format}})
     return details
 
 

@@ -159,13 +159,13 @@ def relationship_state(record) -> dict:
     return state
 
 
-def scan_metadata(storage_key: str) -> dict:
+def scan_metadata(storage_key: str, data_root: Path | None = None) -> dict:
     path = Path(storage_key)
     if path.is_absolute() or "\\" in storage_key or "\0" in storage_key or ".." in path.parts:
         raise HTTPException(422, "WSI 위치는 data/ 아래의 상대 경로로 입력하세요.")
     if path.suffix.lower() not in {".ndpi", ".svs"}:
         raise HTTPException(422, "NDPI 또는 SVS 파일을 지정하세요.")
-    root = DATA_ROOT.resolve()
+    root = (data_root or DATA_ROOT).resolve()
     candidate = root / path
     try:
         resolved = candidate.resolve(strict=True)
