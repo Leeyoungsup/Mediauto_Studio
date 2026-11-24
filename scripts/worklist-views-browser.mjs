@@ -97,6 +97,11 @@ try {
 
   const columns = page.locator('details.column-menu:not(.sort-menu)');
   await columns.locator('summary').click();
+  const columnSearch = columns.getByRole('textbox', { name: 'Search Columns', exact: true });
+  await columnSearch.fill('registered');
+  await columns.getByRole('checkbox', { name: 'Registered At', exact: true }).waitFor();
+  assert.equal(await columns.getByRole('checkbox', { name: 'Specimen', exact: true }).count(), 0);
+  await columnSearch.clear();
   await columns.getByRole('checkbox', { name: 'Specimen', exact: true }).uncheck();
   await columns.getByRole('checkbox', { name: 'Registered At', exact: true }).check();
   await button(page, 'Review Status up').click();

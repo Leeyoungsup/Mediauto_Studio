@@ -1,3 +1,4 @@
+import { demoEvidence } from './workflow-demo-evidence.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
@@ -20,11 +21,17 @@ async function staff(username) {
   return { page, user: await read(page.request.get('/api/auth/me')) };
 }
 
+const evidence = demoEvidence('pap');
+
 try {
   const admin = await staff('integration-admin');
   const primary = await staff('integration-pap-primary');
   const backup = await staff('integration-pap-backup');
   const physician = await staff('integration-doctor');
+  await evidence.observe(admin.page, 'Policy administrator');
+  await evidence.observe(primary.page, 'Primary reviewer');
+  await evidence.observe(backup.page, 'Replacement reviewer');
+  await evidence.observe(physician.page, 'Follow-up pathologist');
   const unassigned = await staff('integration-other');
   const { rows } = await read(admin.page.request.get('/api/worklist?q=IMS-DEMO-MULTI'));
   const record = rows.find((row) => row.case_number === 'IMS-DEMO-MULTI');
@@ -140,6 +147,7 @@ try {
   assert.equal(await second.getByRole('combobox', { name: 'Interpretation' }).isDisabled(), true);
   await second.getByRole('button', { name: 'Complete Follow-up Review' }).click();
   await second.getByRole('status').getByText(/Review Completed · Review 7/).waitFor();
+  await evidence.capture(second, 'completed-follow-up');
   await second.getByRole('textbox', { name: 'Action Reason' }).fill('Synthetic second review');
   await second.getByRole('button', { name: 'Reopen Follow-up Review' }).click();
   await second.getByRole('status').getByText(/Follow-up Draft · Review 8/).waitFor();
@@ -154,6 +162,7 @@ try {
     params: { entity: 'pap_review_revision' },
   }))).rows.length, 8);
   assert.deepEqual(errors, []);
+  await evidence.finish();
   console.log('PASS: Pap vocabulary publication and pinned versions, independent specimen reviews, role revocation, return/resume, stale and duplicate requests, audit');
 } finally {
   await browser.close();

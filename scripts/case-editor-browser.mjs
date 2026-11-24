@@ -1,3 +1,4 @@
+import { demoEvidence } from './workflow-demo-evidence.mjs';
 import assert from 'node:assert/strict';
 
 const { chromium } = await import(process.env.MEDIAUTO_PLAYWRIGHT_MODULE ?? 'playwright-core');
@@ -9,9 +10,12 @@ const replacement = 'CODIPAI-STOP-SS-01376-I-PD-22.ndpi';
 const caseNumber = 'IMS-QA-EDITOR';
 const button = (page, name) => page.getByRole('button', { name, exact: true });
 
+const evidence = demoEvidence('general-intake');
+
 try {
   const page = await browser.newPage({ baseURL, viewport: { width: 1500, height: 1020 } });
   page.setDefaultTimeout(15000);
+  await evidence.observe(page, 'Intake administrator');
   const login = await page.request.post('/api/auth/login', { data: {
     organization: 'local', username: 'integration-editor-admin', password: 'synthetic-test-password',
   }});
@@ -122,7 +126,10 @@ try {
   await page.getByText(replacement + ' · NDPI · Unassessed', { exact: true }).waitFor();
   await button(page, 'Open Viewer').click();
   await button(page, 'Pan using minimap').waitFor();
-  console.log('PASS: intake patient match, block and barcode editing, label retry, OCR confirmation and uploaded label in WSI, QC evidence, blocked review and real NDPI replacement');
+  await evidence.finish();
+  const labelVerification = process.env.MEDIAUTO_TESSERACT ? 'OCR-assisted label confirmation' : 'manual label confirmation';
+  console.log('PASS: intake patient match, block and barcode editing, label retry, ' + labelVerification +
+    ' and uploaded label in WSI, QC evidence, blocked review and real NDPI replacement');
 } finally {
   await browser.close();
 }

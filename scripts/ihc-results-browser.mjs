@@ -1,3 +1,4 @@
+import { demoEvidence } from './workflow-demo-evidence.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
@@ -12,9 +13,12 @@ async function read(request, expected = 200) {
   return response.json();
 }
 
+const evidence = demoEvidence('ihc');
+
 try {
   const page = await browser.newPage({ baseURL, viewport: { width: 1520, height: 1010 } });
   page.setDefaultTimeout(20000);
+  await evidence.observe(page, 'IHC reviewer');
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await read(page.request.post('/api/auth/login', {
@@ -86,6 +90,7 @@ try {
     await card.getByText('IHC Review History', { exact: true }).click();
     await card.getByText('Synthetic source restoration', { exact: true }).waitFor();
     await card.getByText('Synthetic threshold and grade review', { exact: true }).waitFor();
+    await evidence.capture(card, 'restored-result-and-audit');
     const after = await read(page.request.get(sourceUrl));
     assert.equal(after.version, 2);
     assert.equal(after.threshold, 0.3);
@@ -94,6 +99,7 @@ try {
       request_key: randomUUID(), threshold: 0.4, reason: 'Stale browser tab' } }), 409);
   }
   assert.deepEqual(errors, []);
+  await evidence.finish();
   console.log('PASS: Ki-67, ER and PR cards and overlays, approved aggregation, missing approval, cell picking, threshold, revision reload and original restore');
 } finally {
   await browser.close();

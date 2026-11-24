@@ -1,3 +1,4 @@
+import { demoEvidence } from './workflow-demo-evidence.mjs';
 import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
 
@@ -22,9 +23,13 @@ async function login(username) {
   return page;
 }
 
+const evidence = demoEvidence('collaboration');
+
 try {
   const owner = await login('integration-admin');
   const peer = await login('integration-doctor');
+  await evidence.observe(owner, 'Session owner');
+  await evidence.observe(peer, 'Invited pathologist');
   const errors = [];
   for (const page of [owner, peer]) page.on('pageerror', ({ message }) => errors.push(message));
   const account = await checked(peer.request.get('/api/auth/me'));
@@ -133,6 +138,7 @@ try {
   await panel(owner).getByRole('combobox', { name: 'Next Driver' }).selectOption(account.id);
   await button(panel(owner), 'Hand Off Drive').click();
   await panel(peer).getByText('Driving', { exact: true }).waitFor();
+  await evidence.capture(panel(peer), 'drive-handoff');
   const handoffMs = Math.round(performance.now() - handoffStart);
   await button(panel(owner), 'Follow Driver').click();
   await button(peer, 'Zoom Out').click();
@@ -149,6 +155,7 @@ try {
   await button(panel(owner), 'End Session').click();
   await button(panel(owner), 'Start Review Session').waitFor();
   assert.deepEqual(errors, []);
+  await evidence.finish();
   console.log('PASS: paired WSI review, scan and camera sync, Follow pause, offline recovery, refresh, handoff, and invitation revocation');
   console.log('Synthetic same-viewport review:', { pan, handoff, switchMs, panMs, reconnectMs, handoffMs, networkInterruptions: 1, refreshes: 1, handoffActions: 2 });
 } finally {

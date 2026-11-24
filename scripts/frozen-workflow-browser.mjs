@@ -1,3 +1,4 @@
+import { demoEvidence } from './workflow-demo-evidence.mjs';
 import assert from 'node:assert/strict';
 
 const { chromium } = await import(process.env.MEDIAUTO_PLAYWRIGHT_MODULE ?? 'playwright-core');
@@ -20,10 +21,15 @@ async function signIn(username) {
   return page;
 }
 
+const evidence = demoEvidence('frozen');
+
 try {
   const admin = await signIn('integration-admin');
   const doctor = await signIn('integration-doctor');
   const viewer = await signIn('integration-or');
+  await evidence.observe(admin, 'Laboratory administrator');
+  await evidence.observe(doctor, 'Frozen pathologist');
+  await evidence.observe(viewer, 'OR recipient');
   const prefix = '/api/clinical/local';
   const number = 'FROZEN-QA-' + Date.now();
   const record = await checked(admin.request.post(prefix + '/cases', {
@@ -113,6 +119,8 @@ try {
     const logs = await checked(admin.request.get(url + '/logs', { params: { action } }));
     assert.ok(logs.rows.some((row) => row.action === action), 'Missing Case Logs action ' + action);
   }
+  await evidence.capture(orResult, 'corrected-and-acknowledged');
+  await evidence.finish();
   console.log('PASS: Frozen Worklist, preliminary result and margin, scoped OR confirmation and recovery, telephone read-back, correction and Case Logs');
 } finally {
   await browser.close();

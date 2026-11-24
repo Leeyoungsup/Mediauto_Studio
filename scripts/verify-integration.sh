@@ -9,10 +9,33 @@ python="$studio_prefix/bin/python"
 pg=${MEDIAUTO_PG_BIN:-"$(dirname -- "$studio_prefix")/mediauto-postgres/bin"}
 port=${MEDIAUTO_DEMO_PORT:-19920}
 mode=${1:-}
-if [[ -n "$mode" && "$mode" != --manual ]]; then
-    echo 'Usage: scripts/verify-integration.sh [--manual]' >&2
-    exit 2
+demo=${2:-}
+case "$mode:$#:$demo" in
+    :0:|--manual:1:|--demo:2:*) ;;
+    *) printf 'Usage: %s [--manual | --demo general|frozen|tumor-board|ihc|pap|collaboration]\n' "$0" >&2; exit 2 ;;
+esac
+if [[ "$mode" == --demo ]]; then
+    case "$demo" in
+        general|frozen|tumor-board|ihc|pap|collaboration) ;;
+        *) printf 'Unknown workflow demo: %s\n' "$demo" >&2; exit 2 ;;
+    esac
 fi
+
+selected() {
+    [[ -z "$demo" ]] && return 0
+    local candidate
+    for candidate in "$@"; do
+        [[ "$candidate" == "$demo" ]] && return 0
+    done
+    return 1
+}
+
+run_browser() {
+    local script=$1
+    shift
+    if selected "$@"; then node "scripts/$script-browser.mjs"; fi
+}
+
 sandbox=$(mktemp -d /tmp/mediauto-integration.XXXXXX)
 server_pid=
 cleanup() {
@@ -50,7 +73,7 @@ cd -- "$root/backend"
 
 "$python" -s -m alembic upgrade head
 "$python" -s -m alembic check
-if [[ "$mode" != --manual ]]; then
+if [[ -z "$mode" ]]; then
     MEDIAUTO_CLINICAL_TEST=1 "$python" -s -m unittest discover -s tests -v
 fi
 PYTHONPATH="$PWD:$PWD/tests" "$python" -s - <<'PY'
@@ -89,15 +112,20 @@ if [[ "$mode" == --manual ]]; then
     printf 'Manual session at %s. Press Enter to stop.\n' "$MEDIAUTO_DEMO_URL"
     read -r _
 else
-    node scripts/integration-browser.mjs
-    node scripts/workspace-layout-browser.mjs
-    node scripts/viewer-preferences-browser.mjs
-    node scripts/viewer-records-browser.mjs
-    node scripts/multi-view-browser.mjs
-    node scripts/worklist-views-browser.mjs
-    (
-        cd -- "$root/backend"
-        "$python" -s - "$sandbox/pdl1-fixture.json" "${MEDIAUTO_DEMO_SVS:-CODIPAI-STBX-SS-04364-I-PD-22.svs}" <<'PYFIXTURE'
+    if selected general; then
+        node scripts/integration-browser.mjs
+    elif selected tumor-board ihc pap collaboration; then
+        node scripts/integration-browser.mjs --seed-only
+    fi
+    run_browser workspace-layout
+    run_browser viewer-preferences
+    run_browser viewer-records
+    run_browser multi-view ihc pap
+    run_browser worklist-views
+    if selected ihc; then
+        (
+            cd -- "$root/backend"
+            "$python" -s - "$sandbox/pdl1-fixture.json" "${MEDIAUTO_DEMO_SVS:-CODIPAI-STBX-SS-04364-I-PD-22.svs}" <<'PYFIXTURE'
 import argparse
 import json
 from pathlib import Path
@@ -125,11 +153,13 @@ for sample, analysis_version in (
     options.editor = "synthetic-reviewer"
     import_snapshot(options)
 PYFIXTURE
-    )
-    node scripts/case-requests-browser.mjs
-    node scripts/workgroups-browser.mjs
-    export MEDIAUTO_QA_LABEL="$sandbox/qa-label.png"
-    "$python" -s - "$MEDIAUTO_QA_LABEL" <<'PYLABEL'
+        )
+    fi
+    run_browser case-requests
+    run_browser workgroups
+    if selected general; then
+        export MEDIAUTO_QA_LABEL="$sandbox/qa-label.png"
+        "$python" -s - "$MEDIAUTO_QA_LABEL" <<'PYLABEL'
 import sys
 from PIL import Image, ImageDraw, ImageFont
 
@@ -138,10 +168,12 @@ font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 ImageDraw.Draw(image).text((30, 30), "QA-EDITOR-21", font=font, fill="black")
 image.save(sys.argv[1])
 PYLABEL
-    node scripts/case-editor-browser.mjs
-    node scripts/patient-history-browser.mjs
-    export MEDIAUTO_QA_PDF="$sandbox/qa-case-media.pdf" MEDIAUTO_QA_GROSS="$sandbox/qa-gross.png"
-    "$python" -s - "$MEDIAUTO_QA_PDF" "$MEDIAUTO_QA_GROSS" <<'PYMEDIA'
+    fi
+    run_browser case-editor general
+    run_browser patient-history
+    if selected; then
+        export MEDIAUTO_QA_PDF="$sandbox/qa-case-media.pdf" MEDIAUTO_QA_GROSS="$sandbox/qa-gross.png"
+        "$python" -s - "$MEDIAUTO_QA_PDF" "$MEDIAUTO_QA_GROSS" <<'PYMEDIA'
 import sys
 from PIL import Image, ImageDraw
 
@@ -153,27 +185,32 @@ with Image.new("RGB", (480, 360), "ivory") as gross:
     ImageDraw.Draw(gross).ellipse((40, 70, 420, 290), fill="sienna")
     gross.save(sys.argv[2], "PNG")
 PYMEDIA
-    node scripts/case-attachments-browser.mjs
-    node scripts/case-logs-browser.mjs
-    node scripts/notifications-browser.mjs
-    node scripts/case-report-browser.mjs
-    node scripts/frozen-workflow-browser.mjs
-    node scripts/viewer-workflow-browser.mjs
-    node scripts/roi-search-browser.mjs
-    (cd -- "$root/backend" && PYTHONPATH="$PWD" "$python" -s "$root/scripts/seed-ihc-fixtures.py")
-    node scripts/ihc-results-browser.mjs
-    node scripts/analysis-execution-browser.mjs
-    node scripts/case-collections-browser.mjs
-    node scripts/collaborative-review-browser.mjs
+    fi
+    run_browser case-attachments
+    run_browser case-logs
+    run_browser notifications
+    run_browser case-report general
+    run_browser frozen-workflow frozen
+    run_browser viewer-workflow
+    run_browser roi-search
+    if selected ihc; then
+        (cd -- "$root/backend" && PYTHONPATH="$PWD" "$python" -s "$root/scripts/seed-ihc-fixtures.py")
+    fi
+    run_browser ihc-results ihc
+    run_browser analysis-execution ihc
+    run_browser case-collections tumor-board
+    run_browser collaborative-review collaboration
     export MEDIAUTO_BIOMARKER_TEST_DIR="$sandbox"
-    (cd -- "$root/backend" && PYTHONPATH="$PWD" "$python" -s "$root/scripts/seed-biomarker-fixtures.py")
-    node scripts/biomarker-evidence-browser.mjs
+    if selected ihc; then
+        (cd -- "$root/backend" && PYTHONPATH="$PWD" "$python" -s "$root/scripts/seed-biomarker-fixtures.py")
+    fi
+    run_browser biomarker-evidence ihc
     export MEDIAUTO_PROSTATE_TEST_PYTHON="$python" MEDIAUTO_PROSTATE_TEST_DIR="$sandbox"
-    node scripts/prostate-results-browser.mjs
+    run_browser prostate-results
     export MEDIAUTO_SKIN_TEST_PYTHON="$python" MEDIAUTO_SKIN_TEST_DIR="$sandbox"
-    node scripts/skin-review-browser.mjs
+    run_browser skin-review
     export MEDIAUTO_PAP_TEST_PYTHON="$python" MEDIAUTO_PAP_TEST_DIR="$sandbox"
-    node scripts/pap-gallery-browser.mjs
-    node scripts/pap-review-browser.mjs
-    node scripts/related-cases-browser.mjs
+    run_browser pap-gallery pap
+    run_browser pap-review pap
+    run_browser related-cases pap
 fi

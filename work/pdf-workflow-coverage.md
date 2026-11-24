@@ -1,5 +1,7 @@
 # Techcyte IMS PDF 전체 워크플로우 구현 기준
 
+아래 표는 구현 계획 당시의 기준이다. 최신 결과는 [42번 통합 검증](workflow-verification-42.md)과 [34개 화면·96개 기능 ID의 결과](workflow-feature-matrix-42.md)에서 확인한다.
+
 **범위** — [참조 PDF](../reference/Techcyte_IMS_Demo_Screen_Analysis.pdf) 47쪽 전체. 요약·업무·연동 설명은 2–13쪽, 대표 화면 34개는 14–47쪽이다. 기존 01–18에서 만든 기능은 시작점으로 사용한다. 아래 번호는 빠진 단계마다 구현·디버깅·검증을 따로 지시하기 위한 것이다.
 
 ## 업무 흐름

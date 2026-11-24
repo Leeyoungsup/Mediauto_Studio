@@ -1,3 +1,4 @@
+import { demoEvidence } from './workflow-demo-evidence.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
@@ -24,10 +25,15 @@ async function login(username) {
   return page;
 }
 
+const evidence = demoEvidence('tumor-board');
+
 try {
   const admin = await login('integration-admin');
   const physician = await login('integration-doctor');
   const other = await login('integration-editor-admin');
+  await evidence.observe(admin, 'Board organizer');
+  await evidence.observe(physician, 'Board attendee');
+  await evidence.observe(other, 'Nonmember');
   const errors = [];
   for (const page of [admin, physician, other]) page.on('pageerror', ({ message }) => errors.push(message));
   const me = await checked(physician.request.get('/api/auth/me'));
@@ -127,6 +133,7 @@ try {
   await button(first, 'Mark Presented').click();
   await checked(presented);
   await first.getByText('Presented', { exact: true }).waitFor();
+  await evidence.capture(first, 'presented-agenda');
   const preparationSeconds = Math.round((performance.now() - preparation) / 100) / 10;
   const metrics = await admin.evaluate(() => window.boardMetrics);
 
@@ -161,6 +168,7 @@ try {
   assert.equal(await physician.getByText('Synthetic conference note revised', { exact: true }).count(), 0);
   await checked(physician.request.get(collections + '/' + meeting), 404);
   assert.deepEqual(errors, []);
+  await evidence.finish();
   console.log('PASS: personal/shared collections, Worklist references, Board ordering/note/Presented, WSI and completed result, intersection and live revocation');
   console.log('Synthetic browser preparation:', { seconds: preparationSeconds, ...metrics });
 } finally {

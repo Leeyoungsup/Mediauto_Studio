@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import { demoEvidence } from './workflow-demo-evidence.mjs';
 
 const { chromium } = await import(process.env.MEDIAUTO_PLAYWRIGHT_MODULE ?? 'playwright-core');
 const baseURL = process.env.MEDIAUTO_DEMO_URL ?? 'http://127.0.0.1:19920';
 const browser = await chromium.launch({ executablePath: process.env.MEDIAUTO_CHROME ?? '/usr/bin/google-chrome', headless: true });
 const button = (scope, name) => scope.getByRole('button', { name, exact: true });
+const evidence = demoEvidence('general-report');
 
 async function signIn(username) {
   const page = await browser.newPage({ baseURL, viewport: { width: 1560, height: 950 } });
@@ -19,33 +21,9 @@ try {
   const admin = await signIn('integration-admin');
   const doctor = await signIn('integration-doctor');
   const other = await signIn('integration-other');
-  const prefix = '/api/clinical/local';
-  const fixture = 'report-browser-' + Date.now();
-  async function checked(response, expected = 200) {
-    const result = await response;
-    assert.equal(result.status(), expected, await result.text());
-    return result.json();
-  }
-  const record = await checked(admin.request.post(prefix + '/cases', {
-    data: { case_number: fixture }, headers: { 'Idempotency-Key': fixture },
-  }), 201);
-  const caseId = record.id;
-  const currentUser = await checked(doctor.request.get('/api/auth/me'));
-  await checked(admin.request.patch(prefix + '/cases/' + caseId + '/assignment', {
-    data: { assignee_id: currentUser.id, version: record.version, reason: 'Synthetic report fixture' },
-  }));
-  const request = await checked(admin.request.post(prefix + '/cases/' + caseId + '/requests', {
-    data: { kind: 'consult', question: 'Synthetic report evidence', assignee_id: currentUser.id },
-    headers: { 'Idempotency-Key': fixture + '-request' },
-  }), 201);
-  const requestUrl = prefix + '/requests/' + request.id;
-  const started = await checked(doctor.request.patch(requestUrl, { data: { action: 'start', version: request.version } }));
-  await checked(doctor.request.patch(requestUrl, { data: {
-    action: 'complete', version: started.version, note: 'Synthetic completed consultation result.',
-  } }));
-  const route = '/#case/' + caseId + '/report';
-  const reportOf = (page) => page.getByRole('region', { name: 'Case Report', exact: true });
-
+  await evidence.observe(admin, 'Assignment and report administrator');
+  await evidence.observe(doctor, 'Assigned pathologist');
+  await evidence.observe(other, 'Unassigned pathologist');
   await admin.addInitScript(() => {
     class SyntheticRecognition {
       static async available(options) {
@@ -63,6 +41,66 @@ try {
     }
     Object.defineProperty(window, 'SpeechRecognition', { configurable: true, value: SyntheticRecognition });
   });
+
+  const prefix = '/api/clinical/local';
+  const fixture = 'report-browser-' + Date.now();
+  async function checked(response, expected = 200) {
+    const result = await response;
+    assert.equal(result.status(), expected, await result.text());
+    return result.json();
+  }
+  const intake = await checked(admin.request.get('/api/worklist', { params: { q: 'IMS-QA-EDITOR' } }));
+  const record = intake.rows.find((row) => row.case_number === 'IMS-QA-EDITOR');
+  assert.ok(record, 'Run case-editor-browser.mjs first to register and QC this case.');
+  const caseId = record.record_id;
+  const caseUrl = prefix + '/cases/' + caseId;
+  const received = await checked(admin.request.get(prefix + '/editor/cases/' + caseId));
+  const replacement = received.scans.find((scan) => scan.replaces_id);
+  assert.ok(replacement, 'Expected the intake QC replacement on the same case.');
+  assert.equal(received.scans.find((scan) => scan.id === replacement.replaces_id).qc_status, 'replaced');
+
+  const currentUser = await checked(doctor.request.get('/api/auth/me'));
+  await admin.goto('/#case/' + caseId);
+  await button(admin, 'Assign Case').click();
+  const assignment = admin.getByRole('dialog');
+  await assignment.getByLabel('Assigned Pathologist').selectOption(currentUser.id);
+  await assignment.getByLabel('Reason for Change').fill('Assign the verified intake case');
+  await button(assignment, 'Save').click();
+  await assignment.waitFor({ state: 'hidden' });
+  await doctor.goto('/#case/' + caseId);
+  await button(doctor, 'Open Viewer').click();
+  await button(doctor, 'Pan using minimap').waitFor();
+  await doctor.waitForFunction((scanId) => document.querySelector('.image-panel')?.dataset.scanId === scanId, replacement.id);
+  const reviewNote = 'Synthetic review of the verified replacement scan.';
+  for (const [action, reason, note] of [
+    ['Start Review', 'Start review after intake QC', ''],
+    ['Review Complete', 'Verify and complete the slide review', reviewNote],
+  ]) {
+    await button(doctor, action).click();
+    const dialog = doctor.getByRole('dialog');
+    await dialog.getByLabel('Reason for Change').fill(reason);
+    if (note) await dialog.getByLabel('Review Note (Optional)').fill(note);
+    await button(dialog, 'Save').click();
+    await dialog.waitFor({ state: 'hidden' });
+  }
+  await doctor.locator('.page-heading .status-pill').filter({ hasText: /^Review Complete$/ }).waitFor();
+  await doctor.reload();
+  await button(doctor, 'Pan using minimap').waitFor();
+  const reviewed = await checked(doctor.request.get('/api/worklist/' + caseId));
+  assert.equal(reviewed.status, 'reviewed');
+  assert.equal(reviewed.audit[0].after.review_note, reviewNote);
+
+  const request = await checked(admin.request.post(caseUrl + '/requests', {
+    data: { kind: 'consult', question: 'Synthetic report evidence', assignee_id: currentUser.id },
+    headers: { 'Idempotency-Key': fixture + '-request' },
+  }), 201);
+  const requestUrl = prefix + '/requests/' + request.id;
+  const started = await checked(doctor.request.patch(requestUrl, { data: { action: 'start', version: request.version } }));
+  await checked(doctor.request.patch(requestUrl, { data: {
+    action: 'complete', version: started.version, note: 'Synthetic completed consultation result.',
+  } }));
+  const route = '/#case/' + caseId + '/report';
+  const reportOf = (page) => page.getByRole('region', { name: 'Case Report', exact: true });
 
   await admin.goto('/#settings');
   const lis = admin.getByRole('region', { name: 'EMR and LIS Settings' }).locator('form').filter({ has: admin.getByRole('heading', { name: /^LIS/ }) });
@@ -120,11 +158,27 @@ try {
   await button(review, 'View Version 3').click();
   await review.getByText('Synthetic local dictation.', { exact: true }).waitFor();
   assert.equal(await review.getByLabel('Diagnosis (Required)').inputValue(), 'Synthetic amended report.');
+  await button(review, 'Submit for Review').click();
+  await review.locator('.count').filter({ hasText: 'Version 6 · In Review' }).waitFor();
+  await review.getByRole('checkbox', { name: 'I reviewed this report and its evidence.' }).check();
+  await button(review, 'Approve Report').click();
+  await review.locator('.count').filter({ hasText: 'Version 7 · Approved' }).waitFor();
+  await button(review, 'Queue Mock LIS Delivery').click();
+  await review.getByText(/Version 7 · Correction · Acknowledged/).waitFor();
+  await evidence.capture(review, 'approved-correction');
+
+  for (const [action, minimum] of [
+    ['report_approved', 2], ['report_correction_started', 1], ['report_delivery_acknowledged', 2],
+  ]) {
+    const logs = await checked(admin.request.get(caseUrl + '/logs', { params: { action } }));
+    assert.ok(logs.rows.filter((row) => row.action === action).length >= minimum, action);
+  }
 
   await other.goto(route);
   await other.getByText('Unable to load the case.', { exact: true }).waitFor();
   assert.equal((await other.request.get('/api/clinical/local/cases/' + caseId + '/report')).status(), 404);
-  console.log('PASS: report templates, on-device dictation draft workflow, result evidence, assigned approval, Mock LIS ACK, immutable correction history');
+  await evidence.finish();
+  console.log('PASS: same-case intake/QC replacement, assignment and WSI review, draft/evidence, approved original and correction, Mock LIS ACKs, and Case Logs');
 } finally {
   await browser.close();
 }
