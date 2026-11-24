@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { AlertTriangle, LocateFixed, Map, Minus, Pause, Play, Plus, ScanLine } from 'lucide-react';
 import type { WsiScan } from './demo';
-import { api, request } from './session';
+import { api, auditAttemptId, jsonBody, request } from './session';
 import { Pdl1Badge, Pdl1Overlay, Pdl1Panel, usePdl1 } from './pdl1';
 import { TileViewer } from './tile-viewer';
 import type { CameraFrame, SlideInfo, Viewport } from './tile-viewer';
@@ -139,18 +139,33 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       navigate((viewer) => viewer.magnify(event.deltaY < 0 ? 1.25 : 0.8, event.offsetX, event.offsetY));
     }, { signal, passive: false });
 
+    const auditId = auditAttemptId();
+    let finished = false;
+    function recordView(result: 'success' | 'failed') {
+      if (finished || signal.aborted || scan.source !== 'clinical') return;
+      finished = true;
+      const options = { ...jsonBody('POST', { attempt_id: auditId, result }), keepalive: true };
+      void request(`${endpoint}/view-events`, options).catch(() => {});
+    }
+
     async function open() {
       try {
-        const metadata = await api<SlideInfo>(endpoint, { signal });
+        const metadata = await api<SlideInfo>(endpoint, { signal, headers: { 'X-Audit-Attempt': auditId } });
         if (!element || signal.aborted) return;
         renderer.current = new TileViewer(element, metadata, endpoint, (viewport) => {
           setView(viewport);
           const viewer = renderer.current;
           if (viewer) report.current?.onFrame(viewer.cameraFrame());
-        }, setTileStatus, compareMode ? { loads: 2, tiles: 24 } : undefined);
+        }, (status) => {
+          setTileStatus(status);
+          if (status !== 'loading') recordView(status === 'unavailable' ? 'failed' : 'success');
+        }, compareMode ? { loads: 2, tiles: 24 } : undefined);
         setInfo(metadata);
       } catch (error) {
-        if (!signal.aborted) setFailure(error instanceof Error ? error.message : 'Unable to open the slide.');
+        if (!signal.aborted) {
+          setFailure(error instanceof Error ? error.message : 'Unable to open the slide.');
+          recordView('failed');
+        }
       }
     }
     void open();
@@ -161,7 +176,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       drag.current = null;
       drawing.current = null;
     };
-  }, [endpoint, attempt, compareMode]);
+  }, [endpoint, attempt, compareMode, scan.source]);
 
   useEffect(() => {
     setOverview('');

@@ -3,11 +3,12 @@ from datetime import datetime, timezone
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Path, Query
+from fastapi import Request, APIRouter, HTTPException, Path, Query
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from pydantic import Field, StringConstraints
 
+from app.case_activity import attempt_id, record_activity
 from app.auth import CurrentUser, Session, WRITERS
 from app.clinical import case_visibility
 from app.intake import DATA_ROOT, scan_files, slide_entries
@@ -273,11 +274,12 @@ async def remember_open(session, user, key):
 
 
 @router.post("/cases/{case_id}/opened")
-async def clinical_open(case_id: UUID, user: CurrentUser, session: Session):
+async def clinical_open(case_id: UUID, request: Request, user: CurrentUser, session: Session):
     async with session.begin():
         record = await session.scalar(accessible_cases(user).where(Case.id == case_id).with_for_update(read=True))
         if record is None:
             raise HTTPException(404, "Case not found.")
+        await record_activity(session, user, record.id, "case_opened", "case", record.id, attempt_id(request))
         return await remember_open(session, user, record_key({"record_id": record.id}))
 
 

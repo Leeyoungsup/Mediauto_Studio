@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, Request, Response
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -12,8 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from starlette.staticfiles import StaticFiles
 
 from app.auth import load_auth_key, router as auth_router
+from app.case_activity import case_http_exception, case_validation_exception
 from app.case_attachments import router as case_attachments_router
 from app.case_editor import router as case_editor_router
+from app.case_logs import router as case_logs_router
 from app.case_requests import router as case_requests_router
 from app.clinical import router as clinical_router
 from app.database import database_url
@@ -65,8 +69,11 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Mediauto Studio", lifespan=lifespan)
+app.add_exception_handler(StarletteHTTPException, case_http_exception)
+app.add_exception_handler(RequestValidationError, case_validation_exception)
 app.include_router(auth_router)
 app.include_router(case_attachments_router)
+app.include_router(case_logs_router)
 app.include_router(case_editor_router)
 app.include_router(case_requests_router)
 app.include_router(clinical_router)

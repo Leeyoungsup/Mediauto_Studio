@@ -142,4 +142,5 @@ with Image.new("RGB", (480, 360), "ivory") as gross:
     gross.save(sys.argv[2], "PNG")
 PYMEDIA
     node scripts/case-attachments-browser.mjs
+    node scripts/case-logs-browser.mjs
 fi

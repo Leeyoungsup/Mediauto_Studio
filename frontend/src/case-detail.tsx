@@ -1,17 +1,19 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
-import { ArrowLeft, ArrowRight, ClipboardList, PencilLine, MessageSquare, FileSymlink, FileText, Camera, History, ScanLine, UserRound } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ClipboardList, PencilLine, MessageSquare, FileSymlink, FileText, Camera, List, History, ScanLine, UserRound } from 'lucide-react';
 import { CaseAttachments } from './case-attachments';
 import { PatientHistory } from './patient-history';
+import { CaseLogsDialog } from './case-logs';
 import { CaseAudit } from './case-audit';
 import { readyCount } from './demo';
 import type { DemoCase } from './demo';
 import { ScanReference, SlidePreview, StatusLabel } from './worklist';
 
-export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, onConfirm, patientIntegration, requests, report, initialTab, dates, routing, editor, selectedScan, historyEndpoint, attachmentsEndpoint }: {
+export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, onConfirm, patientIntegration, requests, report, initialTab, dates, routing, editor, selectedScan, historyEndpoint, attachmentsEndpoint, logsEndpoint }: {
   item: DemoCase; emr: string; onBack: () => void; onViewer: (slide?: string) => void;
-  onAssign?: () => void; onReview?: () => void; onConfirm?: () => void; patientIntegration?: ReactNode; requests?: ReactNode; report?: ReactNode; initialTab?: string; selectedScan?: string; historyEndpoint?: string; attachmentsEndpoint?: string; dates?: ReactNode; routing?: ReactNode; editor?: ReactNode;
+  onAssign?: () => void; onReview?: () => void; onConfirm?: () => void; patientIntegration?: ReactNode; requests?: ReactNode; report?: ReactNode; initialTab?: string; selectedScan?: string; historyEndpoint?: string; attachmentsEndpoint?: string; logsEndpoint?: string; dates?: ReactNode; routing?: ReactNode; editor?: ReactNode;
 }) {
+  const [showLogs, setShowLogs] = useState(false);
   const [tab, setTab] = useState(initialTab ?? 'Slides');
   const available = readyCount(item);
   const selected = item.slides.find((slide) => slide.id === selectedScan);
@@ -21,6 +23,7 @@ export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, on
     <div className="page-heading"><div><h1>{item.id}</h1><p>{item.specimen} · Received {item.received}</p></div>
       <div className="actions"><StatusLabel status={item.status} />
         {onReview && <button className="button secondary" disabled={!available} onClick={onReview}>{item.status === 'In Review' ? 'Review Complete' : 'Start Review'}</button>}
+        {logsEndpoint && <button type="button" className="button secondary" onClick={() => setShowLogs(true)}><List size={16} /> Case Logs</button>}
         <button className="button primary" disabled={selected ? !selected.wsi : !available} onClick={() => onViewer(selected?.id)}><ScanLine size={17} /> Open Viewer</button>
       </div>
     </div>
@@ -64,5 +67,6 @@ export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, on
         </div>
       </aside>
     </div>
+    {showLogs && logsEndpoint && <CaseLogsDialog endpoint={logsEndpoint} onClose={() => setShowLogs(false)} />}
   </>;
 }

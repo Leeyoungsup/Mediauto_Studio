@@ -270,10 +270,15 @@ class ExternalIdentifier(Base):
 
 class ClinicalEvent(Base):
     __tablename__ = "clinical_events"
-    __table_args__ = (UniqueConstraint("organization", "record_type", "record_id", "version"),)
+    __table_args__ = (
+        UniqueConstraint("organization", "record_type", "record_id", "version"),
+        ForeignKeyConstraint(("organization", "case_id"), ("cases.organization", "cases.id"), name="fk_clinical_event_case"),
+        Index("ix_clinical_event_case_time", "organization", "case_id", "occurred_at", "id"),
+    )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     organization: Mapped[str] = mapped_column(String(64))
+    case_id: Mapped[UUID | None] = mapped_column(Uuid)
     record_type: Mapped[str] = mapped_column(String(24))
     record_id: Mapped[UUID] = mapped_column(Uuid)
     version: Mapped[int] = mapped_column(Integer)
@@ -285,6 +290,30 @@ class ClinicalEvent(Base):
     reason: Mapped[str | None] = mapped_column(String(240))
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     transaction_id: Mapped[UUID] = mapped_column(Uuid)
+
+
+class CaseActivity(Base):
+    __tablename__ = "case_activity"
+    __table_args__ = (
+        ForeignKeyConstraint(("organization", "case_id"), ("cases.organization", "cases.id")),
+        ForeignKeyConstraint(("organization", "actor_id"), ("auth_users.organization", "auth_users.id")),
+        UniqueConstraint("organization", "actor_id", "action", "entity", "target_id", "attempt_id",
+                         name="uq_case_activity_attempt"),
+        CheckConstraint("result IN ('success', 'failed', 'denied')", name="case_activity_result"),
+        Index("ix_case_activity_time", "organization", "case_id", "occurred_at", "id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    organization: Mapped[str] = mapped_column(String(64))
+    case_id: Mapped[UUID] = mapped_column(Uuid)
+    actor_id: Mapped[UUID] = mapped_column(Uuid)
+    action: Mapped[str] = mapped_column(String(40))
+    entity: Mapped[str] = mapped_column(String(24))
+    target_id: Mapped[UUID] = mapped_column(Uuid)
+    attempt_id: Mapped[UUID] = mapped_column(Uuid)
+    result: Mapped[str] = mapped_column(String(8))
+    status_code: Mapped[int | None] = mapped_column(Integer)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class RegistrationRequest(Base):

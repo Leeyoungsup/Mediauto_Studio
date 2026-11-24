@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, jsonBody } from './session';
+import { api, auditAttemptId, jsonBody } from './session';
 import type { SlideInfo, Viewport } from './tile-viewer';
 
 export type Point = [number, number];
@@ -8,7 +8,7 @@ export type Camera = { x: number; y: number; zoom: number };
 type Position = Camera & { version: number; saved_at: string };
 type Kind = Exclude<Tool, 'pan'>;
 type Draft = { id: string; kind: Kind; points: [Point, Point]; label: string };
-type Mark = Draft & { length: number | null; unit: 'um' | 'px' | null; created_at: string; author: string; can_delete: boolean };
+type Mark = Draft & { length: number | null; unit: 'um' | 'px' | null; created_at: string; author: string; can_delete: boolean; version: number };
 type Records = { position: Position | null; annotations: Mark[]; can_annotate: boolean };
 
 const formatter = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
@@ -74,9 +74,7 @@ export function useViewerRecords(endpoint: string, enabled: boolean, restore: (c
       setError('Select two different points on the image.');
       return;
     }
-    const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
-    const uuid = `${id.slice(0, 8)}-${id.slice(8, 12)}-4${id.slice(13, 16)}-8${id.slice(17, 20)}-${id.slice(20)}`;
-    setDraft({ id: uuid, kind, points: [start, end], label: '' });
+    setDraft({ id: auditAttemptId(), kind, points: [start, end], label: '' });
     setError('');
     setNotice('');
     setTool('pan');
@@ -112,6 +110,15 @@ export function useViewerRecords(endpoint: string, enabled: boolean, restore: (c
     });
   }
 
+  function edit(annotation: Mark, label: string, onSaved: () => void) {
+    void change(async () => {
+      const saved = await api<Mark>(path + '/annotations/' + annotation.id, jsonBody('PATCH', { label, version: annotation.version }));
+      setRecords((current) => current && { ...current, annotations: current.annotations.map((item) => item.id === saved.id ? saved : item) });
+      setNotice('Annotation name updated.');
+      onSaved();
+    });
+  }
+
   function remove(annotation: Mark) {
     void change(async () => {
       await api(path + '/annotations/' + annotation.id, { method: 'DELETE' });
@@ -120,7 +127,7 @@ export function useViewerRecords(endpoint: string, enabled: boolean, restore: (c
     });
   }
 
-  return { records, draft, tool, chooseTool, complete, savePosition, saveAnnotation, remove, error, notice,
+  return { records, draft, tool, chooseTool, complete, savePosition, saveAnnotation, edit, remove, error, notice,
     busy: busy || loading, refresh: () => setAttempt((value) => value + 1),
     applySaved: () => { if (records?.position) restore(records.position); },
     cancel: () => setDraft(undefined),
@@ -165,9 +172,10 @@ export function AnnotationOverlay({ view, annotations, draft, drawing }: {
 
 export function ViewerRecordsPanel({ state, info, move }: { state: ToolState; info: SlideInfo; move: (points: [Point, Point]) => void }) {
   const { records, draft, tool, error, busy, notice } = state;
+  const [editing, setEditing] = useState<{ mark: Mark; label: string }>();
   return <section className="viewer-record-panel" aria-label="Review Position and Annotations">
     <h2>Review Position and Annotations</h2>
-    {error && <div className="notice" role="alert">{error}<button className="button secondary" disabled={busy} onClick={state.refresh}>Refresh Saved Records</button></div>}
+    {error && <div className="notice" role="alert">{error}<button className="button secondary" disabled={busy} onClick={() => { setEditing(undefined); state.refresh(); }}>Refresh Saved Records</button></div>}
     {notice && <p role="status">{notice}</p>}
     {records?.position && <p>Saved Position {date.format(new Date(records.position.saved_at))}</p>}
     {tool !== 'pan' && <p role="status">Drag from the start point to the end point on the image.</p>}
@@ -184,9 +192,21 @@ export function ViewerRecordsPanel({ state, info, move }: { state: ToolState; in
       </div>
       <div className="actions">
         <button className="button secondary" onClick={() => move(item.points)}>Go to Position</button>
-        {records.can_annotate && item.can_delete && <button className="button secondary" disabled={busy}
-          onClick={() => { if (window.confirm('Delete this annotation?')) state.remove(item); }}>Delete</button>}
+        {records.can_annotate && item.can_delete && <>
+          <button className="button secondary" disabled={busy} onClick={() => setEditing({ mark: item, label: item.label })}>Edit Name</button>
+          <button className="button secondary" disabled={busy}
+            onClick={() => { if (window.confirm('Delete this annotation?')) { setEditing(undefined); state.remove(item); } }}>Delete</button>
+        </>}
       </div>
+      {editing?.mark.id === item.id && <form className="viewer-record-draft" onSubmit={(event) => {
+        event.preventDefault();
+        state.edit(editing.mark, editing.label, () => setEditing(undefined));
+      }}>
+        <label className="form-field">Updated Annotation Name <input value={editing.label} maxLength={160}
+          onChange={(event) => setEditing({ ...editing, label: event.target.value })} /></label>
+        <div className="actions"><button type="submit" className="button primary" disabled={busy}>Save Name</button>
+          <button type="button" className="button secondary" disabled={busy} onClick={() => setEditing(undefined)}>Cancel</button></div>
+      </form>}
     </li>)}</ul> : records && <p>No saved annotations.</p>}
   </section>;
 }

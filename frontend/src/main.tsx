@@ -20,7 +20,7 @@ import { CaseRouting, WorkgroupSettings } from './workgroups';
 import type { Queue } from './workgroups';
 import type { Scope } from './worklist';
 import { defaultOrder } from './worklist-config';
-import { api, canWrite, jsonBody, SessionGate } from './session';
+import { api, auditAttemptId, canWrite, jsonBody, SessionGate } from './session';
 import type { User } from './session';
 import { caseView, emptyResult, states } from './worklist-api';
 import type { Result, WorklistEntry, WorklistQuery } from './worklist-api';
@@ -189,7 +189,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
     }
     if (lastOpenRequest.current === openedCase) return;
     lastOpenRequest.current = openedCase;
-    api(openedCase, { method: 'POST', keepalive: true })
+    api(openedCase, { method: 'POST', keepalive: true, headers: { 'X-Audit-Attempt': auditAttemptId() } })
       .then(() => setOpenRevision((value) => value + 1))
       .catch(() => { if (lastOpenRequest.current === openedCase) lastOpenRequest.current = undefined; });
   }, [openedCase]);
@@ -230,6 +230,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
 
   const clinicalCaseEndpoint = current?.recordId ? `/api/clinical/${encodeURIComponent(user.organization)}/cases/${current.recordId}` : undefined;
   const historyEndpoint = requestAllowed && clinicalCaseEndpoint ? clinicalCaseEndpoint + '/patient-history' : undefined;
+  const logsEndpoint = requestAllowed && clinicalCaseEndpoint ? clinicalCaseEndpoint + '/logs' : undefined;
   const attachmentsEndpoint = clinicalCaseEndpoint ? clinicalCaseEndpoint + '/attachments' : undefined;
 
   function showModal(next: Modal) { setFormError(''); setModal(next); }
@@ -352,7 +353,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
         {casePage && (!current ? <div className="panel empty"><CircleHelp size={28} /><strong>{casePage.files
           ? (intakeAllowed && filesLoading ? 'Loading case…' : 'Unable to load the case.')
           : detail?.key === detailKey ? detail?.error : 'Loading case…'}</strong><button className="button secondary" onClick={goBack}>Back to Worklist</button></div>
-          : casePage.view === 'case' ? <CaseDetail key={current.id + '/' + (casePage.tab ?? '')} item={current} selectedScan={casePage.selectedScan} historyEndpoint={historyEndpoint} attachmentsEndpoint={attachmentsEndpoint}
+          : casePage.view === 'case' ? <CaseDetail key={current.id + '/' + (casePage.tab ?? '')} item={current} selectedScan={casePage.selectedScan} historyEndpoint={historyEndpoint} attachmentsEndpoint={attachmentsEndpoint} logsEndpoint={logsEndpoint}
             initialTab={current.recordId ? casePage.tab === 'editor' ? 'Case Editor' : requestAllowed
               ? casePage.tab === 'requests' ? 'Requests' : casePage.tab === 'report' ? 'Report Draft' : undefined : undefined : undefined}
             editor={current.recordId ? <CaseEditor item={current} organization={user.organization} editable={writable && current.status !== 'Review Complete'}
@@ -368,7 +369,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
             onAssign={mayAssign ? () => openWorkflow(current, 'assignment') : undefined}
             onReview={mayReview ? () => openWorkflow(current, 'review') : undefined}
             onConfirm={intakeAllowed && current.source === 'files' ? () => openWorkflow(current, 'confirm') : undefined} />
-          : <Viewer key={current.id} item={current} activeSlide={casePage.slide} initialSnapshot={casePage.snapshot} historyEndpoint={historyEndpoint} attachmentsEndpoint={attachmentsEndpoint} editorHref={current.recordId ? `#case/${current.recordId}/editor` : undefined} requestsHref={requestAllowed && current.recordId ? `#case/${current.recordId}/requests` : undefined} onSlide={(id) => navigateViewer(current, id)} onBack={(scan) => navigateCase(current, scan)}
+          : <Viewer key={current.id} item={current} activeSlide={casePage.slide} initialSnapshot={casePage.snapshot} historyEndpoint={historyEndpoint} attachmentsEndpoint={attachmentsEndpoint} logsEndpoint={logsEndpoint} editorHref={current.recordId ? `#case/${current.recordId}/editor` : undefined} requestsHref={requestAllowed && current.recordId ? `#case/${current.recordId}/requests` : undefined} onSlide={(id) => navigateViewer(current, id)} onBack={(scan) => navigateCase(current, scan)}
             onReview={mayReview ? () => openWorkflow(current, 'review') : undefined} />)}
       </main>
     </div>

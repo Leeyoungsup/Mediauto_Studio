@@ -533,3 +533,18 @@ dialog::backdrop { background: #21193575; }
   .attachment-layout { grid-template-columns: minmax(0, 1fr); }
   .attachment-layout section[aria-label="Attachment List"] ul { max-height: 160px; }
 }
+
+.case-logs-dialog { width: min(1140px, calc(100vw - 26px)); }
+.case-logs { display: grid; gap: 12px; }
+.case-log-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(138px, 1fr)); gap: 8px; }
+.case-log-filters .actions { grid-column: 1 / -1; }
+.case-log-table { overflow-x: auto; }
+.case-log-table table { width: 100%; border-collapse: collapse; }
+.case-log-table :is(th, td) { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; font-size: 13px; }
+.case-log-table th { background: var(--accent-soft); }
+.case-log-table td details { min-width: 125px; }
+.case-log-table details summary { cursor: pointer; }
+.case-log-table details dl { margin: 5px 0; min-width: 230px; max-width: 450px; overflow-wrap: anywhere; }
+.case-log-table details dd { margin: 3px 0 7px; }
+.case-log-table details pre { margin: 0; white-space: pre-wrap; font-size: 12px; }
+.viewer-record-list .viewer-record-draft { grid-column: 1 / -1; flex-basis: 100%; }

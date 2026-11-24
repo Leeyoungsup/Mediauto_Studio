@@ -14,7 +14,8 @@ from PIL import Image, ImageCms
 from sqlalchemy import select
 
 from app.auth import CurrentUser, Session
-from app.clinical import case_visibility, scan_metadata
+from app.case_activity import record_activity
+from app.clinical import ClinicalInput, case_visibility, scan_metadata
 from app.intake import DATA_ROOT, INTAKE_PREFIX, require_intake, scan_files, source_id
 from app.scan_quality import BLOCKED_QC, embedded_label
 from app.models import ApplicationSetting, Case, ScanLabel, Slide, SlideScan, Specimen
@@ -83,6 +84,7 @@ async def lock_scan_case(session, user, scan_id):
         .with_for_update(read=True, of=Case))
     if case is None:
         raise HTTPException(404, "Registered WSI not found.")
+    return case
 
 
 def positive_number(value):
@@ -182,6 +184,21 @@ Source = Literal["clinical", "files"]
 async def metadata(source: Source, scan_id: UUID, request: Request, user: CurrentUser, session: Session):
     path = await registered_path(source, scan_id, user, session)
     return await scan_response(request, path, "metadata")
+
+
+class ScanViewEvent(ClinicalInput):
+    attempt_id: UUID
+    result: Literal["success", "failed"]
+
+
+@router.post("/clinical/{scan_id}/view-events", status_code=204)
+async def scan_view_event(scan_id: UUID, data: ScanViewEvent, user: CurrentUser, session: Session):
+    async with session.begin():
+        row = (await session.execute(visible_scan(user, scan_id, Case.id, SlideScan.qc_status)
+                                    .with_for_update(read=True, of=Case))).one_or_none()
+        if row is None or (data.result == "success" and row.qc_status in BLOCKED_QC):
+            raise HTTPException(404, "Registered WSI not found.")
+        await record_activity(session, user, row.id, "scan_viewed", "scan", scan_id, data.attempt_id, data.result)
 
 
 @router.get("/{source}/{scan_id}/overview.jpeg")

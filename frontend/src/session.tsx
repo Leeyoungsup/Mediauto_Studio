@@ -6,6 +6,11 @@ export type User = { id: string; organization: string; username: string; display
 export const canWrite = (user: User) => user.role === 'admin' || user.role === 'labeler';
 const expired = 'mediauto-session-expired';
 
+export function auditAttemptId() {
+  const hex = Array.from(crypto.getRandomValues(new Uint8Array(16)), (value) => value.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20)}`;
+}
+
 export async function request(path: string, options?: RequestInit): Promise<Response> {
   const response = await fetch(path, { cache: 'no-store', ...options });
   if (response.status === 401 && path !== '/api/auth/login') window.dispatchEvent(new Event(expired));

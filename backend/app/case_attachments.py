@@ -12,6 +12,7 @@ from sqlalchemy.orm import load_only
 
 from app.attachment_files import FILE_LIMITS, MIB, MIME_TYPES, pdf_page, photo_preview, prepare_attachment, upload_name
 from app.auth import require_roles
+from app.case_activity import attempt_id, record_activity
 from app.clinical import Organization, RegistrationKey, Session, add_event, case_visibility, find, write
 from app.models import AuthUser, Case, CaseAttachment, ClinicalEvent, Specimen
 
@@ -144,6 +145,11 @@ async def preview(
             content = await asyncio.to_thread(pdf_page, content, page)
         else:
             content = await asyncio.to_thread(photo_preview, content)
+    if page == 1:
+        user = session.info["user"]
+        async with session.begin():
+            case = await find(session, Case, organization, case_id)
+            await record_activity(session, user, case.id, "attachment_opened", "attachment", attachment_id, attempt_id(request))
     return Response(content, media_type="image/png" if kind == "pdf" else "image/jpeg", headers=PRIVATE)
 
 

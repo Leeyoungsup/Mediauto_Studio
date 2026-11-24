@@ -2,14 +2,15 @@
 
 from datetime import date
 from typing import Annotated, Literal
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import Field, StringConstraints
 from sqlalchemy import Date, String, cast, func, literal, select, union_all
 from sqlalchemy.dialects.postgresql import insert
 
 from app.auth import require_roles
+from app.case_activity import attempt_id, record_activity
 from app.clinical import (ClinicalInput, Organization, RegistrationKey, Session, add_event,
                           find, require_version, write)
 from app.integration_service import KIND, SYSTEM
@@ -107,7 +108,7 @@ async def list_history(
 
 @router.get("/document")
 async def get_document(
-    organization: Organization, case_id: UUID, source: Source,
+    organization: Organization, case_id: UUID, source: Source, request: Request,
     record_id: Annotated[str, Query(pattern=r"^[0-9a-f-]{36}$|^[0-9a-f]{64}$")], session: Session,
 ):
     require_roles(session.info["user"], HISTORY_ROLES)
@@ -126,6 +127,9 @@ async def get_document(
             .where(ExternalSnapshot.channel == source, documents.selected_columns.id == record_id))).mappings().one_or_none()
     if result is None:
         raise HTTPException(404, "Clinical record not found for this case.")
+    target = UUID(record_id) if source == "manual" else uuid5(NAMESPACE_URL, f"mediauto-history:{source}:{record_id}")
+    await record_activity(session, session.info["user"], case_id, "patient_history_opened", "clinical_record", target, attempt_id(request))
+    await session.commit()
     return dict(result)
 
 

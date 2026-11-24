@@ -105,6 +105,7 @@ async def current_user(request: Request, response: Response) -> AuthUser:
     if not user:
         raise access_error()
     request.state.auth_session_id = session_id
+    request.state.auth_user = user
     return user
 
 

@@ -12,12 +12,13 @@ from pydantic import Field, StringConstraints, model_validator
 from sqlalchemy import func, or_, select, true
 
 from app.auth import CurrentUser, require_roles
+from app.case_activity import record_activity
 from app.clinical import (ClinicalInput, Organization, RegistrationKey, Session,
                           add_event, find, require_version, write)
 from app.models import AuthUser, Case, CaseRequest, ClinicalEvent, RequestNotification, Slide, SlideScan, Specimen
 from app.pdl1 import results_for_display, snapshot_folder
 from app.scan_quality import BLOCKED_QC
-from app.wsi import PRIVATE, STAGE_DOWNSAMPLES, scan_response, verified_scan_path
+from app.wsi import PRIVATE, STAGE_DOWNSAMPLES, ScanViewEvent, scan_response, verified_scan_path
 
 router = APIRouter(prefix="/api/clinical/{organization}", tags=["Case requests"])
 Kind = Literal["ai", "consult"]
@@ -315,12 +316,19 @@ async def mark_read(organization: Organization, notice_id: UUID, user: CurrentUs
     return {"ok": True}
 
 
-async def scoped_wsi(session, user, request_id):
+async def scoped_scan(session, user, request_id):
     row, case = await request_context(session, user, request_id)
     if not row.scan_id or (user.role != "admin" and case.assigned_to != user.id
                            and (row.assigned_to != user.id or row.status not in WSI_STATUSES)):
         raise HTTPException(404, "Unable to open the requested scan.")
     scan = (await case_scan(session, case, row.scan_id))[0]
+    return case, scan
+
+
+async def scoped_wsi(session, user, request_id, request=None):
+    case, scan = await scoped_scan(session, user, request_id)
+    if request is not None:
+        request.state.case_activity_wsi = (case.id, scan.id)
     path, _ = await verified_scan_path(scan.storage_key, (scan.size_bytes, scan.modified_ns))
     await session.rollback()
     return path
@@ -330,7 +338,15 @@ async def scoped_wsi(session, user, request_id):
 async def request_wsi(organization: Organization, request_id: UUID, request: Request, response: Response,
                       user: CurrentUser, session: Session):
     response.headers.update(PRIVATE)
-    return await scan_response(request, await scoped_wsi(session, user, request_id), "metadata")
+    return await scan_response(request, await scoped_wsi(session, user, request_id, request), "metadata")
+
+
+@router.post("/requests/{request_id}/wsi/view-events", status_code=204)
+async def request_view_event(organization: Organization, request_id: UUID, data: ScanViewEvent,
+                             user: CurrentUser, session: Session):
+    async with session.begin():
+        case, scan = await scoped_scan(session, user, request_id)
+        await record_activity(session, user, case.id, "scan_viewed", "scan", scan.id, data.attempt_id, data.result)
 
 
 @router.get("/requests/{request_id}/wsi/overview.jpeg")

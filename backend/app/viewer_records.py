@@ -52,7 +52,7 @@ def position_result(position):
 
 def annotation_result(row, actor_name, user):
     view = {key: getattr(row, key) for key in (
-        "id", "kind", "points", "label", "length", "unit", "mpp_x", "mpp_y", "created_at",
+        "id", "kind", "points", "label", "length", "unit", "mpp_x", "mpp_y", "created_at", "version",
     )}
     return {**view, "author": actor_name, "can_delete": user.role == "admin" or (user.role == "doctor" and user.id == row.author_id)}
 
@@ -64,7 +64,8 @@ def scope_for(scan_key, user):
 async def write_scope(source, scan_id, session, user):
     session.info["user"] = user
     if source == "clinical":
-        await lock_scan_case(session, user, scan_id)
+        return await lock_scan_case(session, user, scan_id)
+    return None
 
 
 @router.get("")
@@ -113,14 +114,14 @@ async def create_annotation(source: Source, scan_id: UUID, data: Annotation, use
     mpp_x, mpp_y = info["mpp_x"], info["mpp_y"]
     length, unit = measure(points, mpp_x, mpp_y) if data.kind == "distance" else (None, None)
     async with session.begin():
-        await write_scope(source, scan_id, session, user)
+        case_id = await write_scope(source, scan_id, session, user)
         created = await session.scalar(insert(ViewerAnnotation).values(
             id=data.id, organization=user.organization, scan_key=key, author_id=user.id, kind=data.kind,
             points=points, label=data.label, length=length, unit=unit, mpp_x=mpp_x, mpp_y=mpp_y, version=1,
         ).on_conflict_do_nothing().returning(ViewerAnnotation))
         if created is not None:
-            add_event(session, created, "annotation_registered", {}, {"kind": data.kind, "points": points, "length": length, "unit": unit},
-                      source="viewer")
+            add_event(session, created, "annotation_registered", {}, annotation_snapshot(created, scan_id, source),
+                      source="viewer", case_id=case_id)
             return annotation_result(created, user.display_name, user)
         existing = await session.scalar(select(ViewerAnnotation).where(
             *scope_for(key, user), ViewerAnnotation.id == data.id, ViewerAnnotation.author_id == user.id,
@@ -131,21 +132,63 @@ async def create_annotation(source: Source, scan_id: UUID, data: Annotation, use
         raise HTTPException(409, "This save ID belongs to a different annotation.")
 
 
+class AnnotationUpdate(ClinicalInput):
+    version: Annotated[int, Field(ge=1)]
+    label: Annotated[str, StringConstraints(strip_whitespace=True, max_length=160)]
+
+
+def annotation_snapshot(annotation, scan_id, source):
+    return {
+        "kind": annotation.kind, "points": annotation.points, "label": annotation.label,
+        "length": annotation.length, "unit": annotation.unit, "deleted": annotation.deleted_at is not None,
+        "scan_id": str(scan_id), "scan_source": source,
+    }
+
+
+async def editable_annotation(session, key, user, annotation_id):
+    annotation = await session.scalar(select(ViewerAnnotation).where(
+        *scope_for(key, user), ViewerAnnotation.id == annotation_id,
+    ).with_for_update())
+    if annotation is None:
+        raise HTTPException(404, "Annotation not found for this scan.")
+    if annotation.author_id != user.id and user.role != "admin":
+        raise HTTPException(403, "You can change only the annotations you created.")
+    return annotation
+
+
+@router.patch("/annotations/{annotation_id}")
+async def edit_annotation(source: Source, scan_id: UUID, annotation_id: UUID, data: AnnotationUpdate,
+                          user: CurrentUser, session: Session):
+    require_roles(user, ANNOTATORS)
+    _, key = await registered_file(source, scan_id, user, session)
+    async with session.begin():
+        case_id = await write_scope(source, scan_id, session, user)
+        annotation = await editable_annotation(session, key, user, annotation_id)
+        if annotation.deleted_at is not None:
+            raise HTTPException(409, "This annotation has been deleted. Refresh saved records.")
+        if annotation.version != data.version:
+            raise HTTPException(409, "This annotation has changed. Refresh saved records.")
+        if annotation.label != data.label:
+            before = annotation_snapshot(annotation, scan_id, source)
+            annotation.label = data.label
+            annotation.version += 1
+            add_event(session, annotation, "annotation_updated", before, annotation_snapshot(annotation, scan_id, source),
+                      source="viewer", case_id=case_id)
+        author = await session.get(AuthUser, annotation.author_id)
+        return annotation_result(annotation, author.display_name, user)
+
+
 @router.delete("/annotations/{annotation_id}")
 async def delete_annotation(source: Source, scan_id: UUID, annotation_id: UUID, user: CurrentUser, session: Session):
     require_roles(user, ANNOTATORS)
     _, key = await registered_file(source, scan_id, user, session)
     async with session.begin():
-        await write_scope(source, scan_id, session, user)
-        annotation = await session.scalar(select(ViewerAnnotation).where(
-            *scope_for(key, user), ViewerAnnotation.id == annotation_id,
-        ).with_for_update())
-        if annotation is None:
-            raise HTTPException(404, "Annotation not found for this scan.")
-        if annotation.author_id != user.id and user.role != "admin":
-            raise HTTPException(403, "You can delete only the annotations you created.")
+        case_id = await write_scope(source, scan_id, session, user)
+        annotation = await editable_annotation(session, key, user, annotation_id)
         if annotation.deleted_at is None:
+            before = annotation_snapshot(annotation, scan_id, source)
             annotation.deleted_at = datetime.now(timezone.utc)
             annotation.version += 1
-            add_event(session, annotation, "annotation_deleted", {"deleted": False}, {"deleted": True}, source="viewer")
+            add_event(session, annotation, "annotation_deleted", before, annotation_snapshot(annotation, scan_id, source),
+                      source="viewer", case_id=case_id)
     return {"ok": True}

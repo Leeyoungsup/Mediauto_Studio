@@ -159,9 +159,10 @@ def case_visibility(model, user):
 
 
 def add_event(session: AsyncSession, record, action: str, before: dict, after: dict, reason: str | None = None,
-              *, source: str = SOURCE, transaction_id: UUID | None = None) -> None:
+              *, source: str = SOURCE, transaction_id: UUID | None = None, case_id: UUID | None = None) -> None:
     session.add(ClinicalEvent(
         organization=record.organization, record_type=record.__tablename__, record_id=record.id,
+        case_id=case_id or (record.id if isinstance(record, Case) else getattr(record, "case_id", None)),
         version=record.version, action=action, actor=str(session.info["user"].id), source=source, before=before, after=after,
         reason=reason, transaction_id=transaction_id or uuid4(),
     ))

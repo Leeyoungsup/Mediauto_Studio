@@ -520,6 +520,96 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.post(other_url + "/patient-confirm",
                           json={**confirm, "source_revision": 3, "confirm_differences": True})).status_code, 409)
 
+    async def test_case_logs_scope_filters_attempts_and_annotation_changes(self):
+        case = await self.create("cases", {"case_number": "AUDIT-QA"})
+        unrelated = await self.create("cases", {"case_number": "AUDIT-OTHER"})
+        specimen = await self.create("specimens", {"case_id": case["id"], "specimen_number": "A"})
+        slide = await self.create("slides", {"specimen_id": specimen["id"], "slide_number": "AUDIT-S"})
+        sample = self.root / "audit.ndpi"
+        sample.write_bytes(b"damaged input for failure audit")
+        scan = await self.create("scans", {"slide_id": slide["id"], "storage_key": sample.name})
+        base = "/api/wsi/clinical/" + scan["id"]
+        path = self.url + "/cases/" + case["id"] + "/logs"
+
+        async def check(request, code=200):
+            response = await request
+            self.assertEqual(response.status_code, code, response.text)
+            return response
+
+        async def rows(**params):
+            response = await check(self.client.get(path, params=params))
+            return response.json()["rows"]
+
+        attempt = str(uuid4())
+        header = {"X-Audit-Attempt": attempt}
+        for _ in range(2):
+            await check(self.client.post("/api/worklist/cases/" + case["id"] + "/opened", headers=header))
+        await check(self.client.get(base, headers=header), 422)
+        await check(self.client.post(base + "/view-events", json={"attempt_id": attempt, "result": "failed"}), 204)
+        await check(self.client.post(base + "/view-events", json={"attempt_id": str(uuid4()), "result": "success"}), 204)
+        self.assertEqual(len(await rows(action="case_opened")), 1)
+        self.assertEqual(len(await rows(action="scan_viewed", result="success")), 1)
+        failure = await rows(action="scan_viewed", result="failed", target_id=scan["id"])
+        self.assertEqual([event["status_code"] for event in failure], [422])
+
+        annotation = {"id": str(uuid4()), "kind": "rectangle", "label": "Initial overlay", "points": [[3, 4], [10, 12]]}
+        annotations = base + "/viewer-records/annotations"
+        with patch("app.viewer_records.scan_response", return_value={"dimensions": [120, 100], "mpp_x": None, "mpp_y": None}):
+            for _ in range(2):
+                await check(self.client.post(annotations, json=annotation), 201)
+        mark = annotations + "/" + annotation["id"]
+        renamed = await check(self.client.patch(mark, json={"version": 1, "label": "Revised overlay"}))
+        self.assertEqual(renamed.json()["version"], 2)
+        await check(self.client.patch(mark, json={"version": 1, "label": "Stale overlay"}), 409)
+        for _ in range(2):
+            await check(self.client.delete(mark))
+        successful = await rows(entity="annotation", result="success", target_id=annotation["id"])
+        self.assertEqual([event["action"] for event in successful],
+                         ["annotation_deleted", "annotation_updated", "annotation_registered"])
+        self.assertTrue(successful[0]["after"]["deleted"])
+        self.assertEqual((successful[1]["before"]["label"], successful[1]["after"]["label"]),
+                         ("Initial overlay", "Revised overlay"))
+        self.assertEqual(successful[1]["before"]["points"], annotation["points"])
+        self.assertEqual([x["status_code"] for x in await rows(action="annotation_updated", result="failed")], [409])
+
+        doctor = await create_account(self.org, "audit-doctor", "doctor")
+        labeler = await create_account(self.org, "audit-labeler", "labeler")
+        await login(self.client, self.org, doctor.username)
+        await check(self.client.get(path), 404)
+        await check(self.client.get(base), 404)
+        await check(self.client.get("/api/worklist/" + case["id"]), 404)
+        await login(self.client, self.org, labeler.username)
+        await check(self.client.get(path), 403)
+        foreign = await create_account(self.org + "-outside", "audit-foreign", "admin")
+        await login(self.client, foreign.organization, foreign.username)
+        await check(self.client.get(path), 403)
+        await check(self.client.get(base), 404)
+        await login(self.client, self.org, self.user.username)
+
+        denied = await rows(result="denied", actor=str(doctor.id))
+        self.assertEqual(sorted(event["action"] for event in denied), ["case_opened", "scan_viewed"])
+        self.assertFalse(await rows(actor=str(foreign.id)))
+        other = await check(self.client.get(self.url + "/cases/" + unrelated["id"] + "/logs"))
+        self.assertFalse(any(event["target_id"] == scan["id"] for event in other.json()["rows"]))
+
+        for _ in range(32):
+            await check(self.client.post(base + "/view-events", json={"attempt_id": str(uuid4()), "result": "success"}), 204)
+        first = (await check(self.client.get(path, params={"action": "scan_viewed", "result": "success"}))).json()
+        self.assertEqual(len(first["rows"]), 30)
+        self.assertTrue(first["has_more"])
+        cursor = first["rows"][-1]
+        second = await rows(action="scan_viewed", result="success", before_at=cursor["occurred_at"], before_id=cursor["id"])
+        self.assertEqual(len(second), 3)
+        self.assertFalse({event["id"] for event in first["rows"]} & {event["id"] for event in second})
+
+        transferred = await self.create("specimens", {"case_id": unrelated["id"], "specimen_number": "B"})
+        await check(self.client.patch(self.url + "/slides/" + slide["id"] + "/specimen", json={
+            "target_id": transferred["id"], "version": slide["version"], "reason": "Synthetic transfer",
+        }))
+        self.assertEqual(len(await rows(entity="annotation", result="success", target_id=annotation["id"])), 3)
+        new_case = await check(self.client.get(self.url + "/cases/" + unrelated["id"] + "/logs"))
+        self.assertFalse(any(event["target_id"] in (scan["id"], annotation["id"]) for event in new_case.json()["rows"]))
+
     async def test_case_attachments_validate_scope_contents_and_download_audit(self):
         import io
         from PIL import Image
