@@ -4,6 +4,7 @@ import { AlertTriangle, LocateFixed, Map, Minus, Pause, Play, Plus, ScanLine } f
 import type { WsiScan } from './demo';
 import { api, auditAttemptId, jsonBody, request } from './session';
 import { Pdl1Badge, Pdl1Overlay, Pdl1Panel, usePdl1 } from './pdl1';
+import { roiSearchHref } from './roi-search';
 import { LymphCounts } from './lymph-counts';
 import { TileViewer } from './tile-viewer';
 import type { CameraFrame, SlideInfo, Viewport } from './tile-viewer';
@@ -64,10 +65,12 @@ type ViewerOptions = {
 
 const autopanVectors = { right: [-1, 0], left: [1, 0], down: [0, -1], up: [0, 1] } as const;
 
-export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint, initialSnapshot, options }: {
-  scan: WsiScan; label: string; stain: string; comparison?: PaneComparison; readOnlyEndpoint?: string; initialSnapshot?: string; options?: ViewerOptions;
+export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint, initialSnapshot, initialRoi, roiCaseId, options }: {
+  scan: WsiScan; label: string; stain: string; comparison?: PaneComparison; readOnlyEndpoint?: string; initialSnapshot?: string; initialRoi?: string; roiCaseId?: string; options?: ViewerOptions;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
+  const focusedRoi = useRef<string>(undefined);
+  const [roiUnavailable, setRoiUnavailable] = useState(false);
   const renderer = useRef<TileViewer | null>(null);
   const drag = useRef<{ id: number; x: number; y: number } | null>(null);
   const drawing = useRef<{ id: number; kind: Geometry['kind']; points: Point[] } | null>(null);
@@ -114,6 +117,24 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     }
   }, [compareMode]);
   const viewerRecords = useViewerRecords(endpoint, Boolean(info) && !readOnlyEndpoint, restoreCamera);
+
+  function cameraFor(points: Point[], view: Viewport, savedZoom?: number | null): Camera {
+    const xs = points.map(([x]) => x);
+    const ys = points.map(([, y]) => y);
+    const x1 = Math.min(...xs), x2 = Math.max(...xs), y1 = Math.min(...ys), y2 = Math.max(...ys);
+    const zoom = savedZoom ?? (points.length === 1 ? view.zoom : Math.min(
+      view.width * view.zoom * 0.65 / Math.max(1, x2 - x1), view.height * view.zoom * 0.65 / Math.max(1, y2 - y1)));
+    return { x: (x1 + x2) / 2, y: (y1 + y2) / 2, zoom };
+  }
+
+  useEffect(() => {
+    if (!initialRoi || !view || !viewerRecords.records || focusedRoi.current === initialRoi) return;
+    focusedRoi.current = initialRoi;
+    const match = viewerRecords.records.annotations.find((item) => item.id === initialRoi &&
+      ['rectangle', 'ellipse', 'polygon'].includes(item.kind));
+    if (match) restoreCamera(cameraFor(match.points, view));
+    setRoiUnavailable(!match);
+  }, [initialRoi, view, viewerRecords.records, restoreCamera]);
 
   function getPoint(event: ReactPointerEvent<HTMLCanvasElement>, allowClip: boolean): Point | null {
     if (!view || !info) return null;
@@ -429,15 +450,10 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       {overviewFailed && minimap && !settings?.show_overview && <span className="tile-warning" role="status">Minimap unavailable. <button className="button secondary" onClick={() => setOverviewAttempt((value) => value + 1)}>Retry Overview</button></span>}
       {tileStatus === 'partial' && <span className="tile-warning" role="status">Some tiles could not be loaded. <button className="button secondary" onClick={() => renderer.current?.retryTiles()}>Retry</button></span>}
     </footer>
-    {info && !compareMode && !readOnlyEndpoint && <ViewerRecordsPanel state={viewerRecords} info={info} move={(points, savedZoom) => {
-      if (!view) return;
-      const xs = points.map(([x]) => x);
-      const ys = points.map(([, y]) => y);
-      const x1 = Math.min(...xs), x2 = Math.max(...xs), y1 = Math.min(...ys), y2 = Math.max(...ys);
-      const zoom = savedZoom ?? (points.length === 1 ? view.zoom : Math.min(
-        view.width * view.zoom * 0.65 / Math.max(1, x2 - x1), view.height * view.zoom * 0.65 / Math.max(1, y2 - y1)));
-      navigate((viewer) => viewer.restoreCamera({ x: (x1 + x2) / 2, y: (y1 + y2) / 2, zoom }));
-    }} />}
+    {roiUnavailable && <p className="notice" role="status">The linked ROI is unavailable. The scan is still open.</p>}
+    {info && !compareMode && !readOnlyEndpoint && <ViewerRecordsPanel state={viewerRecords} info={info}
+      searchHref={roiCaseId && scan.source === 'clinical' ? (roiId) => roiSearchHref({ caseId: roiCaseId, scanId: scan.id, roiId }) : undefined}
+      move={(points, savedZoom) => { if (view) navigate((viewer) => viewer.restoreCamera(cameraFor(points, view, savedZoom))); }} />}
     {info && !compareMode && !readOnlyEndpoint && scan.source === 'clinical' && viewerRecords.records?.can_annotate &&
       <LymphCounts endpoint={endpoint} />}
     {info && !compareMode && !readOnlyEndpoint && <Pdl1Panel state={pdl1} />}

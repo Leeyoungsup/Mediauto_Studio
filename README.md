@@ -30,6 +30,10 @@ Worklist에서는 **Hide Case Preview**로 목록을 넓힐 수 있습니다. WS
 
 규칙과 파일 등록 정보는 개발 PostgreSQL에 저장되며, 이미 등록한 파일은 규칙을 다시 적용해도 유지됩니다. 등록 정보는 Worklist에서 Case ID로 묶어 확인합니다. 같은 Slide ID의 NDPI와 SVS는 서로 다른 원본 파일로 표시됩니다. 등록된 스캔은 케이스 상세의 WSI 뷰어에서 열 수 있습니다.
 
+### 30. ROI 유사검색
+
+저장된 영역 주석에서 **Find Similar ROIs**를 엽니다. 장기계통을 고르면 같은 케이스에 등록한 참조 ROI를 개발용 어댑터로 검색합니다. **Open Match in WSI**와 **Back to Source ROI**로 결과와 원래 판독 위치를 오갑니다. [30번 설정·검증 기록](work/roi-search-30.md)
+
 ### 29. 조직 정합과 판독 도구
 
 **Multi View → Tissue Registration**에서 같은 조직의 대응점을 지정해 화면을 동기화하고 별도 확인점의 오차를 확인합니다. 단일 뷰의 **Review Tools**에서 다분절 거리, 도형, 점 계수, 북마크, 보정된 ROI 프리셋을 사용합니다. 저장한 ROI는 PNG로 내보낼 수 있으며, 수기 림프절 계수는 **Report Draft → Result Evidence**에 특정 버전으로 연결합니다. [29번 조작·검증 기록](work/viewer-workflow-29.md)

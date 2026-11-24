@@ -1,3 +1,5 @@
+import { roiSearchHref, roiViewerHref } from './roi-search';
+import type { RoiLocation } from './roi-search';
 import { useEffect, useRef, useState } from 'react';
 import { ClipboardList, ArrowLeft, GalleryHorizontalEnd, PanelLeftClose, PanelLeftOpen, Maximize, Minimize, Settings2, ScanLine, History, FileText, Camera, List, MessageSquare } from 'lucide-react';
 import type { DemoCase } from './demo';
@@ -11,8 +13,8 @@ import { MultiView } from './multi-view';
 import { ViewerSettingsPanel, useViewerPreferences } from './viewer-preferences';
 import { ScanReference, SlidePreview, StatusLabel } from './worklist';
 
-export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsHref, initialSnapshot, editorHref, historyEndpoint, attachmentsEndpoint, logsEndpoint, notesEndpoint }: {
-  item: DemoCase; activeSlide?: string; onSlide: (id: string) => void; onBack: (scan?: string) => void; onReview?: () => void; requestsHref?: string; initialSnapshot?: string; editorHref?: string; historyEndpoint?: string; attachmentsEndpoint?: string; logsEndpoint?: string; notesEndpoint?: string;
+export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsHref, initialSnapshot, initialRoi, roiOrigin, editorHref, historyEndpoint, attachmentsEndpoint, logsEndpoint, notesEndpoint }: {
+  item: DemoCase; activeSlide?: string; onSlide: (id: string) => void; onBack: (scan?: string) => void; onReview?: () => void; requestsHref?: string; initialSnapshot?: string; initialRoi?: string; roiOrigin?: RoiLocation; editorHref?: string; historyEndpoint?: string; attachmentsEndpoint?: string; logsEndpoint?: string; notesEndpoint?: string;
 }) {
   const [showNotes, setShowNotes] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
@@ -26,6 +28,8 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
   const [showSettings, setShowSettings] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [fullscreenError, setFullscreenError] = useState('');
+
+  useEffect(() => { if (initialRoi) setComparing(false); }, [initialRoi]);
 
   useEffect(() => {
     const element = root.current;
@@ -65,6 +69,8 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
         <div className="viewer-title"><h1>WSI Viewer</h1><p>{item.id} · {item.specimen}</p></div>
       </div>
       <div className="actions"><StatusLabel status={item.status} />
+      {roiOrigin && <><a className="button secondary" href={roiViewerHref(roiOrigin)}>Back to Source ROI</a>
+        <a className="button secondary" href={roiSearchHref(roiOrigin)}>Return to ROI Search</a></>}
       {!comparing && <button type="button" className="button secondary" aria-controls="viewer-slide-tray" aria-expanded={trayVisible}
         onClick={() => change('tray_visible', !trayVisible)}>
         {trayVisible ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
@@ -100,7 +106,8 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
           <span className="slide-image"><SlidePreview slide={entry} /></span><span><strong>{entry.label ?? entry.id}</strong><small>{entry.stain} · {entry.wsi?.format ?? entry.state}</small><ScanReference scan={entry.wsi} /></span>
         </button>)}</div>
       </aside>
-      {slide?.wsi ? <ImageViewport key={slide.wsi.id + ':' + (initialSnapshot ?? '')} scan={slide.wsi} initialSnapshot={initialSnapshot} label={slide.label ?? slide.id} stain={slide.stain}
+      {slide?.wsi ? <ImageViewport key={slide.wsi.id + ':' + (initialSnapshot ?? initialRoi ?? '')} scan={slide.wsi} initialSnapshot={initialSnapshot}
+        initialRoi={initialRoi} roiCaseId={requestsHref && item.recordId ? item.recordId : undefined} label={slide.label ?? slide.id} stain={slide.stain}
         options={{ settings, toggleFullscreen, toggleGallery, toggleMinimap: () => change('show_minimap', !settings.show_minimap) }} />
         : <div className="panel empty"><ScanLine size={30} /><strong>{activeSlide && !slide ? 'The requested scan could not be found.' : slide?.state === 'QC Hold' || slide?.state === 'Rescan Required' ? 'This scan is blocked by QC.' : 'No scans are available for review.'}</strong><button className="button secondary" onClick={() => onBack(slide?.id)}>Go to Case Details</button></div>}
     </div>}

@@ -115,12 +115,11 @@ def jpeg(region, output_size):
             return buffer.getvalue()
 
 
-def capture_roi(slide, coords, cancelled):
-    kind, points, include_annotation, include_scale = coords
+def capture_roi(slide, cancelled, kind, points, include_annotation, include_scale, max_edge=1600):
     xs, ys = zip(*points)
     left, top = math.floor(min(xs)), math.floor(min(ys))
     width, height = max(1, math.ceil(max(xs)) - left), max(1, math.ceil(max(ys)) - top)
-    scale = min(1, 1600 / max(width, height))
+    scale = min(1, max_edge / max(width, height))
     output = (max(1, round(width * scale)), max(1, round(height * scale)))
     level = slide.get_best_level_for_downsample(1 / scale)
     level_scale = slide.level_downsamples[level]
@@ -176,7 +175,7 @@ def read_scan(path, operation, cancelled, coords=None):
     with openslide.OpenSlide(path) as slide:
         width, height = slide.dimensions
         if operation == "capture":
-            return capture_roi(slide, coords, cancelled)
+            return capture_roi(slide, cancelled, *coords)
         if operation == "metadata":
             return {"dimensions": [width, height], "format": path.suffix[1:].upper(),
                     "mpp_x": positive_number(slide.properties.get("openslide.mpp-x")),

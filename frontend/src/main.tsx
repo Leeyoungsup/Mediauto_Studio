@@ -1,3 +1,5 @@
+import { RoiSearchPage } from './roi-search';
+import type { RoiLocation } from './roi-search';
 import { FrozenWorkflow, ORResults } from './frozen-workflow';
 import { CaseReport } from './case-report';
 import { NotificationCenter, NotificationSettings } from './notifications';
@@ -32,7 +34,7 @@ import './style.css';
 const emrLabels = { unconfigured: 'Not Configured', disabled: 'Disabled', connected: 'Connected', unavailable: 'Connection Unavailable', unknown: 'Unavailable' };
 type Health = { status: 'ok' | 'degraded'; database: 'connected' | 'unavailable'; emr: keyof typeof emrLabels };
 type Page = { view: 'worklist'; scope: Scope } | { view: 'case'; id: string; files: boolean; tab?: 'requests' | 'report' | 'editor' | 'notes' | 'frozen'; selectedScan?: string } | { view: 'request'; id: string } | { view: 'or'; id?: string }
-  | { view: 'viewer'; id: string; slide?: string; snapshot?: string; files: boolean } | { view: 'scans' } | { view: 'settings'; section?: 'groups' | 'notifications' };
+  | { view: 'viewer'; id: string; slide?: string; snapshot?: string; roi?: string; roiOrigin?: RoiLocation; files: boolean } | { view: 'roi-search'; location: RoiLocation } | { view: 'scans' } | { view: 'settings'; section?: 'groups' | 'notifications' };
 type WorkflowAction = 'assignment' | 'review' | 'confirm';
 type Modal = 'register' | 'system' | null;
 
@@ -40,8 +42,19 @@ function decodeRoute(value: string) {
   try { return decodeURIComponent(value); } catch { return value; }
 }
 
+function isUuid(value?: string): value is string {
+  return /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value ?? '');
+}
+
 function readPage(): Page {
-  const [view, id, slide, snapshot] = location.hash.slice(1).split('/');
+  const [view, id, slide, snapshot, roi, sourceScan, sourceRoi] = location.hash.slice(1).split('/');
+  if (view === 'roi-search' && isUuid(id) && isUuid(slide) && isUuid(snapshot)) {
+    return { view, location: { caseId: id, scanId: slide, roiId: snapshot } };
+  }
+  if (view === 'viewer' && isUuid(id) && isUuid(slide) && snapshot === 'roi' && isUuid(roi)) {
+    const roiOrigin = isUuid(sourceScan) && isUuid(sourceRoi) ? { caseId: id, scanId: sourceScan, roiId: sourceRoi } : undefined;
+    return { view, id, slide, roi, roiOrigin, files: false };
+  }
   if (view === 'or') return { view, id: id ? decodeRoute(id) : undefined };
   if (view === 'scans') return { view };
   if (view === 'settings') return { view, section: id === 'groups' || id === 'notifications' ? id : undefined };
@@ -331,7 +344,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
           aria-expanded={!collapseNavigation} aria-label={collapseNavigation ? 'Expand Navigation' : 'Collapse Navigation'}
           title={collapseNavigation ? 'Expand Navigation' : 'Collapse Navigation'} onClick={() => setNavigationCollapsed(!collapseNavigation)}>
           {collapseNavigation ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
-        </button><span>Pathology Workspace</span><ChevronRight size={15} /><strong>{{ viewer: 'WSI Viewer', case: 'Case Details', request: 'Analysis and Consultation Requests', or: 'OR Results', scans: 'Slide Registration', settings: 'Settings', worklist: 'Worklist' }[page.view]}</strong></div>
+        </button><span>Pathology Workspace</span><ChevronRight size={15} /><strong>{{ viewer: 'WSI Viewer', 'roi-search': 'ROI Similarity Search', case: 'Case Details', request: 'Analysis and Consultation Requests', or: 'OR Results', scans: 'Slide Registration', settings: 'Settings', worklist: 'Worklist' }[page.view]}</strong></div>
         <div className="header-actions"><NotificationCenter key={user.id} organization={user.organization} /><span className="demo-label"><FlaskConical size={15} /> Demo Environment</span><button className="emr-chip" onClick={() => showModal('system')}><span /> EMR {emr} · LIS {lis}</button><span className="identity"><UserRound size={17} />{user.display_name}</span><button className="button secondary" onClick={logout}>Sign Out</button></div>
       </header>
       <main className="workspace-main" data-view={page.view}>
@@ -360,6 +373,9 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
         {((page.view === 'settings' && page.section !== 'notifications' && !settingsAllowed) || (page.view === 'scans' && !intakeAllowed)) && <div className="panel empty"><strong>You do not have permission to open this page.</strong><button className="button secondary" onClick={goBack}>Back to Worklist</button></div>}
         {page.view === 'or' && (orAllowed ? <ORResults organization={user.organization} caseId={page.id} />
           : <div className="panel empty"><strong>You do not have permission to open the OR view.</strong></div>)}
+        {page.view === 'roi-search' && (requestAllowed
+          ? <RoiSearchPage key={`${page.location.caseId}/${page.location.scanId}/${page.location.roiId}`} location={page.location} />
+          : <div className="panel empty"><strong>You do not have permission to search saved ROIs.</strong></div>)}
         {page.view === 'request' && <RequestPage key={page.id} id={page.id} organization={user.organization} />}
         {casePage && (!current ? <div className="panel empty"><CircleHelp size={28} /><strong>{casePage.files
           ? (intakeAllowed && filesLoading ? 'Loading case…' : 'Unable to load the case.')
@@ -384,7 +400,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
             onAssign={mayAssign ? () => openWorkflow(current, 'assignment') : undefined}
             onReview={mayReview ? () => openWorkflow(current, 'review') : undefined}
             onConfirm={intakeAllowed && current.source === 'files' ? () => openWorkflow(current, 'confirm') : undefined} />
-          : <Viewer key={current.id} item={current} activeSlide={casePage.slide} initialSnapshot={casePage.snapshot} historyEndpoint={historyEndpoint} attachmentsEndpoint={attachmentsEndpoint} logsEndpoint={logsEndpoint} notesEndpoint={notesEndpoint} editorHref={current.recordId ? `#case/${current.recordId}/editor` : undefined} requestsHref={requestAllowed && current.recordId ? `#case/${current.recordId}/requests` : undefined} onSlide={(id) => navigateViewer(current, id)} onBack={(scan) => navigateCase(current, scan)}
+          : <Viewer key={current.id} item={current} activeSlide={casePage.slide} initialSnapshot={casePage.snapshot} initialRoi={casePage.roi} roiOrigin={casePage.roiOrigin} historyEndpoint={historyEndpoint} attachmentsEndpoint={attachmentsEndpoint} logsEndpoint={logsEndpoint} notesEndpoint={notesEndpoint} editorHref={current.recordId ? `#case/${current.recordId}/editor` : undefined} requestsHref={requestAllowed && current.recordId ? `#case/${current.recordId}/requests` : undefined} onSlide={(id) => navigateViewer(current, id)} onBack={(scan) => navigateCase(current, scan)}
             onReview={mayReview ? () => openWorkflow(current, 'review') : undefined} />)}
       </main>
     </div>

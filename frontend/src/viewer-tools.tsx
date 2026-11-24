@@ -263,7 +263,9 @@ export function AnnotationOverlay({ view, annotations, draft, drawing }: {
   </svg>;
 }
 
-export function ViewerRecordsPanel({ state, info, move }: { state: ToolState; info: SlideInfo; move: (points: Point[], zoom?: number | null) => void }) {
+export function ViewerRecordsPanel({ state, info, move, searchHref }: {
+  state: ToolState; info: SlideInfo; move: (points: Point[], zoom?: number | null) => void; searchHref?: (id: string) => string;
+}) {
   const { records, draft, tool, error, busy, notice } = state;
   const [includeAnnotation, setIncludeAnnotation] = useState(true);
   const [includeScale, setIncludeScale] = useState(!!info.mpp_x);
@@ -299,6 +301,8 @@ export function ViewerRecordsPanel({ state, info, move }: { state: ToolState; in
       </div>
       <div className="actions">
         <button className="button secondary" onClick={() => move(item.points, item.zoom)}>Go to Position</button>
+        {searchHref && records.can_annotate && item.kind !== 'brush' && exportable.has(item.kind) &&
+          <a className="button secondary" href={searchHref(item.id)}>Find Similar ROIs</a>}
         {records.can_export && exportable.has(item.kind) && <button className="button secondary" disabled={busy}
           onClick={() => state.capture(item, includeAnnotation, includeScale)}>Export ROI PNG</button>}
         {records.can_annotate && item.can_delete && <>

@@ -1245,6 +1245,94 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.get(root + "/messages")).status_code, 403)
         self.assertEqual((await self.client.put(config, json={"version": 2, "mode": "disabled"})).status_code, 403)
 
+    async def test_roi_similarity_search_contract_scope_and_audit(self):
+        from io import BytesIO
+        from fastapi import Response
+        from PIL import Image
+
+        async def check(request, status=200):
+            response = await request
+            self.assertEqual(response.status_code, status, response.headers.get("content-type"))
+            return response
+
+        async def case_scan(number, names):
+            case = await self.create("cases", {"case_number": number})
+            specimen = await self.create("specimens", {"case_id": case["id"], "specimen_number": "SYNTH"})
+            slide = await self.create("slides", {"specimen_id": specimen["id"], "slide_number": number})
+            scans = []
+            for name in names:
+                (self.root / name).write_bytes(b"synthetic scan fixture")
+                record = await self.create("scans", {"slide_id": slide["id"], "storage_key": name})
+                scans.append("/api/wsi/clinical/" + record["id"])
+            return case, scans
+
+        async def roi(scan, kind="rectangle"):
+            payload = {"id": str(uuid4()), "kind": kind, "points": [[15, 20], [125, 145]], "label": "Synthetic region"}
+            await check(self.client.post(scan + "/viewer-records/annotations", json=payload), 201)
+            return scan + "/roi-search/rois/" + payload["id"], payload["id"]
+
+        async def synthetic_crop(request, path, operation, coords):
+            self.assertEqual((operation, coords[2:]), ("capture", (False, False, 256)))
+            palette = {"query.ndpi": "red", "near.svs": "red", "far.svs": "blue", "foreign.svs": "red"}
+            buffer = BytesIO()
+            with Image.new("RGB", (32, 24), palette[path.name]) as image:
+                image.save(buffer, "PNG")
+            return Response(buffer.getvalue(), media_type="image/png", headers={"Cache-Control": "private, no-store"})
+
+        breast = {"organ_system": "breast"}
+        case, (query, near, far) = await case_scan("ROI-CONTRACT", ["query.ndpi", "near.svs", "far.svs"])
+        _, (outside,) = await case_scan("ROI-OTHER-CASE", ["foreign.svs"])
+        metadata = {"dimensions": [600, 600], "mpp_x": .25, "mpp_y": .30}
+        with patch("app.viewer_records.scan_response", return_value=metadata), patch("app.roi_search.scan_response", side_effect=synthetic_crop):
+            source, source_id = await roi(query)
+            candidate, near_id = await roi(near)
+            dissimilar, far_id = await roi(far)
+            unrelated, unrelated_id = await roi(outside)
+            invalid, _ = await roi(query, "distance")
+            await check(self.client.get(invalid), 404)
+            context = (await check(self.client.get(source))).json()
+            self.assertEqual((context["case_id"], context["organ_system"]), (case["id"], None))
+            self.assertEqual(context["organ_systems"]["breast"], "Breast")
+            preview = await check(self.client.get(source + "/preview.png"))
+            self.assertEqual(preview.headers["cache-control"], "private, no-store")
+            self.assertTrue(preview.content.startswith(b"\x89PNG"))
+            self.assertEqual((await check(self.client.post(source + "/search", json=breast))).json()["results"], [])
+            await check(self.client.post(source + "/search", json={"organ_system": "invalid", "patient_id": "SYNTH"}), 422)
+            await check(self.client.get(query + "/roi-search/rois/" + near_id + "/preview.png"), 404)
+            for location in (source, unrelated, dissimilar, candidate, candidate):
+                await check(self.client.put(location + "/reference", json=breast))
+            result = (await check(self.client.post(source + "/search", json=breast))).json()
+            self.assertEqual([item["roi_id"] for item in result["results"]], [near_id, far_id])
+            self.assertNotIn(unrelated_id, str(result))
+            self.assertTrue(all(set(item) == {"scan_id", "roi_id", "slide", "format"} for item in result["results"]))
+            await check(self.client.put(dissimilar + "/reference", json={"organ_system": "respiratory"}))
+            filtered = (await check(self.client.post(source + "/search", json=breast))).json()
+            self.assertEqual([item["roi_id"] for item in filtered["results"]], [near_id])
+            with patch("app.roi_search.ADAPTER.search", side_effect=OSError("Synthetic adapter failure")):
+                await check(self.client.post(source + "/search", json=breast), 503)
+            await check(self.client.delete(candidate + "/reference"))
+            self.assertEqual((await check(self.client.post(source + "/search", json=breast))).json()["results"], [])
+            await check(self.client.put(candidate + "/reference", json=breast))
+            await check(self.client.delete(near + "/viewer-records/annotations/" + near_id))
+            self.assertEqual((await check(self.client.post(source + "/search", json=breast))).json()["results"], [])
+
+            reader = await create_account(self.org, "roi-unassigned-doctor", "doctor")
+            worker = await create_account(self.org, "roi-labeler", "labeler")
+            await login(self.client, self.org, worker.username)
+            await check(self.client.get(source + "/preview.png"), 403)
+            await login(self.client, self.org, reader.username)
+            await check(self.client.post(source + "/search", json=breast), 404)
+            await login(self.client, self.org, self.user.username)
+            logs_url = f"{self.url}/cases/{case['id']}/logs"
+            for outcome, expected in [("success", None), ("failed", 503), ("denied", 404)]:
+                rows = (await check(self.client.get(logs_url, params={
+                    "entity": "roi_similarity", "action": "roi_search_run", "result": outcome, "target_id": source_id,
+                }))).json()["rows"]
+                self.assertIn(expected, {row["status_code"] for row in rows})
+                self.assertTrue(all(not row["before"] and not row["after"] for row in rows))
+            self.assertEqual((await self.client.post("/api/auth/logout")).status_code, 200)
+            await check(self.client.get(source + "/preview.png"), 401)
+
     async def test_extended_viewer_geometry_capture_counts_and_report(self):
         from io import BytesIO
         from PIL import Image

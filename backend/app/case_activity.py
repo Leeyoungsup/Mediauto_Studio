@@ -61,6 +61,11 @@ CASE_OPERATIONS = {
 }
 SCAN_OPERATIONS = {
     "metadata": ("scan_viewed", "scan"),
+    "roi_search_context": ("roi_search_opened", "roi_similarity"),
+    "roi_search_preview": ("roi_search_previewed", "roi_similarity"),
+    "search_roi": ("roi_search_run", "roi_similarity"),
+    "index_roi_reference": ("roi_reference_saved", "roi_similarity"),
+    "remove_roi_reference": ("roi_reference_removed", "roi_similarity"),
     "export_roi": ("roi_capture_exported", "annotation"),
     "save_lymph_count": ("lymph_node_count_saved", "lymph_node_count"),
     "create_annotation": ("annotation_registered", "annotation"),
