@@ -30,6 +30,10 @@ Worklist에서는 **Hide Case Preview**로 목록을 넓힐 수 있습니다. WS
 
 규칙과 파일 등록 정보는 개발 PostgreSQL에 저장되며, 이미 등록한 파일은 규칙을 다시 적용해도 유지됩니다. 등록 정보는 Worklist에서 Case ID로 묶어 확인합니다. 같은 Slide ID의 NDPI와 SVS는 서로 다른 원본 파일로 표시됩니다. 등록된 스캔은 케이스 상세의 WSI 뷰어에서 열 수 있습니다.
 
+### 32. Collections와 Tumor Board
+
+**Collections and Tumor Board**에서 개인·공유 컬렉션과 Board 회차를 관리합니다. **Worklist → Add to Collection or Board**에서 원본 케이스를 참조로 추가합니다. 회차에서 순서, 메모, **Presented**를 기록하고 기존 케이스·WSI·완료 결과를 엽니다. [32번 권한과 검증 기록](work/case-collections-32.md)
+
 ### 31. 분석 실행과 IHC 검토
 
 **Case Details → Requests**에서 모델을 지정해 작업을 실행하거나 자문을 배정합니다. **Model Runs**에서 시도별 상태와 취소·재실행을 확인합니다. **Settings → Analysis Pre-run Rules**에서 염색별 사전 실행을 설정합니다. 배정 병리의는 **IHC Review and Best Block**에서 검토를 저장하고 **Report Draft → Result Evidence**에 버전을 연결합니다. [31번 실행 범위와 검증 기록](work/analysis-execution-31.md)

@@ -156,4 +156,5 @@ PYMEDIA
     node scripts/viewer-workflow-browser.mjs
     node scripts/roi-search-browser.mjs
     node scripts/analysis-execution-browser.mjs
+    node scripts/case-collections-browser.mjs
 fi

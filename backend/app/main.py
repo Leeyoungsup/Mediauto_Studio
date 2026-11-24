@@ -13,6 +13,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from starlette.staticfiles import StaticFiles
 
+from app.case_collections import router as case_collections_router
 from app.analysis_execution import router as analysis_execution_router
 from app.analysis_jobs import poll_analysis
 from app.auth import load_auth_key, router as auth_router
@@ -96,6 +97,7 @@ app.include_router(case_editor_router)
 app.include_router(case_requests_router)
 app.include_router(analysis_execution_router)
 app.include_router(frozen_router)
+app.include_router(case_collections_router)
 app.include_router(clinical_router)
 app.include_router(workflow_router)
 app.include_router(intake_router)

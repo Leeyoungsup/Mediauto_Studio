@@ -1,3 +1,4 @@
+import { AddCaseReference, CollectionWorkspace } from './case-collections';
 import { AnalysisSettings } from './analysis-execution';
 import { RoiSearchPage } from './roi-search';
 import type { RoiLocation } from './roi-search';
@@ -35,7 +36,7 @@ import './style.css';
 const emrLabels = { unconfigured: 'Not Configured', disabled: 'Disabled', connected: 'Connected', unavailable: 'Connection Unavailable', unknown: 'Unavailable' };
 type Health = { status: 'ok' | 'degraded'; database: 'connected' | 'unavailable'; emr: keyof typeof emrLabels };
 type Page = { view: 'worklist'; scope: Scope } | { view: 'case'; id: string; files: boolean; tab?: 'requests' | 'report' | 'editor' | 'notes' | 'frozen'; selectedScan?: string } | { view: 'request'; id: string } | { view: 'or'; id?: string }
-  | { view: 'viewer'; id: string; slide?: string; snapshot?: string; roi?: string; roiOrigin?: RoiLocation; files: boolean } | { view: 'roi-search'; location: RoiLocation } | { view: 'scans' } | { view: 'settings'; section?: 'groups' | 'notifications' | 'analysis' };
+  | { view: 'viewer'; id: string; slide?: string; snapshot?: string; roi?: string; roiOrigin?: RoiLocation; files: boolean } | { view: 'roi-search'; location: RoiLocation } | { view: 'collections'; id?: string } | { view: 'scans' } | { view: 'settings'; section?: 'groups' | 'notifications' | 'analysis' };
 type WorkflowAction = 'assignment' | 'review' | 'confirm';
 type Modal = 'register' | 'system' | null;
 
@@ -56,6 +57,7 @@ function readPage(): Page {
     const roiOrigin = isUuid(sourceScan) && isUuid(sourceRoi) ? { caseId: id, scanId: sourceScan, roiId: sourceRoi } : undefined;
     return { view, id, slide, roi, roiOrigin, files: false };
   }
+  if (view === 'collections') return { view, id: isUuid(id) ? id : undefined };
   if (view === 'or') return { view, id: id ? decodeRoute(id) : undefined };
   if (view === 'scans') return { view };
   if (view === 'settings') return { view, section: id === 'groups' || id === 'notifications' || id === 'analysis' ? id : undefined };
@@ -98,6 +100,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
   const [navigationCollapsed, setNavigationCollapsed] = useState<boolean>();
   const collapseNavigation = navigationCollapsed ?? page.view === 'viewer';
   const [selected, setSelected] = useState('');
+  const [referenceCase, setReferenceCase] = useState<{ id: string; title: string }>();
   const [modal, setModal] = useState<Modal>(null);
   const [formError, setFormError] = useState('');
   const [workflow, setWorkflow] = useState<{ item: DemoCase; action: WorkflowAction }>();
@@ -190,6 +193,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
       const next = readPage();
       if (next.view === 'worklist') setLastScope(next.scope);
       else if (next.view === 'case' || next.view === 'viewer') setSelected(next.id);
+      if (next.view !== 'worklist') setReferenceCase(undefined);
       setPage(next);
     }
     sync();
@@ -333,8 +337,10 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
       <a className="brand" href="#worklist/all" aria-label="MeDIAuto Studio Home" title="MeDIAuto Studio Home"><span className="brand-icon"><Microscope size={23} /></span><span className="brand-name">MeDIAuto<strong>Studio</strong></span></a>
       <nav aria-label="Workspace Navigation" className="side-nav">
         <p>Workspace</p>
-        <a href="#worklist/all" aria-label="Worklist" title="Worklist" aria-current={page.view !== 'settings' && page.view !== 'or' ? 'location' : undefined}><LayoutList size={19} /> <span>Worklist</span><small>{result.counts.all}</small></a>
+        <a href="#worklist/all" aria-label="Worklist" title="Worklist" aria-current={page.view !== 'settings' && page.view !== 'or' && page.view !== 'collections' ? 'location' : undefined}><LayoutList size={19} /> <span>Worklist</span><small>{result.counts.all}</small></a>
         {orAllowed && <a href="#or" aria-label="OR Results" title="OR Results" aria-current={page.view === 'or' ? 'page' : undefined}><ClipboardList size={19} /> <span>OR Results</span></a>}
+        {requestAllowed && <a href="#collections" aria-label="Collections and Tumor Board" title="Collections and Tumor Board"
+          aria-current={page.view === 'collections' ? 'page' : undefined}><ClipboardList size={19} /> <span>Collections and Tumor Board</span></a>}
         {settingsAllowed && <a href="#settings" aria-label="Settings" title="Settings" aria-current={page.view === 'settings' ? 'page' : undefined}><Settings2 size={19} /> <span>Settings</span></a>}
       </nav>
       <div className="side-footer"><button aria-label="Service Status" title="Service Status" onClick={() => showModal('system')}><Activity size={18} /><span>Service Status</span><i className={health?.status === 'ok' ? 'online' : ''} /></button></div>
@@ -345,7 +351,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
           aria-expanded={!collapseNavigation} aria-label={collapseNavigation ? 'Expand Navigation' : 'Collapse Navigation'}
           title={collapseNavigation ? 'Expand Navigation' : 'Collapse Navigation'} onClick={() => setNavigationCollapsed(!collapseNavigation)}>
           {collapseNavigation ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
-        </button><span>Pathology Workspace</span><ChevronRight size={15} /><strong>{{ viewer: 'WSI Viewer', 'roi-search': 'ROI Similarity Search', case: 'Case Details', request: 'Analysis and Consultation Requests', or: 'OR Results', scans: 'Slide Registration', settings: 'Settings', worklist: 'Worklist' }[page.view]}</strong></div>
+        </button><span>Pathology Workspace</span><ChevronRight size={15} /><strong>{{ viewer: 'WSI Viewer', 'roi-search': 'ROI Similarity Search', case: 'Case Details', request: 'Analysis and Consultation Requests', or: 'OR Results', collections: 'Collections and Tumor Board', scans: 'Slide Registration', settings: 'Settings', worklist: 'Worklist' }[page.view]}</strong></div>
         <div className="header-actions"><NotificationCenter key={user.id} organization={user.organization} /><span className="demo-label"><FlaskConical size={15} /> Demo Environment</span><button className="emr-chip" onClick={() => showModal('system')}><span /> EMR {emr} · LIS {lis}</button><span className="identity"><UserRound size={17} />{user.display_name}</span><button className="button secondary" onClick={logout}>Sign Out</button></div>
       </header>
       <main className="workspace-main" data-view={page.view}>
@@ -361,6 +367,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
             total={result.total} counts={result.counts} filteredCounts={result.filtered_counts} queues={queues} workload={result.workload} onQueueChanged={refreshQueues} assignees={result.assignees} onQuery={setQuery}
             onOpen={(id) => { const item = worklistCases.find((row) => row.id === id); if (item) navigateCase(item); }}
             onViewer={(id, slide) => { const item = worklistCases.find((row) => row.id === id); if (item) navigateViewer(item, slide); }}
+            onReference={requestAllowed ? (item) => { if (item.recordId) setReferenceCase({ id: item.recordId, title: item.id }); } : undefined}
             onRegister={writable ? () => showModal('register') : undefined} />
         </div>
         {page.view === 'settings' && page.section === 'notifications' && <NotificationSettings organization={user.organization} />}
@@ -374,6 +381,8 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
         {((page.view === 'settings' && page.section !== 'notifications' && !settingsAllowed) || (page.view === 'scans' && !intakeAllowed)) && <div className="panel empty"><strong>You do not have permission to open this page.</strong><button className="button secondary" onClick={goBack}>Back to Worklist</button></div>}
         {page.view === 'or' && (orAllowed ? <ORResults organization={user.organization} caseId={page.id} />
           : <div className="panel empty"><strong>You do not have permission to open the OR view.</strong></div>)}
+        {page.view === 'collections' && (requestAllowed ? <CollectionWorkspace organization={user.organization} selected={page.id} />
+          : <div className="panel empty"><strong>You do not have permission to open Collections.</strong></div>)}
         {page.view === 'roi-search' && (requestAllowed
           ? <RoiSearchPage key={`${page.location.caseId}/${page.location.scanId}/${page.location.roiId}`} location={page.location} />
           : <div className="panel empty"><strong>You do not have permission to search saved ROIs.</strong></div>)}
@@ -405,6 +414,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
             onReview={mayReview ? () => openWorkflow(current, 'review') : undefined} />)}
       </main>
     </div>
+    {referenceCase && <AddCaseReference organization={user.organization} record={referenceCase} onClose={() => setReferenceCase(undefined)} />}
     {modal === 'register' && <ModalWindow title="Register Case" onClose={() => showModal(null)}><form onSubmit={(event) => void register(event)}>
       <label className="form-field">Case ID<input name="case-number" placeholder="IMS-26-0149" required maxLength={40} /></label>
       {formError && <p className="form-error" role="alert">{formError}</p>}

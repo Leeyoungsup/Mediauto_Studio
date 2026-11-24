@@ -1245,6 +1245,123 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.get(root + "/messages")).status_code, 403)
         self.assertEqual((await self.client.put(config, json={"version": 2, "mode": "disabled"})).status_code, 403)
 
+    async def test_collections_board_scope_membership_and_concurrent_edits(self):
+        async def checked(call, expected=200):
+            response = await call
+            self.assertEqual(response.status_code, expected, response.text)
+            return response.json()
+
+        root = self.url + "/collections"
+
+        async def create(url, data, key, status=201):
+            return await checked(self.client.post(url, json=data, headers={"Idempotency-Key": key}), status)
+
+        editor = await create_account(self.org, "board-editor", "doctor")
+        participant = await create_account(self.org, "board-participant", "doctor")
+        outsider = await create_account(self.org, "board-outsider", "admin")
+        other_org = await create_account(self.org + "-outside", "board-foreign", "admin")
+        first = await self.create("cases", {"case_number": "BOARD-VISIBLE"})
+        second = await self.create("cases", {"case_number": "BOARD-HIDDEN"})
+        case_url = self.url + "/cases/" + first["id"]
+        assigned = await checked(self.client.patch(case_url + "/assignment", json={
+            "version": first["version"], "assignee_id": str(participant.id), "reason": "Synthetic board assignment",
+        }))
+        specimen = await self.create("specimens", {"case_id": first["id"], "specimen_number": "SYNTH"})
+        slide = await self.create("slides", {"specimen_id": specimen["id"], "slide_number": "S1", "stain": "H&E"})
+        (self.root / "board.ndpi").write_bytes(b"synthetic board specimen")
+        scan = await self.create("scans", {"slide_id": slide["id"], "storage_key": "board.ndpi"})
+        consult = await create(case_url + "/requests", {"kind": "consult", "question": "Synthetic board consultation",
+            "scan_id": scan["id"], "assignee_id": str(participant.id)}, "board-consultation")
+        private, duplicate = await asyncio.gather(
+            create(root, {"kind": "personal", "title": "Synthetic Private"}, "personal"),
+            create(root, {"kind": "personal", "title": "Synthetic Private"}, "personal"),
+        )
+        self.assertEqual(private["id"], duplicate["id"])
+        private_url = root + "/" + private["id"]
+        shared = root + "/" + (await create(root, {"kind": "shared", "title": "Synthetic Shared"}, "shared"))["id"]
+        board = root + "/" + (await create(root, {"kind": "board", "title": "Synthetic Board"}, "board"))["id"]
+        meeting = await create(board + "/meetings", {"title": "Round 1", "meeting_date": "2026-12-01"}, "meeting")
+        session_url = root + "/" + meeting["id"]
+        second_meeting = await create(board + "/meetings", {"title": "Round 2", "meeting_date": "2026-12-15"}, "meeting-2")
+        self.assertEqual((await checked(self.client.get(board)))["meetings"][0]["id"], second_meeting["id"])
+        self.assertEqual((await checked(self.client.get(root)))["meetings"][0]["id"], second_meeting["id"])
+
+        async def member(path, user, role, expected=200):
+            return await checked(self.client.put(path + "/members/" + str(user.id), json={"role": role}), expected)
+
+        await member(private_url, participant, "viewer", 403)
+        await member(board, other_org, "viewer", 404)
+        await member(board, participant, "viewer")
+        await member(board, editor, "editor")
+        await member(shared, participant, "viewer")
+        await create(board + "/entries", {"case_id": first["id"]}, "folder", 422)
+        x, y = await asyncio.gather(
+            checked(self.client.post(session_url + "/entries", json={"case_id": first["id"], "note": "Synthetic note"}), 201),
+            checked(self.client.post(session_url + "/entries", json={"case_id": first["id"], "note": "Synthetic note"}), 201),
+        )
+        self.assertEqual(x["id"], y["id"])
+        await checked(self.client.post(session_url + "/entries", json={"case_id": first["id"], "note": "Different"}), 409)
+        hidden = await checked(self.client.post(session_url + "/entries", json={"case_id": second["id"], "note": "Restricted note"}), 201)
+        await checked(self.client.post(shared + "/entries", json={"case_id": first["id"]}), 201)
+        before = await checked(self.client.get(session_url))
+        entry_url = session_url + "/entries/" + x["id"]
+        reorder = session_url + "/entries/" + hidden["id"] + "/move"
+        await checked(self.client.post(reorder, json={"version": before["version"], "direction": "earlier"}))
+        await checked(self.client.post(reorder, json={"version": before["version"], "direction": "later"}), 409)
+        self.assertEqual((await checked(self.client.get(session_url)))["entries"][0]["id"], hidden["id"])
+
+        notes = await asyncio.gather(*[
+            self.client.patch(entry_url, json={"version": x["version"], "note": text, "presented": True})
+            for text in ("Synthetic updated A", "Synthetic updated B")
+        ])
+        self.assertEqual(sorted(row.status_code for row in notes), [200, 409])
+        saved = next(row.json() for row in notes if row.status_code == 200)
+        self.assertIsNotNone(saved["presented_at"])
+        self.assertEqual(saved["presented_by"], str(self.user.id))
+
+        await login(self.client, self.org, participant.username)
+        await checked(self.client.get(private_url), 404)
+        self.assertEqual(len((await checked(self.client.get(shared)))["entries"]), 1)
+        visible = await checked(self.client.get(session_url))
+        self.assertEqual([item["case_number"] for item in visible["entries"]], ["BOARD-VISIBLE"])
+        await checked(self.client.get(session_url + "/entries/" + hidden["id"] + "/links"), 404)
+        await checked(self.client.patch(entry_url, json={"version": saved["version"], "note": "Read-only"}), 403)
+        request_url = self.url + "/requests/" + consult["id"]
+        started = await checked(self.client.patch(request_url, json={"version": consult["version"], "action": "start"}))
+        await checked(self.client.patch(request_url, json={"version": started["version"], "action": "complete", "note": "Synthetic reviewed answer"}))
+        links = await checked(self.client.get(entry_url + "/links"))
+        self.assertEqual([item["id"] for item in links["scans"]], [scan["id"]])
+        self.assertEqual([item["id"] for item in links["requests"]], [consult["id"]])
+
+        await login(self.client, self.org, editor.username)
+        self.assertEqual((await checked(self.client.get(session_url)))["entries"], [])
+        await checked(self.client.get(entry_url + "/links"), 404)
+        await checked(self.client.post(session_url + "/entries", json={"case_id": first["id"]}), 404)
+        await login(self.client, self.org, outsider.username)
+        await checked(self.client.get(session_url), 404)
+        await login(self.client, other_org.organization, other_org.username)
+        await checked(self.client.get(session_url), 403)
+
+        await login(self.client, self.org, self.user.username)
+        await checked(self.client.patch(case_url + "/assignment", json={
+            "version": assigned["version"], "assignee_id": str(editor.id), "reason": "Synthetic Board scope change",
+        }))
+        await login(self.client, self.org, participant.username)
+        self.assertEqual((await checked(self.client.get(session_url)))["entries"], [])
+        await checked(self.client.get(entry_url + "/links"), 404)
+        await login(self.client, self.org, self.user.username)
+        await member(board, participant, None)
+        await login(self.client, self.org, participant.username)
+        await checked(self.client.get(session_url), 404)
+        await checked(self.client.get(board), 404)
+        self.assertFalse((await checked(self.client.get(root)))["meetings"])
+        await login(self.client, self.org, self.user.username)
+        await checked(self.client.delete(entry_url, params={"version": saved["version"] - 1}), 409)
+        await checked(self.client.delete(entry_url, params={"version": saved["version"]}))
+        new = await checked(self.client.post(session_url + "/entries", json={"case_id": first["id"], "note": "Re-added"}), 201)
+        self.assertEqual(new["id"], x["id"])
+        self.assertIsNone(new["presented_at"])
+
     async def test_model_execution_cancellation_rerun_rules_and_ihc_evidence(self):
         from app.analysis_adapters import AnalysisFailure
 

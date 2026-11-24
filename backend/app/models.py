@@ -503,6 +503,57 @@ class ViewerPreference(Base):
     version: Mapped[int] = mapped_column(Integer)
 
 
+class CaseCollection(ClinicalRecord, Base):
+    __tablename__ = "case_collections"
+    __table_args__ = (
+        UniqueConstraint("organization", "id"),
+        UniqueConstraint("organization", "created_by", "request_key"),
+        ForeignKeyConstraint(("organization", "owner_id"), ("auth_users.organization", "auth_users.id")),
+        ForeignKeyConstraint(("organization", "parent_id"), ("case_collections.organization", "case_collections.id")),
+        CheckConstraint("kind IN ('personal','shared','board','meeting')", name="case_collection_kind"),
+        CheckConstraint("(kind = 'meeting' AND parent_id IS NOT NULL AND meeting_date IS NOT NULL) OR "
+                        "(kind <> 'meeting' AND parent_id IS NULL AND meeting_date IS NULL)", name="case_collection_parent"),
+    )
+    owner_id: Mapped[UUID] = mapped_column(Uuid)
+    parent_id: Mapped[UUID | None] = mapped_column(Uuid)
+    title: Mapped[str] = mapped_column(String(100))
+    kind: Mapped[str] = mapped_column(String(16))
+    meeting_date: Mapped[date | None] = mapped_column(Date)
+    request_key: Mapped[str] = mapped_column(String(128))
+
+
+class CollectionMember(ClinicalRecord, Base):
+    __tablename__ = "collection_members"
+    __table_args__ = (
+        UniqueConstraint("organization", "collection_id", "user_id"),
+        ForeignKeyConstraint(("organization", "collection_id"), ("case_collections.organization", "case_collections.id")),
+        ForeignKeyConstraint(("organization", "user_id"), ("auth_users.organization", "auth_users.id")),
+        CheckConstraint("role IN ('viewer','editor')", name="collection_member_role"),
+        Index("ix_collection_members_user", "organization", "user_id"),
+    )
+    collection_id: Mapped[UUID] = mapped_column(Uuid)
+    user_id: Mapped[UUID] = mapped_column(Uuid)
+    role: Mapped[str] = mapped_column(String(12))
+
+
+class CollectionEntry(ClinicalRecord, Base):
+    __tablename__ = "collection_entries"
+    __table_args__ = (
+        UniqueConstraint("organization", "collection_id", "linked_case_id"),
+        ForeignKeyConstraint(("organization", "collection_id"), ("case_collections.organization", "case_collections.id")),
+        ForeignKeyConstraint(("organization", "linked_case_id"), ("cases.organization", "cases.id")),
+        ForeignKeyConstraint(("organization", "presented_by"), ("auth_users.organization", "auth_users.id")),
+        Index("ix_collection_entries_order", "organization", "collection_id", "position"),
+    )
+    collection_id: Mapped[UUID] = mapped_column(Uuid)
+    linked_case_id: Mapped[UUID] = mapped_column(Uuid)
+    position: Mapped[int] = mapped_column(Integer)
+    note: Mapped[str] = mapped_column(String(2000))
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    presented_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    presented_by: Mapped[UUID | None] = mapped_column(Uuid)
+
+
 class CaseRequest(ClinicalRecord, Base):
     __tablename__ = "case_requests"
     __table_args__ = (

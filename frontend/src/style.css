@@ -611,3 +611,16 @@ dialog::backdrop { background: #21193575; }
 .model-runs, .ihc-reviews { margin-top: 14px; }
 .model-runs .timeline > li { padding-bottom: 12px; }
 .ihc-reviews form { max-width: 650px; }
+
+.collection-layout { display: grid; grid-template-columns: minmax(215px, 290px) minmax(0, 1fr); align-items: start; gap: 14px; }
+.collection-layout aside section { margin-bottom: 15px; }
+.collection-list, .collection-entries { list-style: none; padding-left: 0; }
+.collection-list li { margin-block: 6px; }
+.collection-list a[aria-current=page] { font-weight: 700; }
+.collection-create { margin-block: 12px; }
+.collection-create summary { cursor: pointer; font-weight: 650; }
+.collection-entry { border-top: 1px solid var(--line); padding: 12px 0; }
+.collection-entry .actions { margin-top: 7px; }
+.collection-note { white-space: pre-wrap; overflow-wrap: anywhere; }
+.collection-links { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+@media (max-width: 760px) { .collection-layout, .collection-links { grid-template-columns: minmax(0, 1fr); } }

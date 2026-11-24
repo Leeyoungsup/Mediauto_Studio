@@ -94,9 +94,10 @@ type Props = {
   canReportFrozen?: boolean;
   onViewer: (id: string, slide?: string) => void;
   onRegister?: () => void;
+  onReference?: (item: DemoCase) => void;
 };
 
-export function Worklist({ cases, loading, total, counts, filteredCounts, queues, workload, onQueueChanged, assignees, onQuery, scope, onScope, mayShare, current, onSelect, onOpen, onViewer, onRegister, canReportFrozen }: Props) {
+export function Worklist({ cases, loading, total, counts, filteredCounts, queues, workload, onQueueChanged, assignees, onQuery, scope, onScope, mayShare, current, onSelect, onOpen, onViewer, onRegister, canReportFrozen, onReference }: Props) {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<CaseStatus | ''>('');
   const [assignee, setAssignee] = useState('');
@@ -231,6 +232,7 @@ export function Worklist({ cases, loading, total, counts, filteredCounts, queues
           </button>)}</div> : <p className="empty-inline">No slides are linked to this case.</p>}
           {canReportFrozen && selected.recordId && selected.worklist?.priority === 'frozen' &&
             <a className="button secondary full" href={`#case/${selected.recordId}/frozen`}>Frozen Report</a>}
+          {onReference && selected.recordId && <button className="button secondary full" onClick={() => onReference(selected)}>Add to Collection or Board</button>}
           <button className="button primary full" onClick={() => onOpen(selected.id)}>Open Case Details <ArrowRight size={16} /></button>
           {readyCount(selected) > 0 && <button className="button secondary full" onClick={() => onViewer(selected.id)}><ScanLine size={16} /> Open Viewer</button>}
         </div> : <p className="empty-inline">Select a case from the list.</p>}
