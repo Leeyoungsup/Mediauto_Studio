@@ -11,7 +11,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from app.auth import require_roles
 from app.clinical import ClinicalInput, Organization, Session, find
 from app.intake import source_id
-from app.models import (AuthUser, Case, CaseActivity, CaseAttachment, CaseRequest, ClinicalEvent,
+from app.models import (AuthUser, Case, CaseActivity, CaseAttachment, CaseNote, CaseRequest, ClinicalEvent,
                         PatientHistoryRecord, Slide, SlideScan, Specimen, SpecimenBlock, ViewerAnnotation)
 
 router = APIRouter(prefix="/api/clinical/{organization}/cases/{case_id}/logs", tags=["Case logs"])
@@ -20,7 +20,7 @@ PAGE_SIZE = 30
 ENTITY_NAMES = {
     "cases": "case", "specimens": "specimen", "specimen_blocks": "block", "slides": "slide",
     "slide_scans": "scan", "viewer_annotations": "annotation", "case_attachments": "attachment",
-    "case_requests": "request", "patient_history_records": "clinical_record",
+    "case_requests": "request", "case_notes": "note", "patient_history_records": "clinical_record",
 }
 
 
@@ -62,7 +62,7 @@ async def audit_rows(session, organization, case_id):
         in_scope("viewer_annotations", select(ViewerAnnotation.id).where(
             ViewerAnnotation.organization == organization, ViewerAnnotation.scan_key.in_(fingerprints))),
         *(in_scope(model.__tablename__, select(model.id).where(model.organization == organization, model.case_id == case_id))
-          for model in (CaseAttachment, CaseRequest, PatientHistoryRecord)),
+          for model in (CaseAttachment, CaseNote, CaseRequest, PatientHistoryRecord)),
     )
     mutation = ClinicalEvent
     failed = or_(

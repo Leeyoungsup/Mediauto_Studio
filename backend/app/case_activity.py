@@ -41,6 +41,7 @@ CASE_OPERATIONS = {
     "patient_lookup": ("patient_lookup", "case"),
     "confirm_patient": ("patient_confirmation", "case"),
     "manual_patient": ("manual_patient_entry", "case"),
+    "post_note": ("note_created", "note"),
     "create_request": ("request_created", "request"),
     "create_manual": ("patient_history_recorded", "clinical_record"),
     "list_history": ("patient_history_opened", "clinical_record"),

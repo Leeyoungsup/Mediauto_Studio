@@ -16,6 +16,7 @@ from app.case_activity import record_activity
 from app.clinical import (ClinicalInput, Organization, RegistrationKey, Session,
                           add_event, find, require_version, write)
 from app.models import AuthUser, Case, CaseRequest, ClinicalEvent, RequestNotification, Slide, SlideScan, Specimen
+from app.notification_delivery import enqueue
 from app.pdl1 import results_for_display, snapshot_folder
 from app.scan_quality import BLOCKED_QC
 from app.wsi import PRIVATE, STAGE_DOWNSAMPLES, ScanViewEvent, scan_response, verified_scan_path
@@ -131,13 +132,16 @@ def state(row):
             "result_note": row.result_note, "snapshot_id": row.snapshot["id"] if row.snapshot else None}
 
 
-def record_change(session, row, actor, action, before, previous=None):
+async def record_change(session, row, actor, action, before, previous=None, case=None):
     add_event(session, row, action, before, state(row), source="ims")
     recipients = {row.requested_by, row.assigned_to, previous} - {None, actor.id}
-    for recipient in recipients:
-        label = "assignment_removed" if previous == recipient and recipient != row.assigned_to else action
-        session.add(RequestNotification(organization=row.organization, request_id=row.id, recipient_id=recipient,
-                                        event_version=row.version, action=label))
+    if action == "request_created" and case and case.assigned_to not in (None, actor.id):
+        recipients.add(case.assigned_to)
+    labels = {recipient: "assignment_removed" if previous == recipient and recipient != row.assigned_to else action
+              for recipient in recipients}
+    await enqueue(session, organization=row.organization, case_id=row.case_id, recipients=labels,
+                  event="request", action=action, event_key=f"request:{row.id}:{row.version}", request=row)
+
 
 
 async def show_requests(session, rows, user):
@@ -183,7 +187,7 @@ async def create_request(organization: Organization, case_id: UUID, data: Create
                           status="assigned" if data.assignee_id else "open")
         session.add(row)
         await session.flush()
-        record_change(session, row, user, "request_assigned" if data.assignee_id else "request_created", {})
+        await record_change(session, row, user, "request_assigned" if data.assignee_id else "request_created", {}, case=case)
         return (await show_requests(session, [row], user))[0]
 
 
@@ -274,7 +278,7 @@ async def change_request(organization: Organization, request_id: UUID, data: Cha
                 row.result_note = None
         row.version += 1
         row.updated_at = datetime.now(timezone.utc)
-        record_change(session, row, user, action, before, previous)
+        await record_change(session, row, user, action, before, previous)
         return (await show_requests(session, [row], user))[0]
 
 

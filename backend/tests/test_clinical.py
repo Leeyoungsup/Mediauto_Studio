@@ -520,6 +520,121 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.post(other_url + "/patient-confirm",
                           json={**confirm, "source_revision": 3, "confirm_differences": True})).status_code, 409)
 
+    async def test_notes_channel_preferences_deduplication_and_delivery_retry(self):
+        import base64
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from app.notification_transport import DeliveryProblem
+
+        doctor = await create_account(self.org, "notes-doctor", "doctor")
+        outsider = await create_account(self.org, "notes-outsider", "doctor")
+        foreign = await create_account(self.org + "-outside", "notes-foreign", "doctor")
+        case = await self.create("cases", {"case_number": "NOTIFY-QA"})
+        other = await self.create("cases", {"case_number": "NOTIFY-OTHER"})
+        path = f"{self.url}/cases/{case['id']}/notes"
+        notice = self.url + "/notifications"
+        req = f"{self.url}/cases/{case['id']}/requests"
+
+        async def check(call, code=200):
+            response = await call
+            self.assertEqual(response.status_code, code, response.text)
+            return response.json()
+
+        async def inbox():
+            return await check(self.client.get(notice))
+
+        async def wait_email(state):
+            for _ in range(70):
+                items = (await inbox())["deliveries"]
+                matching = [item for item in items if item["event"] == "mention" and item["channel"] == "email"]
+                if matching and matching[0]["status"] == state:
+                    return matching[0]
+                await asyncio.sleep(.07)
+            self.fail(f"Expected mention email state {state}.")
+
+        await login(self.client, self.org, doctor.username)
+        settings = await check(self.client.get(notice + "/preferences"))
+        self.assertTrue(settings["rules"]["mention"]["in_app"])
+        self.assertFalse(settings["email_configured"])
+        configuration = {"version": 0, "rules": {"mention": {"email": True, "push": True},
+                                                    "request": {"in_app": False, "email": True}}}
+        saved = await check(self.client.put(notice + "/preferences", json=configuration))
+        self.assertEqual(saved["version"], 1)
+        await check(self.client.put(notice + "/preferences", json=configuration), 409)
+        await check(self.client.put(notice + "/push-subscription", json={
+            "endpoint": "https://127.0.0.1/fcm/send/private", "keys": {"p256dh": "xyz", "auth": "xyz"},
+        }), 422)
+        private_key = ec.generate_private_key(ec.SECP256R1())
+        encode = lambda data: base64.urlsafe_b64encode(data).decode().rstrip("=")
+        push = {"endpoint": "https://fcm.googleapis.com/fcm/send/synthetic-token", "keys": {
+            "p256dh": encode(private_key.public_key().public_bytes(
+                serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint,
+            )),
+            "auth": encode(b"0123456789abcdef"),
+        }}
+        await check(self.client.put(notice + "/push-subscription", json=push), 409)
+        with patch("app.notifications.vapid_settings", return_value=("/unused", "mailto:ops@example.test", push["keys"]["p256dh"])):
+            await check(self.client.put(notice + "/push-subscription", json=push))
+            self.assertTrue((await check(self.client.get(notice + "/preferences")))["push_registered"])
+            await check(self.client.delete(notice + "/push-subscription"))
+
+        await login(self.client, self.org, self.user.username)
+        assigned = await check(self.client.patch(f"{self.url}/cases/{case['id']}/assignment", json={
+            "assignee_id": str(doctor.id), "version": case["version"], "reason": "Synthetic notification test",
+        }))
+        await check(self.client.patch(f"{self.url}/cases/{case['id']}/assignment", json={
+            "assignee_id": str(doctor.id), "version": assigned["version"], "reason": "Repeat assignment",
+        }))
+        await check(self.client.post(path, json={"body": "@notes-outsider"}, headers={"Idempotency-Key": "blocked-mention"}), 422)
+        await check(self.client.post(path, json={"body": "@notes-foreign"}, headers={"Idempotency-Key": "cross-mention"}), 422)
+
+        with patch("app.notification_delivery.send_email", side_effect=[
+            DeliveryProblem("provider_unavailable"), DeliveryProblem("provider_rejected", "failed"), None,
+        ]) as email:
+            note = {"body": "Synthetic note for @notes-doctor and @notes-doctor."}
+            headers = {"Idempotency-Key": "note-once"}
+            created = await check(self.client.post(path, json=note, headers=headers), 201)
+            self.assertEqual(await check(self.client.post(path, json=note, headers=headers), 201), created)
+            await check(self.client.post(path, json={"body": "changed"}, headers=headers), 409)
+            await check(self.client.post(f"{self.url}/cases/{other['id']}/notes", json={
+                "body": "Synthetic cross-case reply", "parent_id": created["id"],
+            }, headers={"Idempotency-Key": "wrong-parent"}), 404)
+
+            await login(self.client, self.org, doctor.username)
+            self.assertEqual((await check(self.client.get(notice + "/preferences")))["rules"], saved["rules"])
+            items = (await inbox())["items"]
+            self.assertEqual(sorted(item["event"] for item in items), ["case_assignment", "mention"])
+            mention = next(item for item in items if item["event"] == "mention")
+            await check(self.client.post(notice + "/" + mention["id"] + "/read"))
+            first = await wait_email("retry_wait")
+            self.assertEqual(first["attempts"], 1)
+            final = await wait_email("failed")
+            self.assertEqual(final["attempts"], 2)
+            await check(self.client.post(notice + "/" + final["id"] + "/retry"))
+            self.assertEqual((await wait_email("delivered"))["id"], final["id"])
+            self.assertEqual(email.call_count, 3)
+            self.assertEqual({str(call.args[1]) for call in email.call_args_list}, {final["id"]})
+            delivery = next(item for item in (await inbox())["deliveries"] if item["channel"] == "push")
+            self.assertEqual((delivery["status"], delivery["error"]), ("blocked", "channel_not_configured"))
+            await check(self.client.post(path, json={"body": "Synthetic reply", "parent_id": created["id"]},
+                         headers={"Idempotency-Key": "reply-once"}), 201)
+            self.assertEqual((await check(self.client.get(path)))["notes"][0]["comments"][0]["body"], "Synthetic reply")
+
+        await login(self.client, self.org, self.user.username)
+        self.assertEqual([item["event"] for item in (await inbox())["items"]], ["case_comment"])
+        request = {"kind": "consult", "question": "Synthetic consultation", "assignee_id": str(doctor.id)}
+        for _ in range(2):
+            await check(self.client.post(req, json=request, headers={"Idempotency-Key": "notify-request"}), 201)
+        await check(self.client.post(notice + "/" + mention["id"] + "/read"), 404)
+        await login(self.client, self.org, doctor.username)
+        self.assertFalse(any(item["event"] == "request" for item in (await inbox())["items"]))
+        self.assertEqual(sum(item["event"] == "request" for item in (await inbox())["deliveries"]), 1)
+        await login(self.client, self.org, outsider.username)
+        await check(self.client.get(path), 404)
+        self.assertFalse((await inbox())["items"])
+        await login(self.client, foreign.organization, foreign.username)
+        await check(self.client.get(path), 403)
+
     async def test_case_logs_scope_filters_attempts_and_annotation_changes(self):
         case = await self.create("cases", {"case_number": "AUDIT-QA"})
         unrelated = await self.create("cases", {"case_number": "AUDIT-OTHER"})

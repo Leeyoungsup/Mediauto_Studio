@@ -7,3 +7,4 @@ Pillow==12.2.0
 python-jose[cryptography]==3.5.0
 SQLAlchemy[asyncio]==2.0.52
 uvicorn==0.30.0
+pywebpush==2.5.0

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Bell, ClipboardList, ScanLine } from 'lucide-react';
+import { ClipboardList, ScanLine } from 'lucide-react';
 import { ImageViewport } from './image-viewport';
 import { api, jsonBody } from './session';
 import type { DemoCase } from './demo';
@@ -8,6 +8,7 @@ import type { DemoCase } from './demo';
 const kinds = { ai: 'PD-L1 Analysis', consult: 'Consultation' };
 const statuses = { open: 'Awaiting Assignment', assigned: 'Assigned', in_progress: 'In Progress', completed: 'Completed', failed: 'Failed', cancelled: 'Cancel' };
 const actions = { assign: 'Assign Request', start: 'Start Processing', complete: 'Complete Request', fail: 'Record Failure', retry: 'Reopen Request', cancel: 'Cancel Request' };
+
 const notices: Record<string, string> = {
   request_created: 'Create Request', request_assigned: 'Request Assigned', request_reassigned: 'Request Reassigned',
   request_started: 'Request Started', request_completed: 'Request Completed', request_failed: 'Request Failed',
@@ -29,8 +30,6 @@ type RequestDetail = CaseRequest & {
   history: { version: number; action: string; at: string; before: Status | null; after: Status }[];
   scan: { id: string; label: string; stain: string | null; format: 'NDPI' | 'SVS' } | null;
 };
-type Notice = { id: string; action: string; created_at: string; request_id: string | null; read_at: string | null };
-type Inbox = { unread: number; items: Notice[] };
 const pathFor = (org: string) => '/api/clinical/' + encodeURIComponent(org);
 const time = (value: string) => new Date(value).toLocaleString('en-US');
 const notificationEvent = 'mediauto-request-changed';
@@ -219,39 +218,4 @@ export function RequestPage({ organization, id }: { organization: string; id: st
         label={row.scan.label} stain={row.scan.stain ?? 'Not Entered'} readOnlyEndpoint={path + '/wsi'} />}
     </div>}
   </>;
-}
-
-export function RequestInbox({ organization }: { organization: string }) {
-  const path = pathFor(organization) + '/request-notifications';
-  const { data, error, refresh } = useResource<Inbox>(path);
-  const [readError, setReadError] = useState('');
-  useEffect(() => {
-    const timer = window.setInterval(refresh, 10000);
-    window.addEventListener(notificationEvent, refresh);
-    return () => { clearInterval(timer); window.removeEventListener(notificationEvent, refresh); };
-  }, [refresh]);
-
-  async function mark(item: Notice, navigate: boolean) {
-    setReadError('');
-    try {
-      if (!item.read_at) await api(path + '/' + item.id + '/read', { method: 'POST' });
-      if (navigate && item.request_id) location.hash = 'request/' + item.request_id;
-      changed();
-      return true;
-    } catch (failure) { setReadError(errorText(failure)); return false; }
-  }
-  return <details className="request-inbox" onToggle={(event) => { if (event.currentTarget.open) refresh(); }}>
-    <summary className="button secondary"><Bell size={16} /> Request Notifications{data?.unread ? ` (${data.unread})` : ''}</summary>
-    <section className="panel request-inbox-panel" aria-label="Request Inbox">
-      <button className="button secondary" onClick={refresh}>Refresh Notifications</button>
-      {readError && <p className="form-error" role="alert">{readError}</p>}
-      {data ? data.items.length ? <ul className="request-list">{data.items.map((item) => <li key={item.id}>
-        <strong>{notices[item.action]}{!item.read_at && ' · Unread'}</strong><small>{time(item.created_at)}</small>
-        {item.request_id ? <button className="button secondary" onClick={(event) => {
-          const inbox = event.currentTarget.closest('details');
-          void mark(item, true).then((ok) => { if (ok && inbox) inbox.open = false; });
-        }}>Open Request</button> : !item.read_at && <button className="button secondary" onClick={() => void mark(item, false)}>Mark as Read</button>}
-      </li>)}</ul> : <p className="empty-inline">No request notifications.</p> : <ResourceStatus error={error} retry={refresh} />}
-    </section>
-  </details>;
 }

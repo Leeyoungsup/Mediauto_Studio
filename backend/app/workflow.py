@@ -15,6 +15,7 @@ from app.clinical import (
     require_version, scan_metadata, write,
 )
 from app.models import AuthUser, Case, Patient, Slide, SlideScan, Specimen, SpecimenBlock
+from app.notification_delivery import enqueue
 from app.scan_quality import BLOCKED_QC
 from app.workgroup_policy import GroupKey, Priority, group_member, lock_group, member_filter
 
@@ -54,6 +55,7 @@ def record_change(session, case, action, before, reason, *, note=""):
 @router.patch("/cases/{case_id}/assignment")
 async def assign_case(organization: Organization, case_id: UUID, data: Assignment, session: Session):
     async with write(session, ("admin",)):
+        user = session.info["user"]
         case = await find(session, Case, organization, case_id, lock=True)
         require_version(case, data.version)
         if case.status not in ("registered", "assigned", "in_review"):
@@ -69,7 +71,11 @@ async def assign_case(organization: Organization, case_id: UUID, data: Assignmen
         action = "reassigned" if case.assigned_to else "assigned"
         case.assigned_to = assignee.id
         case.status = "assigned"
-        return record_change(session, case, action, before, data.reason)
+        result = record_change(session, case, action, before, data.reason)
+        if assignee.id != user.id:
+            await enqueue(session, organization=organization, case_id=case.id, recipients={assignee.id: None},
+                          event="case_assignment", action=action, event_key=f"assignment:{case.id}:{case.version}")
+        return result
 
 
 class Classification(CaseChange):

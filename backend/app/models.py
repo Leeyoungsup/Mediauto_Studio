@@ -39,6 +39,7 @@ class AuthUser(Base):
     display_name: Mapped[str] = mapped_column(String(120))
     role: Mapped[str] = mapped_column(String(16))
     password_hash: Mapped[str] = mapped_column(String(120))
+    notification_email: Mapped[str | None] = mapped_column(String(254))
     active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     failed_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -530,6 +531,71 @@ class RequestNotification(Base):
     event_version: Mapped[int] = mapped_column(Integer)
     action: Mapped[str] = mapped_column(String(40))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CaseNote(ClinicalRecord, Base):
+    __tablename__ = "case_notes"
+    __table_args__ = (
+        UniqueConstraint("organization", "case_id", "id"),
+        UniqueConstraint("organization", "case_id", "created_by", "request_key"),
+        ForeignKeyConstraint(("organization", "case_id"), ("cases.organization", "cases.id")),
+        ForeignKeyConstraint(("organization", "case_id", "parent_id"),
+                             ("case_notes.organization", "case_notes.case_id", "case_notes.id")),
+        Index("ix_case_notes_thread", "organization", "case_id", "parent_id", "created_at", "id"),
+    )
+
+    case_id: Mapped[UUID] = mapped_column(Uuid)
+    parent_id: Mapped[UUID | None] = mapped_column(Uuid)
+    body: Mapped[str] = mapped_column(Text)
+    mentions: Mapped[list] = mapped_column(JSONB)
+    request_key: Mapped[str] = mapped_column(String(128))
+
+
+class NotificationPreference(Base):
+    __tablename__ = "notification_preferences"
+    __table_args__ = (
+        ForeignKeyConstraint(("organization", "user_id"), ("auth_users.organization", "auth_users.id"), ondelete="CASCADE"),
+        UniqueConstraint("push_endpoint"),
+    )
+
+    organization: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    rules: Mapped[dict] = mapped_column(JSONB, default=dict)
+    version: Mapped[int] = mapped_column(Integer, default=0)
+    push_endpoint: Mapped[str | None] = mapped_column(String(1000))
+    push_keys: Mapped[dict | None] = mapped_column(JSONB)
+
+
+class NotificationDelivery(Base):
+    __tablename__ = "notification_deliveries"
+    __table_args__ = (
+        UniqueConstraint("organization", "recipient_id", "event_key", "channel"),
+        ForeignKeyConstraint(("organization", "recipient_id"), ("auth_users.organization", "auth_users.id")),
+        ForeignKeyConstraint(("organization", "case_id"), ("cases.organization", "cases.id")),
+        ForeignKeyConstraint(("organization", "request_id"), ("case_requests.organization", "case_requests.id")),
+        CheckConstraint("channel IN ('in_app','email','push')", name="notification_delivery_channel"),
+        CheckConstraint("status IN ('queued','sending','retry_wait','delivered','blocked','failed')",
+                        name="notification_delivery_state"),
+        Index("ix_notification_delivery_due", "status", "next_attempt_at"),
+        Index("ix_notification_delivery_recipient", "organization", "recipient_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    organization: Mapped[str] = mapped_column(String(64))
+    recipient_id: Mapped[UUID] = mapped_column(Uuid)
+    case_id: Mapped[UUID] = mapped_column(Uuid)
+    request_id: Mapped[UUID | None] = mapped_column(Uuid)
+    event_key: Mapped[str] = mapped_column(String(150))
+    event: Mapped[str] = mapped_column(String(24))
+    action: Mapped[str] = mapped_column(String(40))
+    channel: Mapped[str] = mapped_column(String(8))
+    status: Mapped[str] = mapped_column(String(12))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(String(40))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 

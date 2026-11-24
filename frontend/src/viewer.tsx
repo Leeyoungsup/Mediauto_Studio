@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, GalleryHorizontalEnd, PanelLeftClose, PanelLeftOpen, Maximize, Minimize, Settings2, ScanLine, History, FileText, Camera, List } from 'lucide-react';
+import { ArrowLeft, GalleryHorizontalEnd, PanelLeftClose, PanelLeftOpen, Maximize, Minimize, Settings2, ScanLine, History, FileText, Camera, List, MessageSquare } from 'lucide-react';
 import type { DemoCase } from './demo';
+import { NotesDialog } from './case-notes';
 import { CaseLogsDialog } from './case-logs';
 import { AttachmentDialog } from './case-attachments';
 import type { AttachmentKind } from './case-attachments';
@@ -10,9 +11,10 @@ import { MultiView } from './multi-view';
 import { ViewerSettingsPanel, useViewerPreferences } from './viewer-preferences';
 import { ScanReference, SlidePreview, StatusLabel } from './worklist';
 
-export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsHref, initialSnapshot, editorHref, historyEndpoint, attachmentsEndpoint, logsEndpoint }: {
-  item: DemoCase; activeSlide?: string; onSlide: (id: string) => void; onBack: (scan?: string) => void; onReview?: () => void; requestsHref?: string; initialSnapshot?: string; editorHref?: string; historyEndpoint?: string; attachmentsEndpoint?: string; logsEndpoint?: string;
+export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsHref, initialSnapshot, editorHref, historyEndpoint, attachmentsEndpoint, logsEndpoint, notesEndpoint }: {
+  item: DemoCase; activeSlide?: string; onSlide: (id: string) => void; onBack: (scan?: string) => void; onReview?: () => void; requestsHref?: string; initialSnapshot?: string; editorHref?: string; historyEndpoint?: string; attachmentsEndpoint?: string; logsEndpoint?: string; notesEndpoint?: string;
 }) {
+  const [showNotes, setShowNotes] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [attachmentKind, setAttachmentKind] = useState<AttachmentKind>();
   const [showHistory, setShowHistory] = useState(false);
@@ -84,6 +86,7 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
       </button>}
       {attachmentsEndpoint && <><button type="button" className="button secondary" onClick={() => setAttachmentKind('pdf')}><FileText size={16} /> Media</button>
         <button type="button" className="button secondary" onClick={() => setAttachmentKind('gross')}><Camera size={16} /> Gross Images</button></>}
+      {notesEndpoint && <button type="button" className="button secondary" onClick={() => setShowNotes(true)}><MessageSquare size={16} /> Notes</button>}
       {logsEndpoint && <button type="button" className="button secondary" onClick={() => setShowLogs(true)}><List size={16} /> Case Logs</button>}
       {editorHref && <a className="button secondary" href={editorHref}>Case Editor</a>}
       {requestsHref && <a className="button secondary" href={requestsHref}>Analysis and Consultation Requests</a>}
@@ -101,6 +104,7 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
         : <div className="panel empty"><ScanLine size={30} /><strong>{activeSlide && !slide ? 'The requested scan could not be found.' : slide?.state === 'QC Hold' || slide?.state === 'Rescan Required' ? 'This scan is blocked by QC.' : 'No scans are available for review.'}</strong><button className="button secondary" onClick={() => onBack(slide?.id)}>Go to Case Details</button></div>}
     </div>}
     {attachmentKind && attachmentsEndpoint && <AttachmentDialog endpoint={attachmentsEndpoint} kind={attachmentKind} onClose={() => setAttachmentKind(undefined)} />}
+    {showNotes && notesEndpoint && <NotesDialog endpoint={notesEndpoint} onClose={() => setShowNotes(false)} />}
     {showLogs && logsEndpoint && <CaseLogsDialog endpoint={logsEndpoint} onClose={() => setShowLogs(false)} />}
     {showHistory && historyEndpoint && <PatientHistoryDialog key={historyEndpoint} endpoint={historyEndpoint} onClose={() => setShowHistory(false)} />}
   </section>;

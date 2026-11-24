@@ -1,3 +1,4 @@
+import { NotificationCenter, NotificationSettings } from './notifications';
 import { StrictMode, useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { Activity, ChevronRight, CircleHelp, ClipboardList, FlaskConical, LayoutList, Microscope, PanelLeftClose, PanelLeftOpen, ScanLine, Settings2, UserRound, UserRoundCheck, X } from 'lucide-react';
@@ -7,7 +8,7 @@ import { PatientMatch } from './patient-match';
 import type { PatientSelection } from './patient-match';
 import { CaseDetail } from './case-detail';
 import { CaseDates } from './case-dates';
-import { CaseRequests, ReportDraftReferences, RequestInbox, RequestPage } from './case-requests';
+import { CaseRequests, ReportDraftReferences, RequestPage } from './case-requests';
 import type { DemoCase } from './demo';
 import { IntakePage, IntakeSettings } from './intake';
 import { IntegrationSettings, PatientIntegration, integrationLabel, integrationPath } from './integration';
@@ -28,8 +29,8 @@ import './style.css';
 
 const emrLabels = { unconfigured: 'Not Configured', disabled: 'Disabled', connected: 'Connected', unavailable: 'Connection Unavailable', unknown: 'Unavailable' };
 type Health = { status: 'ok' | 'degraded'; database: 'connected' | 'unavailable'; emr: keyof typeof emrLabels };
-type Page = { view: 'worklist'; scope: Scope } | { view: 'case'; id: string; files: boolean; tab?: 'requests' | 'report' | 'editor'; selectedScan?: string } | { view: 'request'; id: string }
-  | { view: 'viewer'; id: string; slide?: string; snapshot?: string; files: boolean } | { view: 'scans' } | { view: 'settings'; section?: 'groups' };
+type Page = { view: 'worklist'; scope: Scope } | { view: 'case'; id: string; files: boolean; tab?: 'requests' | 'report' | 'editor' | 'notes'; selectedScan?: string } | { view: 'request'; id: string }
+  | { view: 'viewer'; id: string; slide?: string; snapshot?: string; files: boolean } | { view: 'scans' } | { view: 'settings'; section?: 'groups' | 'notifications' };
 type WorkflowAction = 'assignment' | 'review' | 'confirm';
 type Modal = 'register' | 'system' | null;
 
@@ -40,9 +41,9 @@ function decodeRoute(value: string) {
 function readPage(): Page {
   const [view, id, slide, snapshot] = location.hash.slice(1).split('/');
   if (view === 'scans') return { view };
-  if (view === 'settings') return { view, section: id === 'groups' ? 'groups' : undefined };
+  if (view === 'settings') return { view, section: id === 'groups' || id === 'notifications' ? id : undefined };
   if (view === 'request' && id) return { view, id: decodeRoute(id) };
-  if ((view === 'case' || view === 'file-case') && id) return { view: 'case', id: decodeRoute(id), files: view === 'file-case', tab: slide === 'requests' || slide === 'report' || slide === 'editor' ? slide : undefined,
+  if ((view === 'case' || view === 'file-case') && id) return { view: 'case', id: decodeRoute(id), files: view === 'file-case', tab: slide === 'requests' || slide === 'report' || slide === 'editor' || slide === 'notes' ? slide : undefined,
     selectedScan: slide === 'slides' && snapshot ? decodeRoute(snapshot) : undefined };
   if ((view === 'viewer' || view === 'file-viewer') && id) return { view: 'viewer', id: decodeRoute(id), slide: slide ? decodeRoute(slide) : undefined, snapshot: /^[a-f0-9]{64}$/.test(snapshot ?? '') ? snapshot : undefined, files: view === 'file-viewer' };
   return { view: 'worklist', scope: id === 'mine' || id === 'unassigned' ? id : 'all' };
@@ -231,6 +232,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
   const clinicalCaseEndpoint = current?.recordId ? `/api/clinical/${encodeURIComponent(user.organization)}/cases/${current.recordId}` : undefined;
   const historyEndpoint = requestAllowed && clinicalCaseEndpoint ? clinicalCaseEndpoint + '/patient-history' : undefined;
   const logsEndpoint = requestAllowed && clinicalCaseEndpoint ? clinicalCaseEndpoint + '/logs' : undefined;
+  const notesEndpoint = clinicalCaseEndpoint ? clinicalCaseEndpoint + '/notes' : undefined;
   const attachmentsEndpoint = clinicalCaseEndpoint ? clinicalCaseEndpoint + '/attachments' : undefined;
 
   function showModal(next: Modal) { setFormError(''); setModal(next); }
@@ -324,7 +326,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
           title={collapseNavigation ? 'Expand Navigation' : 'Collapse Navigation'} onClick={() => setNavigationCollapsed(!collapseNavigation)}>
           {collapseNavigation ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
         </button><span>Pathology Workspace</span><ChevronRight size={15} /><strong>{{ viewer: 'WSI Viewer', case: 'Case Details', request: 'Analysis and Consultation Requests', scans: 'Slide Registration', settings: 'Settings', worklist: 'Worklist' }[page.view]}</strong></div>
-        <div className="header-actions">{requestAllowed && <RequestInbox organization={user.organization} />}<span className="demo-label"><FlaskConical size={15} /> Demo Environment</span><button className="emr-chip" onClick={() => showModal('system')}><span /> EMR {emr} · LIS {lis}</button><span className="identity"><UserRound size={17} />{user.display_name}</span><button className="button secondary" onClick={logout}>Sign Out</button></div>
+        <div className="header-actions"><NotificationCenter key={user.id} organization={user.organization} /><span className="demo-label"><FlaskConical size={15} /> Demo Environment</span><button className="emr-chip" onClick={() => showModal('system')}><span /> EMR {emr} · LIS {lis}</button><span className="identity"><UserRound size={17} />{user.display_name}</span><button className="button secondary" onClick={logout}>Sign Out</button></div>
       </header>
       <main className="workspace-main" data-view={page.view}>
         {(page.view === 'worklist' || page.view === 'scans') && <nav aria-label="Worklist Navigation" className="worklist-nav">
@@ -341,20 +343,21 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
             onViewer={(id, slide) => { const item = worklistCases.find((row) => row.id === id); if (item) navigateViewer(item, slide); }}
             onRegister={writable ? () => showModal('register') : undefined} />
         </div>
-        {page.view === 'settings' && settingsAllowed && (page.section === 'groups'
+        {page.view === 'settings' && page.section === 'notifications' && <NotificationSettings organization={user.organization} />}
+        {page.view === 'settings' && page.section !== 'notifications' && settingsAllowed && (page.section === 'groups'
           ? <WorkgroupSettings onChanged={refreshQueues} /> : <>
           <div className="settings-actions"><a className="button secondary" href="#settings/groups">Manage Workgroups</a></div>
           {intakeAllowed && <IntakeSettings refresh={refreshFiles} emrConnected={integration?.emr.state === 'connected'} />}
           <IntegrationSettings org={user.organization} status={integration} onRefresh={refreshIntegration} />
         </>)}
         {page.view === 'scans' && intakeAllowed && <IntakePage files={files} loading={filesLoading} problem={fileProblem} refresh={refreshFiles} />}
-        {((page.view === 'settings' && !settingsAllowed) || (page.view === 'scans' && !intakeAllowed)) && <div className="panel empty"><strong>You do not have permission to open this page.</strong><button className="button secondary" onClick={goBack}>Back to Worklist</button></div>}
+        {((page.view === 'settings' && page.section !== 'notifications' && !settingsAllowed) || (page.view === 'scans' && !intakeAllowed)) && <div className="panel empty"><strong>You do not have permission to open this page.</strong><button className="button secondary" onClick={goBack}>Back to Worklist</button></div>}
         {page.view === 'request' && <RequestPage key={page.id} id={page.id} organization={user.organization} />}
         {casePage && (!current ? <div className="panel empty"><CircleHelp size={28} /><strong>{casePage.files
           ? (intakeAllowed && filesLoading ? 'Loading case…' : 'Unable to load the case.')
           : detail?.key === detailKey ? detail?.error : 'Loading case…'}</strong><button className="button secondary" onClick={goBack}>Back to Worklist</button></div>
-          : casePage.view === 'case' ? <CaseDetail key={current.id + '/' + (casePage.tab ?? '')} item={current} selectedScan={casePage.selectedScan} historyEndpoint={historyEndpoint} attachmentsEndpoint={attachmentsEndpoint} logsEndpoint={logsEndpoint}
-            initialTab={current.recordId ? casePage.tab === 'editor' ? 'Case Editor' : requestAllowed
+          : casePage.view === 'case' ? <CaseDetail key={current.id + '/' + (casePage.tab ?? '')} item={current} selectedScan={casePage.selectedScan} historyEndpoint={historyEndpoint} attachmentsEndpoint={attachmentsEndpoint} logsEndpoint={logsEndpoint} notesEndpoint={notesEndpoint}
+            initialTab={current.recordId ? casePage.tab === 'editor' ? 'Case Editor' : casePage.tab === 'notes' ? 'Notes' : requestAllowed
               ? casePage.tab === 'requests' ? 'Requests' : casePage.tab === 'report' ? 'Report Draft' : undefined : undefined : undefined}
             editor={current.recordId ? <CaseEditor item={current} organization={user.organization} editable={writable && current.status !== 'Review Complete'}
               canImport={user.role === 'admin'} onChanged={patientChanged}
@@ -369,7 +372,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
             onAssign={mayAssign ? () => openWorkflow(current, 'assignment') : undefined}
             onReview={mayReview ? () => openWorkflow(current, 'review') : undefined}
             onConfirm={intakeAllowed && current.source === 'files' ? () => openWorkflow(current, 'confirm') : undefined} />
-          : <Viewer key={current.id} item={current} activeSlide={casePage.slide} initialSnapshot={casePage.snapshot} historyEndpoint={historyEndpoint} attachmentsEndpoint={attachmentsEndpoint} logsEndpoint={logsEndpoint} editorHref={current.recordId ? `#case/${current.recordId}/editor` : undefined} requestsHref={requestAllowed && current.recordId ? `#case/${current.recordId}/requests` : undefined} onSlide={(id) => navigateViewer(current, id)} onBack={(scan) => navigateCase(current, scan)}
+          : <Viewer key={current.id} item={current} activeSlide={casePage.slide} initialSnapshot={casePage.snapshot} historyEndpoint={historyEndpoint} attachmentsEndpoint={attachmentsEndpoint} logsEndpoint={logsEndpoint} notesEndpoint={notesEndpoint} editorHref={current.recordId ? `#case/${current.recordId}/editor` : undefined} requestsHref={requestAllowed && current.recordId ? `#case/${current.recordId}/requests` : undefined} onSlide={(id) => navigateViewer(current, id)} onBack={(scan) => navigateCase(current, scan)}
             onReview={mayReview ? () => openWorkflow(current, 'review') : undefined} />)}
       </main>
     </div>

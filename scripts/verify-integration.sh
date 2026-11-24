@@ -39,6 +39,8 @@ mkdir "$sandbox/socket"
 export MEDIAUTO_DATABASE_URL="postgresql+asyncpg://$(id -un)@/mediauto_clinical_test?host=$sandbox/socket"
 export MEDIAUTO_AUTH_SECRET_FILE="$sandbox/auth.key"
 export MEDIAUTO_PDL1_ROOT="$sandbox/pdl1"
+export MEDIAUTO_NOTIFICATION_CONFIG_FILE="$sandbox/notifications.json"
+export MEDIAUTO_SMTP_HOST="" MEDIAUTO_VAPID_PRIVATE_KEY=""
 export MEDIAUTO_DEMO_URL="http://127.0.0.1:$port"
 cd -- "$root/backend"
 
@@ -143,4 +145,5 @@ with Image.new("RGB", (480, 360), "ivory") as gross:
 PYMEDIA
     node scripts/case-attachments-browser.mjs
     node scripts/case-logs-browser.mjs
+    node scripts/notifications-browser.mjs
 fi
