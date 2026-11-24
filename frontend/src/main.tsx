@@ -1,3 +1,4 @@
+import { CaseReport } from './case-report';
 import { NotificationCenter, NotificationSettings } from './notifications';
 import { StrictMode, useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
@@ -363,7 +364,10 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
               canImport={user.role === 'admin'} onChanged={patientChanged}
               patient={<PatientIntegration item={current} org={user.organization} editable={writable} status={integration} onChanged={patientChanged} />} /> : undefined}
             requests={requestAllowed && current.recordId ? <CaseRequests organization={user.organization} item={current} /> : undefined}
-            report={requestAllowed && current.recordId ? <ReportDraftReferences organization={user.organization} caseId={current.recordId} /> : undefined} emr={emr} onBack={goBack} onViewer={(slide) => navigateViewer(current, slide)}
+            report={requestAllowed && current.recordId && clinicalCaseEndpoint ? <>
+              <CaseReport endpoint={clinicalCaseEndpoint + '/report'} caseId={current.recordId} caseVersion={current.version} caseChanged={patientChanged} />
+              <ReportDraftReferences organization={user.organization} caseId={current.recordId} />
+            </> : undefined} emr={emr} onBack={goBack} onViewer={(slide) => navigateViewer(current, slide)}
             patientIntegration={current.recordId ? <PatientIntegration item={current} org={user.organization}
               editable={writable} status={integration} onChanged={patientChanged} /> : undefined}
             dates={current.recordId ? <CaseDates item={current} organization={user.organization} editable={writable} onChanged={patientChanged} /> : undefined}

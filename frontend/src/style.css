@@ -565,3 +565,14 @@ dialog::backdrop { background: #21193575; }
 .notification-settings .history-connections dd.actions { margin-top: 8px; }
 .delivery-activity { margin-top: 8px; }
 .delivery-activity summary { cursor: pointer; font-weight: 600; }
+
+.case-report { display: grid; gap: 12px; min-width: 0; }
+.case-report .history-manual > button { justify-self: start; }
+.report-evidence { min-width: 0; border: 1px solid var(--line); border-radius: 7px; padding: 8px; display: grid; gap: 6px; }
+.report-evidence label { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; font-size: 13px; }
+.report-evidence a { font-weight: 600; }
+.report-dictation summary, .report-history summary { cursor: pointer; font-weight: 650; margin-bottom: 6px; }
+.report-snapshot { display: grid; gap: 7px; min-width: 0; }
+.report-snapshot p, .report-identifier, .report-history p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.report-history .timeline { margin-block: 8px; }
+.report-history .timeline li { margin-block: 5px; }

@@ -332,6 +332,7 @@ class IntegrationConnection(Base):
 
     organization: Mapped[str] = mapped_column(String(64), primary_key=True)
     channel: Mapped[str] = mapped_column(String(8), primary_key=True)
+    report_delivery_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     mode: Mapped[str] = mapped_column(String(16))
     scenario: Mapped[str] = mapped_column(String(16))
     state: Mapped[str] = mapped_column(String(24))
@@ -597,6 +598,83 @@ class NotificationDelivery(Base):
     next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ReportTemplate(Base):
+    __tablename__ = "report_templates"
+    __table_args__ = (
+        UniqueConstraint("organization", "id"),
+        UniqueConstraint("organization", "template_key", "version"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    organization: Mapped[str] = mapped_column(String(64))
+    template_key: Mapped[UUID] = mapped_column(Uuid)
+    version: Mapped[int] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(String(120))
+    sections: Mapped[list] = mapped_column(JSONB)
+    created_by: Mapped[UUID] = mapped_column(Uuid)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CaseReport(ClinicalRecord, Base):
+    __tablename__ = "case_reports"
+    __table_args__ = (
+        UniqueConstraint("organization", "id"),
+        UniqueConstraint("organization", "case_id"),
+        ForeignKeyConstraint(("organization", "case_id"), ("cases.organization", "cases.id")),
+    )
+
+    case_id: Mapped[UUID] = mapped_column(Uuid)
+
+
+class ReportRevision(Base):
+    __tablename__ = "report_revisions"
+    __table_args__ = (
+        UniqueConstraint("organization", "report_id", "id"),
+        UniqueConstraint("organization", "report_id", "version"),
+        ForeignKeyConstraint(("organization", "report_id"), ("case_reports.organization", "case_reports.id")),
+        CheckConstraint("status IN ('draft','in_review','approved')", name="report_revision_status"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    organization: Mapped[str] = mapped_column(String(64))
+    report_id: Mapped[UUID] = mapped_column(Uuid)
+    version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16))
+    content: Mapped[dict] = mapped_column(JSONB)
+    replaces_version: Mapped[int | None] = mapped_column(Integer)
+    correction_reason: Mapped[str | None] = mapped_column(String(240))
+    author: Mapped[str] = mapped_column(String(80))
+    action: Mapped[str] = mapped_column(String(32))
+    reason: Mapped[str | None] = mapped_column(String(240))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ReportTransmission(ClinicalRecord, Base):
+    __tablename__ = "report_transmissions"
+    __table_args__ = (
+        UniqueConstraint("organization", "report_id", "revision_id"),
+        ForeignKeyConstraint(("organization", "case_id"), ("cases.organization", "cases.id")),
+        ForeignKeyConstraint(("organization", "report_id", "revision_id"),
+                             ("report_revisions.organization", "report_revisions.report_id", "report_revisions.id")),
+        CheckConstraint("status IN ('queued','sending','retry_wait','acknowledged','failed')",
+                        name="report_transmission_status"),
+        Index("ix_report_transmission_due", "status", "due_at"),
+    )
+
+    case_id: Mapped[UUID] = mapped_column(Uuid)
+    report_id: Mapped[UUID] = mapped_column(Uuid)
+    revision_id: Mapped[UUID] = mapped_column(Uuid)
+    report_version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16))
+    payload: Mapped[dict] = mapped_column(JSONB)
+    digest: Mapped[str] = mapped_column(String(64))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    error: Mapped[str | None] = mapped_column(String(32))
+    ack_id: Mapped[str | None] = mapped_column(String(128))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class WorklistOpen(Base):

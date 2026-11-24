@@ -19,6 +19,7 @@ from app.case_attachments import router as case_attachments_router
 from app.case_editor import router as case_editor_router
 from app.case_logs import router as case_logs_router
 from app.case_notes import router as case_notes_router
+from app.case_reports import router as case_reports_router
 from app.case_requests import router as case_requests_router
 from app.clinical import router as clinical_router
 from app.database import database_url
@@ -29,6 +30,7 @@ from app.patient_history import router as patient_history_router
 from app.pdl1 import router as pdl1_router
 from app.notification_delivery import poll_deliveries
 from app.notifications import router as notifications_router
+from app.report_delivery import poll_reports
 from app.models import ApplicationSetting, IntegrationConnection
 from app.viewer_records import router as viewer_records_router
 from app.worklist import router as worklist_router
@@ -63,12 +65,13 @@ async def lifespan(app: FastAPI):
     app.state.engine = engine
     inbox = asyncio.create_task(poll_inbox(engine))
     deliveries = asyncio.create_task(poll_deliveries(engine))
+    reports = asyncio.create_task(poll_reports(engine))
     try:
         yield
     finally:
-        for task in (inbox, deliveries):
+        for task in (inbox, deliveries, reports):
             task.cancel()
-        for task in (inbox, deliveries):
+        for task in (inbox, deliveries, reports):
             with suppress(asyncio.CancelledError):
                 await task
         await engine.dispose()
@@ -81,6 +84,7 @@ app.include_router(auth_router)
 app.include_router(case_attachments_router)
 app.include_router(case_logs_router)
 app.include_router(case_notes_router)
+app.include_router(case_reports_router)
 app.include_router(notifications_router)
 app.include_router(case_editor_router)
 app.include_router(case_requests_router)

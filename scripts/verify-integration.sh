@@ -146,4 +146,5 @@ PYMEDIA
     node scripts/case-attachments-browser.mjs
     node scripts/case-logs-browser.mjs
     node scripts/notifications-browser.mjs
+    node scripts/case-report-browser.mjs
 fi

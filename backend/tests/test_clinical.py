@@ -520,6 +520,129 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.post(other_url + "/patient-confirm",
                           json={**confirm, "source_revision": 3, "confirm_differences": True})).status_code, 409)
 
+    async def test_report_templates_evidence_approval_delivery_and_correction(self):
+        doctor = await create_account(self.org, "report-doctor", "doctor")
+        other = await create_account(self.org, "report-other", "doctor")
+        outsider = await create_account(self.org + "-outside", "report-outside", "admin")
+        case = await self.create("cases", {"case_number": "REPORT-QA"})
+        case_path = self.url + "/cases/" + case["id"]
+        path = case_path + "/report"
+        templates = self.url + "/report-templates"
+        lis = f"/api/integration/{self.org}/connections/lis"
+
+        async def check(call, code=200):
+            response = await call
+            self.assertEqual(response.status_code, code, response.text)
+            return response.json()
+
+        async def action(name, version, code=200, **fields):
+            return await check(self.client.post(path + "/actions", json={"version": version, "action": name, **fields}), code)
+
+        async def wait_delivery(version, expected):
+            for _ in range(140):
+                view = await check(self.client.get(path))
+                value = next((row for row in view["deliveries"] if row["report_version"] == version), None)
+                if value and value["status"] == expected:
+                    return value
+                await asyncio.sleep(.07)
+            self.fail(f"Expected delivery state {expected}.")
+
+        assigned = await check(self.client.patch(case_path + "/assignment", json={
+            "assignee_id": str(doctor.id), "version": case["version"], "reason": "Assign synthetic report",
+        }))
+        first_template = await check(self.client.post(templates, json={"name": "Original template", "sections": [
+            {"key": "diagnosis", "label": "Diagnosis", "required": True},
+        ]}), 201)
+        consultation = await check(self.client.post(case_path + "/requests", json={
+            "kind": "consult", "question": "Synthetic evidence", "assignee_id": str(doctor.id),
+        }, headers={"Idempotency-Key": "report-qa-request"}), 201)
+
+        await login(self.client, self.org, doctor.username)
+        request_path = self.url + "/requests/" + consultation["id"]
+        started = await check(self.client.patch(request_path, json={"version": consultation["version"], "action": "start"}))
+        completed = await check(self.client.patch(request_path, json={
+            "version": started["version"], "action": "complete", "note": "Synthetic consultation response",
+        }))
+        await check(self.client.post(templates, json={"name": "Cannot manage", "sections": [
+            {"key": "finding", "label": "Finding"},
+        ]}), 403)
+
+        await login(self.client, self.org, self.user.username)
+        empty = {"version": 0, "template_id": first_template["id"], "sections": {}, "evidence_ids": [completed["id"]]}
+        draft = await check(self.client.put(path, json=empty))
+        one = draft["version"]
+        await action("submit", one, 422)
+        await check(self.client.put(path, json={**empty, "version": one, "sections": {"unexpected": "No"}}), 422)
+        await check(self.client.put(path, json={**empty, "version": one, "evidence_ids": [str(uuid4())]}), 422)
+        await check(self.client.post(templates, json={
+            "template_key": first_template["template_key"], "version": 1, "name": "Revised template", "sections": [
+                {"key": "diagnosis", "label": "Renamed Diagnosis", "required": True},
+            ],
+        }), 201)
+        self.assertEqual((await check(self.client.get(path)))["draft"]["template"]["name"], "Original template")
+        dictation = "Synthetic transcribed finding."
+        revision = await check(self.client.put(path, json={**empty, "version": one, "sections": {"diagnosis": dictation},
+                                                           "dictated_sections": ["diagnosis"]}))
+        await check(self.client.put(path, json={**empty, "version": one}), 409)
+        await check(self.client.post(path + "/send", json={"version": revision["version"]}), 409)
+        review = await action("submit", revision["version"])
+        await action("approve", review["version"], 403, reviewed=True)
+
+        await login(self.client, self.org, doctor.username)
+        await action("approve", review["version"], 422)
+        returned = await action("return", review["version"], reason="Recheck source wording")
+        review = await action("submit", returned["version"])
+        approved = await action("approve", review["version"], reviewed=True)
+        original_version = approved["version"]
+        self.assertEqual(approved["evidence"][0]["version"], completed["version"])
+        self.assertEqual(approved["dictated_sections"], ["diagnosis"])
+        await check(self.client.post(path + "/send", json={"version": original_version}), 409)
+
+        await login(self.client, self.org, self.user.username)
+        await check(self.client.put(lis, json={"version": 0, "mode": "mock", "scenario": "bad_ack", "report_delivery_enabled": True}))
+        await check(self.client.post(path + "/send", json={"version": original_version}), 409)
+        await check(self.client.post(case_path + "/external-identifiers", json={
+            "version": assigned["version"], "system": "lis.mock", "kind": "ACCESSION",
+            "value": "SYNTH-ACCESSION", "reason": "Synthetic LIS link",
+        }))
+        queued = await check(self.client.post(path + "/send", json={"version": original_version}), 202)
+        duplicate = await check(self.client.post(path + "/send", json={"version": original_version}), 202)
+        self.assertEqual(queued["id"], duplicate["id"])
+        failed = await wait_delivery(original_version, "failed")
+        self.assertEqual((failed["error"], failed["attempts"], failed["ack_id"]), ("invalid_ack", 3, None))
+        await action("correct", original_version, 409, reason="Cannot cross unresolved delivery")
+        await check(self.client.put(lis, json={"version": 1, "mode": "mock", "scenario": "normal", "report_delivery_enabled": True}))
+        retried = await check(self.client.post(path + "/retry", json={"version": original_version}), 202)
+        self.assertEqual(retried["id"], queued["id"])
+        original_ack = await wait_delivery(original_version, "acknowledged")
+        self.assertTrue(original_ack["ack_id"].startswith("mock-"))
+
+        correction = await action("correct", original_version, reason="Synthetic amendment")
+        self.assertEqual(correction["replaces_version"], original_version)
+        self.assertEqual(correction["correction_reason"], "Synthetic amendment")
+        revised = await check(self.client.put(path, json={**empty, "version": correction["version"],
+                                                         "sections": {"diagnosis": "Corrected text."}}))
+        review = await action("submit", revised["version"])
+        await login(self.client, self.org, doctor.username)
+        accepted = await action("approve", review["version"], reviewed=True)
+        sent = await check(self.client.post(path + "/send", json={"version": accepted["version"]}), 202)
+        corrected_ack = await wait_delivery(accepted["version"], "acknowledged")
+        self.assertEqual(sent["kind"], "correction")
+        self.assertNotEqual(corrected_ack["ack_id"], original_ack["ack_id"])
+        old = await check(self.client.get(f"{path}/versions/{original_version}"))
+        self.assertEqual(old["sections"]["diagnosis"], dictation)
+        log = await check(self.client.get(case_path + "/logs", params={"entity": "report", "action": "report_correction_started"}))
+        self.assertEqual(log["rows"][0]["after"]["replaces_version"], original_version)
+        async with app.state.engine.connect() as connection:
+            previous_ack = await connection.scalar(text("SELECT payload->>'previous_ack' FROM report_transmissions WHERE id = CAST(:id AS uuid)"),
+                {"id": sent["id"]})
+        self.assertEqual(previous_ack, original_ack["ack_id"])
+
+        await login(self.client, self.org, other.username)
+        await check(self.client.get(path), 404)
+        await login(self.client, outsider.organization, outsider.username)
+        await check(self.client.get(path), 403)
+
     async def test_notes_channel_preferences_deduplication_and_delivery_retry(self):
         import base64
         from cryptography.hazmat.primitives import serialization

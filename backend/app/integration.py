@@ -30,7 +30,8 @@ Version = Annotated[int, Field(strict=True, ge=1, le=9007199254740991)]
 class Config(ClinicalInput):
     version: int = Field(ge=0)
     mode: Literal["not_configured", "disabled", "mock"]
-    scenario: Literal["normal", "unavailable", "timeout"] = "normal"
+    scenario: Literal["normal", "unavailable", "timeout", "bad_ack", "reject_report"] = "normal"
+    report_delivery_enabled: bool | None = None
 
 
 class PatientPayload(ClinicalInput):
@@ -73,9 +74,9 @@ class ManualPatient(PatientCreate):
 def connection_view(row, channel):
     if row is None:
         return {"channel": channel, "mode": "not_configured", "state": "not_configured", "scenario": "normal",
-                "version": 0, "checked_at": None, "last_success_at": None}
+                "version": 0, "report_delivery_enabled": False, "checked_at": None, "last_success_at": None}
     return {"channel": channel, "mode": row.mode, "state": row.state, "scenario": row.scenario,
-            "version": row.version, "checked_at": row.checked_at, "last_success_at": row.last_success_at}
+            "version": row.version, "report_delivery_enabled": row.report_delivery_enabled, "checked_at": row.checked_at, "last_success_at": row.last_success_at}
 
 
 def message_view(row):
@@ -93,6 +94,8 @@ async def status(organization: Organization, session: Session):
 
 @router.put("/connections/{channel}")
 async def configure(organization: Organization, channel: Channel, data: Config, session: Session):
+    if channel != "lis" and (data.report_delivery_enabled or data.scenario in ("bad_ack", "reject_report")):
+        raise HTTPException(422, "Report delivery settings apply to LIS only.")
     async with write(session, ("admin",)):
         row = await session.get(IntegrationConnection, (organization, channel), with_for_update=True)
         if (row.version if row else 0) != data.version:
@@ -101,6 +104,10 @@ async def configure(organization: Organization, channel: Channel, data: Config, 
             row = IntegrationConnection(organization=organization, channel=channel, version=0)
             session.add(row)
         row.mode, row.scenario = data.mode, data.scenario if data.mode == "mock" else "normal"
+        if channel != "lis" or data.mode != "mock":
+            row.report_delivery_enabled = False
+        elif data.report_delivery_enabled is not None:
+            row.report_delivery_enabled = data.report_delivery_enabled
         row.state = "configured" if data.mode == "mock" else data.mode
         row.checked_at = None
         row.version += 1

@@ -30,6 +30,10 @@ Worklist에서는 **Hide Case Preview**로 목록을 넓힐 수 있습니다. WS
 
 규칙과 파일 등록 정보는 개발 PostgreSQL에 저장되며, 이미 등록한 파일은 규칙을 다시 적용해도 유지됩니다. 등록 정보는 Worklist에서 Case ID로 묶어 확인합니다. 같은 Slide ID의 NDPI와 SVS는 서로 다른 원본 파일로 표시됩니다. 등록된 스캔은 케이스 상세의 WSI 뷰어에서 열 수 있습니다.
 
+### 27. 보고 초안과 LIS 전송
+
+**Case Details → Report Draft**에서 템플릿과 근거 결과를 선택해 초안을 작성합니다. **Dictation Draft**에서 확인한 전사 텍스트를 섹션에 반영하고, 버전별 내용은 **Version History**에서 조회합니다. 배정 병리의 승인 후 연결한 Mock LIS에 명시적으로 전송할 수 있습니다. [27번 역할·설정 및 검증 기록](work/case-reporting-27.md)
+
 ### 26. Case Notes와 알림
 
 **Case Details** 또는 **WSI Viewer**의 **Notes**에서 메모, 댓글과 `@username` 멘션을 작성합니다. **Notifications → Notification Preferences**에서 사건별 **In-app**, **Email**, **Push**를 선택하고 **Delivery Status**에서 전송 상태를 확인합니다. 이메일과 Push에는 운영자 발신 설정이 필요합니다. [26번 설정과 검증 기록](work/case-notifications-26.md)

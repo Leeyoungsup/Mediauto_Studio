@@ -11,7 +11,7 @@ const labels = {
   connected: 'Connected', degraded: 'Connection Unavailable',
 };
 type Connection = {
-  channel: Channel; mode: 'not_configured' | 'disabled' | 'mock'; scenario: 'normal' | 'unavailable' | 'timeout';
+  channel: Channel; mode: 'not_configured' | 'disabled' | 'mock'; scenario: 'normal' | 'unavailable' | 'timeout' | 'bad_ack' | 'reject_report'; report_delivery_enabled?: boolean;
   state: keyof typeof labels; version: number; last_success_at: string | null;
 };
 export type IntegrationStatus = Record<Channel, Connection>;
@@ -68,7 +68,8 @@ export function IntegrationSettings({ org, status, onRefresh }: { org: string; s
         return <form key={`${channel}-${connection.version}`} onSubmit={(event) => {
           event.preventDefault();
           const form = new FormData(event.currentTarget);
-          void act(base + channel, jsonBody('PUT', { version: connection.version, mode: form.get('mode'), scenario: form.get('scenario') }));
+          void act(base + channel, jsonBody('PUT', { version: connection.version, mode: form.get('mode'), scenario: form.get('scenario'),
+            report_delivery_enabled: channel === 'lis' && form.has('report-delivery') }));
         }}>
           <h3>{channel.toUpperCase()} · {integrationLabel(connection)}</h3>
           <label className="form-field">Mode<select name="mode" defaultValue={connection.mode}>
@@ -76,7 +77,9 @@ export function IntegrationSettings({ org, status, onRefresh }: { org: string; s
           </select></label>
           <label className="form-field">Mock Response<select name="scenario" defaultValue={connection.scenario}>
             <option value="normal">Normal</option><option value="unavailable">Connection Unavailable</option><option value="timeout">Delayed Response</option>
+            {channel === 'lis' && <><option value="bad_ack">Mismatched Report ACK</option><option value="reject_report">Reject Report</option></>}
           </select></label>
+          {channel === 'lis' && <label><input type="checkbox" name="report-delivery" defaultChecked={connection.report_delivery_enabled} /> Enable Mock Report Delivery</label>}
           <p className="muted">Last Success {connection.last_success_at ? date.format(new Date(connection.last_success_at)) : 'No record'}</p>
           <div className="actions"><button className="button primary" disabled={busy}>Save</button>
             <button type="button" className="button secondary" disabled={busy || connection.mode !== 'mock'}

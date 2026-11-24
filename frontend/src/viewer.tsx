@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, GalleryHorizontalEnd, PanelLeftClose, PanelLeftOpen, Maximize, Minimize, Settings2, ScanLine, History, FileText, Camera, List, MessageSquare } from 'lucide-react';
+import { ClipboardList, ArrowLeft, GalleryHorizontalEnd, PanelLeftClose, PanelLeftOpen, Maximize, Minimize, Settings2, ScanLine, History, FileText, Camera, List, MessageSquare } from 'lucide-react';
 import type { DemoCase } from './demo';
 import { NotesDialog } from './case-notes';
 import { CaseLogsDialog } from './case-logs';
@@ -89,6 +89,7 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
       {notesEndpoint && <button type="button" className="button secondary" onClick={() => setShowNotes(true)}><MessageSquare size={16} /> Notes</button>}
       {logsEndpoint && <button type="button" className="button secondary" onClick={() => setShowLogs(true)}><List size={16} /> Case Logs</button>}
       {editorHref && <a className="button secondary" href={editorHref}>Case Editor</a>}
+      {requestsHref && <a className="button secondary" href={requestsHref.replace(/\/requests$/, '/report')}><ClipboardList size={16} /> Report Draft</a>}
       {requestsHref && <a className="button secondary" href={requestsHref}>Analysis and Consultation Requests</a>}
       {!comparing && onReview && <button className="button secondary" disabled={!slide?.wsi} onClick={onReview}>{item.status === 'In Review' ? 'Review Complete' : 'Start Review'}</button>}</div></div>
     {fullscreenError && <p className="notice" role="alert">{fullscreenError}</p>}

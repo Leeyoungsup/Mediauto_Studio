@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/clinical/{organization}/cases/{case_id}/logs", t
 ROLE_SCOPE = ("admin", "doctor")
 PAGE_SIZE = 30
 ENTITY_NAMES = {
-    "cases": "case", "specimens": "specimen", "specimen_blocks": "block", "slides": "slide",
+    "cases": "case", "case_reports": "report", "report_transmissions": "report_delivery", "specimens": "specimen", "specimen_blocks": "block", "slides": "slide",
     "slide_scans": "scan", "viewer_annotations": "annotation", "case_attachments": "attachment",
     "case_requests": "request", "case_notes": "note", "patient_history_records": "clinical_record",
 }
@@ -67,6 +67,7 @@ async def audit_rows(session, organization, case_id):
     mutation = ClinicalEvent
     failed = or_(
         and_(mutation.record_type == "case_requests", mutation.after["status"].astext == "failed"),
+        and_(mutation.record_type == "report_transmissions", mutation.after["status"].astext == "failed"),
         and_(mutation.action == "scan_structure_checked", mutation.after["error"].astext.is_not(None)),
     )
     changes = select(
