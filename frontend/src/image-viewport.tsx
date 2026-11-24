@@ -27,6 +27,7 @@ function ScaleBar({ mpp, zoom }: { mpp: number | null; zoom?: number }) {
   return <div className="scale-bar" aria-label={`Scale bar ${label}`}><span>{label}</span><i style={{ width: length * zoom / mpp }} /></div>;
 }
 
+const PapReview = lazy(() => import('./pap-review'));
 const PapGallery = lazy(() => import('./pap-gallery'));
 const SkinOverlay = lazy(() => import('./skin-review').then((module) => ({ default: module.SkinOverlay })));
 const SkinPanel = lazy(() => import('./skin-review').then((module) => ({ default: module.SkinPanel })));
@@ -93,6 +94,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   const [labelError, setLabelError] = useState('');
   const [labelAttempt, setLabelAttempt] = useState(0);
   const [autopan, setAutopan] = useState(false);
+  const [showPapReview, setShowPapReview] = useState(false);
   const [showPap, setShowPap] = useState(false);
   const [showSkin, setShowSkin] = useState(false);
   const [showProstate, setShowProstate] = useState(false);
@@ -345,6 +347,8 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     data-view-zoom={view?.zoom}>
     <div className="image-toolbar"><span><ScanLine size={17} /> {label} <span className="image-stain">{stain} · {scan.format}</span>{options && <ScanReference scan={scan} />}</span>
       <div className="image-actions">
+        {canOpenSlideReview && <button type="button" className="button secondary" aria-expanded={showPapReview}
+          onClick={() => setShowPapReview((open) => !open)}>Pap Review</button>}
         {canOpenSlideReview && <button type="button" className="button secondary" aria-expanded={showPap}
           disabled={pap.busy} onClick={() => setShowPap((open) => !open)}>Pap Gallery</button>}
         {canOpenSlideReview && <button type="button" className="button secondary" aria-expanded={showSkin}
@@ -524,6 +528,9 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       {overviewFailed && minimap && !settings?.show_overview && <span className="tile-warning" role="status">Minimap unavailable. <button className="button secondary" onClick={() => setOverviewAttempt((value) => value + 1)}>Retry Overview</button></span>}
       {tileStatus === 'partial' && <span className="tile-warning" role="status">Some tiles could not be loaded. <button className="button secondary" onClick={() => renderer.current?.retryTiles()}>Retry</button></span>}
     </footer>
+    {canOpenSlideReview && showPapReview && <Suspense fallback={<p role="status">Loading Pap review…</p>}>
+      <PapReview endpoint={endpoint} following={following} />
+    </Suspense>}
     {canOpenSlideReview && showSkin && <Suspense fallback={<p role="status">Loading skin tools…</p>}><SkinPanel state={skin} following={following}
       activate={(mode) => {
         setAutopan(false);

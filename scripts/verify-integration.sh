@@ -64,6 +64,7 @@ async def main():
             ("integration-admin", "admin"), ("integration-doctor", "doctor"), ("integration-other", "doctor"),
             ("integration-viewer-admin", "admin"), ("integration-editor-admin", "admin"),
             ("integration-or", "viewer"),
+            ("integration-pap-primary", "labeler"), ("integration-pap-backup", "labeler"),
         ):
             await create_account("local", account, role)
 
@@ -173,4 +174,5 @@ PYMEDIA
     node scripts/skin-review-browser.mjs
     export MEDIAUTO_PAP_TEST_PYTHON="$python" MEDIAUTO_PAP_TEST_DIR="$sandbox"
     node scripts/pap-gallery-browser.mjs
+    node scripts/pap-review-browser.mjs
 fi

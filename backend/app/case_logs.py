@@ -24,6 +24,7 @@ ENTITY_NAMES = {
     "review_rooms": "review_room", "review_participants": "review_participant",
     "analysis_runs": "analysis_run", "ihc_reviews": "ihc_review", "ihc_result_revisions": "ihc_result_revision",
     "skin_review_revisions": "skin_review_revision",
+    "pap_review_revisions": "pap_review_revision",
     "lymph_node_counts": "lymph_node_count", "slide_scans": "scan", "viewer_annotations": "annotation", "case_attachments": "attachment",
     "case_requests": "request", "case_notes": "note", "patient_history_records": "clinical_record",
 }

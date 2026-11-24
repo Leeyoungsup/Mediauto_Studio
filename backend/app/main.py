@@ -33,6 +33,7 @@ from app.integration_service import poll_inbox
 from app.patient_history import router as patient_history_router
 from app.pdl1 import router as pdl1_router
 from app.pap_gallery import router as pap_router
+from app.pap_review import router as pap_review_router
 from app.prostate_results import router as prostate_router
 from app.skin_review import router as skin_review_router
 from app.ihc import router as ihc_router
@@ -104,6 +105,7 @@ app.include_router(analysis_execution_router)
 app.include_router(frozen_router)
 app.include_router(case_collections_router)
 app.include_router(review_room_router)
+app.include_router(pap_review_router)
 app.include_router(clinical_router)
 app.include_router(workflow_router)
 app.include_router(intake_router)

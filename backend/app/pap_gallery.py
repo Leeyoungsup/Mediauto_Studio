@@ -93,10 +93,12 @@ def folder_for(organization, signature):
     return root / organization / signature_key(signature)
 
 
-async def scan_binding(session, user, scan_id, case_id=None):
+async def scan_binding(session, user, scan_id, case_id=None, *, lock_specimen=False):
     query = visible_scan(user, scan_id, Case.id, Specimen.id, Slide.id, Slide.block_id, Slide.stain)
     if case_id:
-        query = query.where(Case.id == case_id).with_for_update(read=True, of=(Slide, Specimen))
+        query = query.where(Case.id == case_id)
+        query = (query.with_for_update(of=(Slide, Specimen)) if lock_specimen
+                 else query.with_for_update(read=True, of=(Slide, Specimen)))
     record = (await session.execute(query)).one_or_none()
     if record is None:
         raise HTTPException(404, "Registered WSI not found.")

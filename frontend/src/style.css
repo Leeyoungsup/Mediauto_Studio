@@ -685,3 +685,12 @@ dialog::backdrop { background: #21193575; }
   .pap-workspace { grid-template-columns: minmax(0, 1fr); }
   .pap-gallery { border-left: 0; border-top: 1px solid var(--line); max-height: 58vh; }
 }
+
+.pap-review-fields, .pap-organisms { display: grid; gap: 10px; margin: 0; min-width: 0; padding: 0; border: 0; }
+.pap-review-fields { max-width: 780px; }
+.pap-review-fields > .button { justify-self: start; }
+.pap-organisms { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); padding-block: 6px; }
+.pap-organisms legend { font-size: 13px; font-weight: 600; }
+.pap-policy form, .pap-review-reason { margin: 10px 0; }
+.pap-review-reason { max-width: 780px; }
+.pap-findings-summary dd, .pap-review details p { white-space: pre-wrap; overflow-wrap: anywhere; }

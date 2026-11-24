@@ -985,3 +985,42 @@ class PapGalleryCursor(Base):
     candidate_id: Mapped[str] = mapped_column(String(80))
     version: Mapped[int] = mapped_column(Integer)
     saved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PapReviewPolicy(ClinicalRecord, Base):
+    __tablename__ = "pap_review_policies"
+    __table_args__ = (
+        UniqueConstraint("organization", "id"),
+        UniqueConstraint("organization", "version"),
+    )
+
+    name: Mapped[str] = mapped_column(String(120))
+    terms: Mapped[dict] = mapped_column(JSONB)
+    permissions: Mapped[dict] = mapped_column(JSONB)
+    reason: Mapped[str] = mapped_column(String(240))
+
+
+class PapReviewRevision(ClinicalRecord, Base):
+    __tablename__ = "pap_review_revisions"
+    __table_args__ = (
+        ForeignKeyConstraint(("organization", "case_id", "specimen_id"),
+                             ("specimens.organization", "specimens.case_id", "specimens.id")),
+        ForeignKeyConstraint(("organization", "scan_id"), ("slide_scans.organization", "slide_scans.id")),
+        ForeignKeyConstraint(("organization", "terminology_id"), ("pap_review_policies.organization", "pap_review_policies.id")),
+        ForeignKeyConstraint(("organization", "policy_id"), ("pap_review_policies.organization", "pap_review_policies.id")),
+        UniqueConstraint("organization", "case_id", "specimen_id", "version"),
+        UniqueConstraint("organization", "case_id", "specimen_id", "created_by", "request_key"),
+        CheckConstraint("status IN ('primary_draft', 'submitted', 'followup_draft', 'returned', 'completed')", name="pap_review_status"),
+    )
+
+    case_id: Mapped[UUID] = mapped_column(Uuid)
+    specimen_id: Mapped[UUID] = mapped_column(Uuid)
+    scan_id: Mapped[UUID] = mapped_column(Uuid)
+    terminology_id: Mapped[UUID] = mapped_column(Uuid)
+    policy_id: Mapped[UUID] = mapped_column(Uuid)
+    action: Mapped[str] = mapped_column(String(24))
+    status: Mapped[str] = mapped_column(String(24))
+    findings: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True))
+    reason: Mapped[str | None] = mapped_column(String(240))
+    request_key: Mapped[UUID] = mapped_column(Uuid)
+    request_hash: Mapped[str] = mapped_column(String(64))

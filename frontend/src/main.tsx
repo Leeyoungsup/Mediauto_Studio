@@ -5,7 +5,7 @@ import type { RoiLocation } from './roi-search';
 import { FrozenWorkflow, ORResults } from './frozen-workflow';
 import { CaseReport } from './case-report';
 import { NotificationCenter, NotificationSettings } from './notifications';
-import { StrictMode, useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, StrictMode, useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { Activity, ChevronRight, CircleHelp, ClipboardList, FlaskConical, LayoutList, Microscope, PanelLeftClose, PanelLeftOpen, ScanLine, Settings2, UserRound, UserRoundCheck, X } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
@@ -35,8 +35,10 @@ import './style.css';
 
 const emrLabels = { unconfigured: 'Not Configured', disabled: 'Disabled', connected: 'Connected', unavailable: 'Connection Unavailable', unknown: 'Unavailable' };
 type Health = { status: 'ok' | 'degraded'; database: 'connected' | 'unavailable'; emr: keyof typeof emrLabels };
+const PapPolicySettings = lazy(() => import('./pap-policy-settings'));
+
 type Page = { view: 'worklist'; scope: Scope } | { view: 'case'; id: string; files: boolean; tab?: 'requests' | 'report' | 'editor' | 'notes' | 'frozen'; selectedScan?: string } | { view: 'request'; id: string } | { view: 'or'; id?: string }
-  | { view: 'viewer'; id: string; slide?: string; snapshot?: string; roi?: string; roiOrigin?: RoiLocation; files: boolean } | { view: 'roi-search'; location: RoiLocation } | { view: 'collections'; id?: string } | { view: 'scans' } | { view: 'settings'; section?: 'groups' | 'notifications' | 'analysis' };
+  | { view: 'viewer'; id: string; slide?: string; snapshot?: string; roi?: string; roiOrigin?: RoiLocation; files: boolean } | { view: 'roi-search'; location: RoiLocation } | { view: 'collections'; id?: string } | { view: 'scans' } | { view: 'settings'; section?: 'groups' | 'notifications' | 'analysis' | 'pap' };
 type WorkflowAction = 'assignment' | 'review' | 'confirm';
 type Modal = 'register' | 'system' | null;
 
@@ -60,7 +62,7 @@ function readPage(): Page {
   if (view === 'collections') return { view, id: isUuid(id) ? id : undefined };
   if (view === 'or') return { view, id: id ? decodeRoute(id) : undefined };
   if (view === 'scans') return { view };
-  if (view === 'settings') return { view, section: id === 'groups' || id === 'notifications' || id === 'analysis' ? id : undefined };
+  if (view === 'settings') return { view, section: id === 'groups' || id === 'notifications' || id === 'analysis' || id === 'pap' ? id : undefined };
   if (view === 'request' && id) return { view, id: decodeRoute(id) };
   if ((view === 'case' || view === 'file-case') && id) return { view: 'case', id: decodeRoute(id), files: view === 'file-case', tab: slide === 'requests' || slide === 'report' || slide === 'editor' || slide === 'notes' || slide === 'frozen' ? slide : undefined,
     selectedScan: slide === 'slides' && snapshot ? decodeRoute(snapshot) : undefined };
@@ -372,8 +374,10 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
         </div>
         {page.view === 'settings' && page.section === 'notifications' && <NotificationSettings organization={user.organization} />}
         {page.view === 'settings' && page.section !== 'notifications' && settingsAllowed && (page.section === 'groups'
-          ? <WorkgroupSettings onChanged={refreshQueues} /> : page.section === 'analysis' ? <AnalysisSettings organization={user.organization} /> : <>
-          <div className="settings-actions"><a className="button secondary" href="#settings/groups">Manage Workgroups</a><a className="button secondary" href="#settings/analysis">Analysis Pre-run Rules</a></div>
+          ? <WorkgroupSettings onChanged={refreshQueues} /> : page.section === 'analysis' ? <AnalysisSettings organization={user.organization} />
+          : page.section === 'pap' ? <Suspense fallback={<p role="status">Loading Pap policy…</p>}>
+            <PapPolicySettings organization={user.organization} /></Suspense> : <>
+          <div className="settings-actions"><a className="button secondary" href="#settings/groups">Manage Workgroups</a><a className="button secondary" href="#settings/analysis">Analysis Pre-run Rules</a><a className="button secondary" href="#settings/pap">Pap Review Policy</a></div>
           {intakeAllowed && <IntakeSettings refresh={refreshFiles} emrConnected={integration?.emr.state === 'connected'} />}
           <IntegrationSettings org={user.organization} status={integration} onRefresh={refreshIntegration} />
         </>)}

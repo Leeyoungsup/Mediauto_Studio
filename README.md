@@ -30,6 +30,10 @@ Worklist에서는 **Hide Case Preview**로 목록을 넓힐 수 있습니다. WS
 
 규칙과 파일 등록 정보는 개발 PostgreSQL에 저장되며, 이미 등록한 파일은 규칙을 다시 적용해도 유지됩니다. 등록 정보는 Worklist에서 Case ID로 묶어 확인합니다. 같은 Slide ID의 NDPI와 SVS는 서로 다른 원본 파일로 표시됩니다. 등록된 스캔은 케이스 상세의 WSI 뷰어에서 열 수 있습니다.
 
+### 39. Pap Specimen Review
+
+**Settings → Pap Review Policy**에서 기관 용어와 1차·후속 검토자를 게시합니다. 등록한 Pap 스캔의 **WSI Viewer → Pap Review**에서 적절성·해석·미생물을 입력하고 제출·후속 검토·반려·재개 이력을 확인합니다. [39번 설정, 권한과 검증](work/pap-review-39.md)
+
 ### 38. Pap Candidate Gallery
 
 등록된 Papanicolaou 스캔의 **WSI Viewer → Pap Gallery**에서 분석과 후보 범주를 선택합니다. 후보 이미지를 누르면 해당 WSI 위치로 이동하며 같은 계정으로 다시 열면 마지막 후보를 복원합니다. [38번 입력 계약과 검증](work/pap-gallery-38.md)
