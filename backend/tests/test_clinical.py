@@ -1245,6 +1245,110 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.get(root + "/messages")).status_code, 403)
         self.assertEqual((await self.client.put(config, json={"version": 2, "mode": "disabled"})).status_code, 403)
 
+    async def test_ihc_review_roles_revisions_threshold_and_restore(self):
+        from app.ihc_archive import archive_folder
+
+        case = await self.create("cases", {"case_number": "IHC-QA"})
+        specimen = await self.create("specimens", {"case_id": case["id"], "specimen_number": "A1"})
+        slide = await self.create("slides", {"specimen_id": specimen["id"], "slide_number": "IHC Slide", "stain": "Ki-67"})
+        path = self.root / (self.org + ".svs")
+        path.write_bytes(b"Synthetic IHC API file signature fixture")
+        scan = await self.create("scans", {"slide_id": slide["id"], "storage_key": path.name})
+        other_case = await self.create("cases", {"case_number": "IHC-QA-OTHER"})
+        other_specimen = await self.create("specimens", {"case_id": other_case["id"], "specimen_number": "B1"})
+        actor = await create_account(self.org, "reviewer", "doctor")
+        unassigned = await create_account(self.org, "unassigned", "doctor")
+        labeler = await create_account(self.org, "labeler", "labeler")
+        assigned = await self.client.patch(f"{self.url}/cases/{case['id']}/assignment", json={
+            "assignee_id": str(actor.id), "version": case["version"], "reason": "Synthetic QA",
+        })
+        self.assertEqual(assigned.status_code, 200, assigned.text)
+
+        snapshot = "a" * 64
+        url = f"/api/wsi/clinical/{scan['id']}/ihc"
+        detail = f"{url}/{snapshot}"
+        box = {"left": 0, "top": 0, "right": 150, "bottom": 200}
+        signature = {"filename": path.name, "size": path.stat().st_size, "quickhash": "synthetic", "dimensions": [1000, 1000]}
+        approval_path = self.root / "approval.json"
+        environment = {"MEDIAUTO_IHC_ROOT": str(self.root / "ihc"), "MEDIAUTO_IHC_VALIDATION_FILE": str(approval_path)}
+        manifest = {"id": snapshot, "marker": "ki67", "dimensions": signature["dimensions"], "model": "synthetic.pt",
+                    "model_version": "qa", "analysis_version": "test", "default_threshold": 0.3,
+                    "checkpoint_sha256": "b" * 64, "point_count": 4, "original_counts": [1, 1, 1, 0, 0], "replay_aligned": True}
+        async def get_json(url, params=None, expected=200):
+            response = await self.client.get(url, params=params)
+            self.assertEqual(response.status_code, expected, response.text)
+            return response.json()
+
+        async def revise(payload, expected=200):
+            response = await self.client.post(detail + "/revisions", json=payload)
+            self.assertEqual(response.status_code, expected, response.text)
+            return response.json()
+
+        with patch.dict(os.environ, environment), patch("app.ihc.scan_signature", return_value=signature):
+            source = archive_folder(self.org, signature) / snapshot
+            source.mkdir(parents=True)
+            (source / "manifest.json").write_text(json.dumps(manifest))
+            raw = [[50, 60, 0, 0.44], [80, 90, 1, 0.9], [170, 60, 2, 0.71], [50, 95, 3, 0.29]]
+            (source / "cells.json").write_text(json.dumps(raw))
+            await login(self.client, self.org, unassigned.username)
+            await get_json(url, expected=404)
+            await login(self.client, self.org, actor.username)
+            self.assertEqual((await get_json(url))["results"], [manifest])
+            baseline = await get_json(detail)
+            self.assertEqual(baseline["counts"], [1, 1, 1, 0, 0])
+            self.assertIsNone(baseline["aggregate"])
+            original_cells = await get_json(detail + "/cells", box)
+            self.assertEqual(original_cells["points"], [[50, 60, 0, 0, 0.44, 0, False], [80, 90, 1, 1, 0.9, 1, False]])
+            approval = {**manifest, "organization": self.org, "source_id": snapshot, "rule": "quanti-ki67-index-v1",
+                        "reference": "synthetic protocol", "clone": "synthetic", "platform": "synthetic",
+                        "protocol": "synthetic", "scoring_scope": "synthetic whole region", "minimum_tumor_cells": 2,
+                        "confidence_thresholds": [0.3, 0.8], "allow_cell_overrides": True}
+            approval_path.write_text(json.dumps([approval]))
+            self.assertEqual((await get_json(detail))["aggregate"]["percent"], 66.67)
+            change = {"action": "edit", "expected_version": 0, "request_key": str(uuid4()), "reason": "Synthetic corrections",
+                      "threshold": 0.8, "changes": {"0": 3, "1": 4}}
+            await login(self.client, self.org, labeler.username)
+            await revise(change, 403)
+            self.assertFalse((await get_json(url))["can_review"])
+            await login(self.client, self.org, actor.username)
+            await revise({**change, "changes": {"4": 3}}, 422)
+            concurrent = await asyncio.gather(revise(change), revise(change))
+            self.assertEqual(concurrent, [{"version": 1}, {"version": 1}])
+            await revise({**change, "reason": "Different request key content"}, 409)
+            await revise({**change, "request_key": str(uuid4())}, 409)
+            state = await get_json(detail)
+            self.assertEqual(state["counts"], [0, 0, 0, 1, 1])
+            self.assertEqual(state["status"], "insufficient_cells")
+            self.assertEqual(state["override_count"], 2)
+            self.assertEqual(state["history"][0]["actor"], actor.display_name)
+            points = (await get_json(detail + "/cells", {**box, "version": 1}))["points"]
+            self.assertEqual(points, [[50, 60, 3, 0, 0.44, 0, True], [80, 90, 4, 1, 0.9, 1, True]])
+            await login(self.client, self.org, labeler.username)
+            await get_json(detail + "/cells", {**box, "version": 1}, 404)
+            self.assertEqual((await get_json(detail))["latest_version"], 0)
+            await login(self.client, self.org, actor.username)
+            await revise({"action": "restore", "expected_version": 1, "request_key": str(uuid4()), "reason": "Restore source"})
+            latest = await get_json(detail)
+            self.assertEqual(latest["threshold"], 0.3)
+            self.assertEqual(latest["counts"], baseline["counts"])
+            self.assertEqual(latest["aggregate"]["percent"], 66.67)
+            self.assertEqual([row["action"] for row in latest["history"]], ["restore", "edit"])
+            self.assertEqual(await get_json(detail + "/cells", {**box, "version": 2}), original_cells)
+            self.assertEqual((await get_json(detail, {"version": 1}))["counts"], state["counts"])
+            audit = await get_json(self.url + f"/cases/{case['id']}/logs", {"entity": "ihc_result_revision"})
+            self.assertEqual({row["action"] for row in audit["rows"]}, {"ihc_result_restored", "ihc_result_edited"})
+            history = await get_json(detail, {"version": 0})
+            self.assertEqual(history["counts"], baseline["counts"])
+            await login(self.client, self.org, self.user.username)
+            moved = await self.client.patch(f"{self.url}/slides/{slide['id']}/specimen", json={
+                "target_id": other_specimen["id"], "version": slide["version"], "reason": "Synthetic case transfer",
+            })
+            self.assertEqual(moved.status_code, 200, moved.text)
+            self.assertEqual((await get_json(detail))["latest_version"], 0)
+            await get_json(detail, {"version": 1}, 404)
+            approval_path.unlink()
+            self.assertIsNone((await get_json(detail))["aggregate"])
+
     async def test_collaborative_review_camera_handoff_reconnect_and_revocation(self):
         doctor = await create_account(self.org, "review-doctor", "doctor")
         independent = await create_account(self.org, "review-independent", "doctor")

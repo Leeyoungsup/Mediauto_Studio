@@ -924,3 +924,25 @@ class WorklistOpen(Base):
     user_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
     record_key: Mapped[str] = mapped_column(String(90), primary_key=True)
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class IhcResultRevision(ClinicalRecord, Base):
+    __tablename__ = "ihc_result_revisions"
+    __table_args__ = (
+        ForeignKeyConstraint(("organization", "case_id"), ("cases.organization", "cases.id")),
+        ForeignKeyConstraint(("organization", "scan_id"), ("slide_scans.organization", "slide_scans.id")),
+        UniqueConstraint("organization", "case_id", "scan_id", "source_id", "version"),
+        UniqueConstraint("organization", "case_id", "scan_id", "source_id", "created_by", "request_key"),
+        CheckConstraint("action IN ('edit', 'restore')", name="ihc_result_action"),
+        CheckConstraint("threshold BETWEEN 0 AND 1", name="ihc_result_threshold"),
+    )
+
+    case_id: Mapped[UUID] = mapped_column(Uuid)
+    scan_id: Mapped[UUID] = mapped_column(Uuid)
+    source_id: Mapped[str] = mapped_column(String(64))
+    action: Mapped[str] = mapped_column(String(16))
+    threshold: Mapped[float] = mapped_column(Float)
+    overrides: Mapped[dict] = mapped_column(JSONB)
+    reason: Mapped[str] = mapped_column(String(240))
+    request_key: Mapped[UUID] = mapped_column(Uuid)
+    request_hash: Mapped[str] = mapped_column(String(64))

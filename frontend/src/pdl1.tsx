@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { CellOverlay } from './cell-overlay';
 import { api } from './session';
 import type { Viewport } from './tile-viewer';
 
@@ -77,38 +78,9 @@ export function usePdl1(endpoint: string, ready: boolean, view: Viewport | undef
 type Pdl1State = ReturnType<typeof usePdl1>;
 
 export function Pdl1Overlay({ view, result, cells }: { view?: Viewport; result?: Result; cells?: Cells }) {
-  const canvas = useRef<HTMLCanvasElement>(null);
-  const { x, y, width, height, zoom } = view ?? { x: 0, y: 0, width: 0, height: 0, zoom: 0 };
-
-  useEffect(() => {
-    const element = canvas.current;
-    if (!element || !result || !cells || !zoom) return;
-    const ctx = element.getContext('2d');
-    if (!ctx) return;
-    const ratio = window.devicePixelRatio || 1;
-    element.width = Math.round(width * zoom * ratio);
-    element.height = Math.round(height * zoom * ratio);
-    ctx.scale(ratio, ratio);
-    ctx.globalAlpha = 0.86;
-    const radius = Math.min(4, Math.max(1.15, zoom * 3));
-    const byClass = new Map<number, Path2D>();
-    for (const [px, py, category] of cells.points) {
-      const sx = (px - x) * zoom;
-      const sy = (py - y) * zoom;
-      if (sx < 0 || sy < 0 || sx >= width * zoom || sy >= height * zoom) continue;
-      const path = byClass.get(category) ?? new Path2D();
-      path.moveTo(sx + radius, sy);
-      path.arc(sx, sy, radius, 0, 2 * Math.PI);
-      byClass.set(category, path);
-    }
-    for (const [category, path] of byClass) {
-      ctx.fillStyle = result.classes[category].color;
-      ctx.fill(path);
-    }
-  }, [x, y, width, height, zoom, result, cells]);
-
-  if (!result || !cells) return null;
-  return <canvas className="pdl1-overlay" ref={canvas} aria-label="PD-L1 Cell Overlay" />;
+  const colors = useMemo(() => Object.fromEntries(Object.entries(result?.classes ?? {})
+    .map(([key, value]) => [key, value.color])), [result]);
+  return <CellOverlay view={view} colors={colors} points={result ? cells?.points : undefined} label="PD-L1 Cell Overlay" />;
 }
 
 const scoreStatusLabel: Record<ScoreStatus, string> = {

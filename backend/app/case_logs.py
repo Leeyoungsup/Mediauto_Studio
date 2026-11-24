@@ -22,7 +22,7 @@ ENTITY_NAMES = {
     "frozen_receipts": "or_confirmation", "frozen_callbacks": "frozen_callback",
     "cases": "case", "case_reports": "report", "report_transmissions": "report_delivery", "specimens": "specimen", "specimen_blocks": "block", "slides": "slide",
     "review_rooms": "review_room", "review_participants": "review_participant",
-    "analysis_runs": "analysis_run", "ihc_reviews": "ihc_review",
+    "analysis_runs": "analysis_run", "ihc_reviews": "ihc_review", "ihc_result_revisions": "ihc_result_revision",
     "lymph_node_counts": "lymph_node_count", "slide_scans": "scan", "viewer_annotations": "annotation", "case_attachments": "attachment",
     "case_requests": "request", "case_notes": "note", "patient_history_records": "clinical_record",
 }

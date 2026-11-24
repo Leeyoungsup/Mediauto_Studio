@@ -632,3 +632,10 @@ dialog::backdrop { background: #21193575; }
 .review-people small { color: var(--muted); }
 .review-room-controls form { margin-top: 8px; align-items: end; }
 @media (max-width: 760px) { .review-room-layout { grid-template-columns: minmax(0, 1fr); } }
+
+.ihc-controls, .ihc-cell-actions { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 14px; }
+.ihc-review-form { display: grid; gap: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.ihc-review-form > .form-field { max-width: 500px; }
+.ihc-score { display: grid; gap: 3px; }
+.ihc-score strong { font-size: 19px; }
+.ihc-score small, .ihc-digest { overflow-wrap: anywhere; }

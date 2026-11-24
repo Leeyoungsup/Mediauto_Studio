@@ -39,6 +39,7 @@ mkdir "$sandbox/socket"
 export MEDIAUTO_DATABASE_URL="postgresql+asyncpg://$(id -un)@/mediauto_clinical_test?host=$sandbox/socket"
 export MEDIAUTO_AUTH_SECRET_FILE="$sandbox/auth.key"
 export MEDIAUTO_PDL1_ROOT="$sandbox/pdl1"
+export MEDIAUTO_IHC_ROOT="$sandbox/ihc" MEDIAUTO_IHC_VALIDATION_FILE="$sandbox/ihc-validation.json"
 export MEDIAUTO_NOTIFICATION_CONFIG_FILE="$sandbox/notifications.json"
 export MEDIAUTO_SMTP_HOST="" MEDIAUTO_VAPID_PRIVATE_KEY=""
 export MEDIAUTO_DEMO_URL="http://127.0.0.1:$port"
@@ -155,6 +156,8 @@ PYMEDIA
     node scripts/frozen-workflow-browser.mjs
     node scripts/viewer-workflow-browser.mjs
     node scripts/roi-search-browser.mjs
+    (cd -- "$root/backend" && PYTHONPATH="$PWD" "$python" -s "$root/scripts/seed-ihc-fixtures.py")
+    node scripts/ihc-results-browser.mjs
     node scripts/analysis-execution-browser.mjs
     node scripts/case-collections-browser.mjs
     node scripts/collaborative-review-browser.mjs

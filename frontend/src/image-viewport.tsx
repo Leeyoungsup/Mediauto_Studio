@@ -3,6 +3,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import { AlertTriangle, LocateFixed, Map, Minus, Pause, Play, Plus, ScanLine } from 'lucide-react';
 import type { WsiScan } from './demo';
 import { api, auditAttemptId, jsonBody, request } from './session';
+import { IhcOverlay, IhcPanel, useIhcResults } from './ihc-results';
 import { Pdl1Badge, Pdl1Overlay, Pdl1Panel, usePdl1 } from './pdl1';
 import { roiSearchHref } from './roi-search';
 import { LymphCounts } from './lymph-counts';
@@ -117,6 +118,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   useEffect(() => {
     if (info && sharedCamera) renderer.current?.restoreCamera(sharedCamera);
   }, [info, sharedCamera?.x, sharedCamera?.y, sharedCamera?.zoom]);
+  const ihc = useIhcResults(endpoint, Boolean(info) && !readOnlyEndpoint && !compareMode, view);
   const pdl1 = usePdl1(endpoint, Boolean(info) && !readOnlyEndpoint, view, initialSnapshot);
   const restoreCamera = useCallback((camera: Camera) => {
     if (!compareMode && !reviewFrame.current?.locked) {
@@ -327,14 +329,14 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         <button className="icon-button" title="Minimap" aria-label="Minimap" aria-pressed={minimap} disabled={!overview && !options} onClick={toggleMinimap}><Map size={17} /></button>
         {options && <button type="button" className="icon-button" title={autopan ? 'Pause Autopan' : 'Start Autopan'}
           aria-label={autopan ? 'Pause Autopan' : 'Start Autopan'} aria-pressed={autopan}
-          disabled={!info || following || viewerRecords.tool !== 'pan' || tileStatus === 'unavailable'} onClick={toggleAutopan}>
+          disabled={!info || following || ihc.picking || viewerRecords.tool !== 'pan' || tileStatus === 'unavailable'} onClick={toggleAutopan}>
           {autopan ? <Pause size={17} /> : <Play size={17} />}
         </button>}
       </div>
     </div>
     {info && !compareMode && !readOnlyEndpoint && !following && <ViewerToolsBar state={viewerRecords} view={view} info={info} />}
     <div className="image-surface">
-      <canvas className={viewerRecords.tool === 'pan' ? 'wsi-canvas' : 'wsi-canvas drawing-tool'} ref={canvas} tabIndex={0} aria-label="WSI Canvas"
+      <canvas className={viewerRecords.tool === 'pan' && !ihc.picking ? 'wsi-canvas' : 'wsi-canvas drawing-tool'} ref={canvas} tabIndex={0} aria-label="WSI Canvas"
         onPointerDown={(event) => {
           if (following || event.button !== 0 || !info || drag.current || drawing.current) return;
           setAutopan(false);
@@ -342,6 +344,11 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
           if (report.current?.captureLandmark) {
             const point = getPoint(event, false);
             if (point) report.current.captureLandmark(point);
+            return;
+          }
+          if (ihc.picking) {
+            const point = getPoint(event, false);
+            if (point) ihc.pickAt(...point);
             return;
           }
           const tool = viewerRecords.tool;
@@ -399,6 +406,10 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         onKeyDown={(event) => {
           if (following || settings?.shortcuts === false || event.altKey || event.ctrlKey || event.metaKey || event.nativeEvent.isComposing) return;
           const key = event.key.toLowerCase();
+          if (key === 'escape' && ihc.picking) {
+            ihc.setPicking(false);
+            return;
+          }
           if (key === 'escape' && viewerRecords.tool !== 'pan') {
             viewerRecords.chooseTool('pan');
             return;
@@ -426,6 +437,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         }}
       />
       <Pdl1Overlay view={view} result={pdl1.result} cells={pdl1.cells} />
+      <IhcOverlay state={ihc} view={view} />
       <AnnotationOverlay view={view} annotations={viewerRecords.records?.annotations ?? []} draft={viewerRecords.draft} drawing={preview ?? (viewerRecords.vertices.length ? {
         kind: viewerRecords.tool === 'polygon' ? 'polygon' : viewerRecords.tool === 'count' ? 'count' : 'distance',
         points: viewerRecords.vertices,
@@ -468,6 +480,8 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     {info && !compareMode && !readOnlyEndpoint && scan.source === 'clinical' && viewerRecords.records?.can_annotate &&
       <LymphCounts endpoint={endpoint} />}
     {info && !compareMode && !readOnlyEndpoint && <Pdl1Panel state={pdl1} />}
+    {info && !compareMode && !readOnlyEndpoint && <IhcPanel state={ihc} readOnly={following}
+      onPickStart={() => { setAutopan(false); viewerRecords.chooseTool('pan'); }} />}
   </section>;
 }
 
