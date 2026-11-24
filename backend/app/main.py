@@ -33,6 +33,7 @@ from app.integration_service import poll_inbox
 from app.patient_history import router as patient_history_router
 from app.pdl1 import router as pdl1_router
 from app.prostate_results import router as prostate_router
+from app.skin_review import router as skin_review_router
 from app.ihc import router as ihc_router
 from app.notification_delivery import poll_deliveries
 from app.notifications import router as notifications_router
@@ -116,6 +117,7 @@ app.include_router(lymph_counts_router)
 app.include_router(viewer_preferences_router)
 app.include_router(pdl1_router)
 app.include_router(prostate_router)
+app.include_router(skin_review_router)
 app.include_router(ihc_router)
 app.include_router(patient_history_router)
 

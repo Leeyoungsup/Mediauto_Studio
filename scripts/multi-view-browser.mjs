@@ -39,8 +39,12 @@ try {
   const sync = button('Sync Position');
 
   async function open(caseId) {
-    await page.goto('/');
-    await button(caseId + ' details').click();
+    const response = await page.request.get('/api/worklist', { params: { q: caseId } });
+    assert.ok(response.ok(), await response.text());
+    const { rows } = await response.json();
+    const row = rows.find((entry) => entry.case_number === caseId);
+    assert.ok(row?.record_id, 'Expected registered test case ' + caseId);
+    await page.goto('/#case/' + row.record_id);
     await page.getByRole('heading', { name: caseId, exact: true }).waitFor();
     await button('Open Viewer').click();
     await button('Multi View').click();

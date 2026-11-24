@@ -946,3 +946,24 @@ class IhcResultRevision(ClinicalRecord, Base):
     reason: Mapped[str] = mapped_column(String(240))
     request_key: Mapped[UUID] = mapped_column(Uuid)
     request_hash: Mapped[str] = mapped_column(String(64))
+
+
+class SkinReviewRevision(ClinicalRecord, Base):
+    __tablename__ = "skin_review_revisions"
+    __table_args__ = (
+        ForeignKeyConstraint(("organization", "case_id"), ("cases.organization", "cases.id")),
+        ForeignKeyConstraint(("organization", "scan_id"), ("slide_scans.organization", "slide_scans.id")),
+        UniqueConstraint("organization", "case_id", "scan_id", "source_id", "version"),
+        UniqueConstraint("organization", "case_id", "scan_id", "source_id", "created_by", "request_key"),
+        CheckConstraint("action IN ('window', 'remove_window', 'add', 'decide')", name="skin_review_action"),
+    )
+
+    case_id: Mapped[UUID] = mapped_column(Uuid)
+    scan_id: Mapped[UUID] = mapped_column(Uuid)
+    source_id: Mapped[str] = mapped_column(String(80))
+    action: Mapped[str] = mapped_column(String(24))
+    state: Mapped[dict] = mapped_column(JSONB)
+    change: Mapped[dict] = mapped_column(JSONB)
+    reason: Mapped[str] = mapped_column(String(240))
+    request_key: Mapped[UUID] = mapped_column(Uuid)
+    request_hash: Mapped[str] = mapped_column(String(64))

@@ -41,6 +41,7 @@ export MEDIAUTO_AUTH_SECRET_FILE="$sandbox/auth.key"
 export MEDIAUTO_PDL1_ROOT="$sandbox/pdl1"
 export MEDIAUTO_IHC_ROOT="$sandbox/ihc" MEDIAUTO_IHC_VALIDATION_FILE="$sandbox/ihc-validation.json"
 export MEDIAUTO_PROSTATE_ROOT="$sandbox/prostate"
+export MEDIAUTO_SKIN_ROOT="$sandbox/skin"
 export MEDIAUTO_NOTIFICATION_CONFIG_FILE="$sandbox/notifications.json"
 export MEDIAUTO_SMTP_HOST="" MEDIAUTO_VAPID_PRIVATE_KEY=""
 export MEDIAUTO_DEMO_URL="http://127.0.0.1:$port"
@@ -167,4 +168,6 @@ PYMEDIA
     node scripts/biomarker-evidence-browser.mjs
     export MEDIAUTO_PROSTATE_TEST_PYTHON="$python" MEDIAUTO_PROSTATE_TEST_DIR="$sandbox"
     node scripts/prostate-results-browser.mjs
+    export MEDIAUTO_SKIN_TEST_PYTHON="$python" MEDIAUTO_SKIN_TEST_DIR="$sandbox"
+    node scripts/skin-review-browser.mjs
 fi

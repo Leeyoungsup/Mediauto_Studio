@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { AlertTriangle, LocateFixed, Map, Minus, Pause, Play, Plus, ScanLine } from 'lucide-react';
 import type { WsiScan } from './demo';
 import { api, auditAttemptId, jsonBody, request } from './session';
 import { IhcOverlay, IhcPanel, useIhcResults } from './ihc-results';
+import { useSkinReview } from './skin-review-state';
 import { ProstateOverlay, ProstatePanel, useProstateResults } from './prostate-results';
 import { Pdl1Badge, Pdl1Overlay, Pdl1Panel, usePdl1 } from './pdl1';
 import { roiSearchHref } from './roi-search';
@@ -24,6 +25,9 @@ function ScaleBar({ mpp, zoom }: { mpp: number | null; zoom?: number }) {
   const label = length >= 1000 ? `${length / 1000} mm` : `${Number(length.toPrecision(3))} µm`;
   return <div className="scale-bar" aria-label={`Scale bar ${label}`}><span>{label}</span><i style={{ width: length * zoom / mpp }} /></div>;
 }
+
+const SkinOverlay = lazy(() => import('./skin-review').then((module) => ({ default: module.SkinOverlay })));
+const SkinPanel = lazy(() => import('./skin-review').then((module) => ({ default: module.SkinPanel })));
 
 function Navigator({ src, info, view, dynamic, onMove }: { src: string; info: SlideInfo; view: Viewport; dynamic?: boolean; onMove: (x: number, y: number) => void }) {
   const [width, height] = info.dimensions;
@@ -87,6 +91,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   const [labelError, setLabelError] = useState('');
   const [labelAttempt, setLabelAttempt] = useState(0);
   const [autopan, setAutopan] = useState(false);
+  const [showSkin, setShowSkin] = useState(false);
   const [showProstate, setShowProstate] = useState(false);
   const [autopanNotice, setAutopanNotice] = useState('');
   const settings = options?.settings;
@@ -120,8 +125,9 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   useEffect(() => {
     if (info && sharedCamera) renderer.current?.restoreCamera(sharedCamera);
   }, [info, sharedCamera?.x, sharedCamera?.y, sharedCamera?.zoom]);
-  const canOpenProstate = Boolean(info) && !readOnlyEndpoint && !compareMode && scan.source === 'clinical';
-  const prostate = useProstateResults(endpoint, canOpenProstate && showProstate);
+  const canOpenSlideReview = Boolean(info) && !readOnlyEndpoint && !compareMode && scan.source === 'clinical';
+  const skin = useSkinReview(endpoint, canOpenSlideReview && showSkin);
+  const prostate = useProstateResults(endpoint, canOpenSlideReview && showProstate);
   const ihc = useIhcResults(endpoint, Boolean(info) && !readOnlyEndpoint && !compareMode, view);
   const pdl1 = usePdl1(endpoint, Boolean(info) && !readOnlyEndpoint, view, initialSnapshot);
   const restoreCamera = useCallback((camera: Camera) => {
@@ -326,7 +332,9 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     data-view-zoom={view?.zoom}>
     <div className="image-toolbar"><span><ScanLine size={17} /> {label} <span className="image-stain">{stain} · {scan.format}</span>{options && <ScanReference scan={scan} />}</span>
       <div className="image-actions">
-        {canOpenProstate && <button type="button" className="button secondary" aria-expanded={showProstate}
+        {canOpenSlideReview && <button type="button" className="button secondary" aria-expanded={showSkin}
+          disabled={skin.busy} onClick={() => { skin.setMode(undefined); setShowSkin((open) => !open); }}>Skin Review</button>}
+        {canOpenSlideReview && <button type="button" className="button secondary" aria-expanded={showProstate}
           onClick={() => setShowProstate((open) => !open)}>Prostate AI</button>}
         <button className="icon-button" title="Zoom Out" aria-label="Zoom Out" disabled={!info || following} onClick={() => navigate((viewer) => viewer.magnify(0.7))}><Minus size={18} /></button>
         <output aria-label="Zoom relative to scan" className="zoom-value">{view ? `${(view.zoom * 100).toFixed(view.zoom < 0.1 ? 1 : 0)}%` : '—'}</output>
@@ -335,14 +343,14 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         <button className="icon-button" title="Minimap" aria-label="Minimap" aria-pressed={minimap} disabled={!overview && !options} onClick={toggleMinimap}><Map size={17} /></button>
         {options && <button type="button" className="icon-button" title={autopan ? 'Pause Autopan' : 'Start Autopan'}
           aria-label={autopan ? 'Pause Autopan' : 'Start Autopan'} aria-pressed={autopan}
-          disabled={!info || following || ihc.picking || viewerRecords.tool !== 'pan' || tileStatus === 'unavailable'} onClick={toggleAutopan}>
+          disabled={!info || following || ihc.picking || skin.mode !== undefined || viewerRecords.tool !== 'pan' || tileStatus === 'unavailable'} onClick={toggleAutopan}>
           {autopan ? <Pause size={17} /> : <Play size={17} />}
         </button>}
       </div>
     </div>
     {info && !compareMode && !readOnlyEndpoint && !following && <ViewerToolsBar state={viewerRecords} view={view} info={info} />}
     <div className="image-surface">
-      <canvas className={viewerRecords.tool === 'pan' && !ihc.picking ? 'wsi-canvas' : 'wsi-canvas drawing-tool'} ref={canvas} tabIndex={0} aria-label="WSI Canvas"
+      <canvas className={viewerRecords.tool === 'pan' && !ihc.picking && !skin.mode ? 'wsi-canvas' : 'wsi-canvas drawing-tool'} ref={canvas} tabIndex={0} aria-label="WSI Canvas"
         onPointerDown={(event) => {
           if (following || event.button !== 0 || !info || drag.current || drawing.current) return;
           setAutopan(false);
@@ -350,6 +358,11 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
           if (report.current?.captureLandmark) {
             const point = getPoint(event, false);
             if (point) report.current.captureLandmark(point);
+            return;
+          }
+          if (showSkin && skin.mode) {
+            const point = getPoint(event, false);
+            if (point) skin.place(point);
             return;
           }
           if (ihc.picking) {
@@ -412,6 +425,10 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         onKeyDown={(event) => {
           if (following || settings?.shortcuts === false || event.altKey || event.ctrlKey || event.metaKey || event.nativeEvent.isComposing) return;
           const key = event.key.toLowerCase();
+          if (key === 'escape' && skin.mode) {
+            skin.setMode(undefined);
+            return;
+          }
           if (key === 'escape' && ihc.picking) {
             ihc.setPicking(false);
             return;
@@ -430,7 +447,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
             if (key === 'f') void options.toggleFullscreen();
             if (key === 'm') toggleMinimap();
             if (key === 'g') options.toggleGallery();
-            if (key === ' ') toggleAutopan();
+            if (key === ' ' && !skin.mode) toggleAutopan();
             return;
           }
           const directions: Record<string, [number, number]> = { ArrowLeft: [48, 0], ArrowRight: [-48, 0], ArrowUp: [0, 48], ArrowDown: [0, -48] };
@@ -444,7 +461,8 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       />
       <Pdl1Overlay view={view} result={pdl1.result} cells={pdl1.cells} />
       <IhcOverlay state={ihc} view={view} />
-      {canOpenProstate && showProstate && <ProstateOverlay state={prostate} view={view} />}
+      {canOpenSlideReview && showSkin && <Suspense fallback={null}><SkinOverlay state={skin} view={view} /></Suspense>}
+      {canOpenSlideReview && showProstate && <ProstateOverlay state={prostate} view={view} />}
       <AnnotationOverlay view={view} annotations={viewerRecords.records?.annotations ?? []} draft={viewerRecords.draft} drawing={preview ?? (viewerRecords.vertices.length ? {
         kind: viewerRecords.tool === 'polygon' ? 'polygon' : viewerRecords.tool === 'count' ? 'count' : 'distance',
         points: viewerRecords.vertices,
@@ -480,7 +498,19 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       {overviewFailed && minimap && !settings?.show_overview && <span className="tile-warning" role="status">Minimap unavailable. <button className="button secondary" onClick={() => setOverviewAttempt((value) => value + 1)}>Retry Overview</button></span>}
       {tileStatus === 'partial' && <span className="tile-warning" role="status">Some tiles could not be loaded. <button className="button secondary" onClick={() => renderer.current?.retryTiles()}>Retry</button></span>}
     </footer>
-    {canOpenProstate && showProstate && <ProstatePanel state={prostate} canNavigate={Boolean(view) && !following}
+    {canOpenSlideReview && showSkin && <Suspense fallback={<p role="status">Loading skin tools…</p>}><SkinPanel state={skin} following={following}
+      activate={(mode) => {
+        setAutopan(false);
+        ihc.setPicking(false);
+        viewerRecords.chooseTool('pan');
+        skin.setMode(mode);
+        canvas.current?.focus();
+      }}
+      focus={(points) => {
+        if (view) navigate((viewer) => viewer.restoreCamera(cameraFor(points, view)));
+        canvas.current?.scrollIntoView({ block: 'nearest' });
+      }} /></Suspense>}
+    {canOpenSlideReview && showProstate && <ProstatePanel state={prostate} canNavigate={Boolean(view) && !following}
       focus={(points) => {
         if (view) navigate((viewer) => viewer.restoreCamera(cameraFor(points, view)));
         canvas.current?.scrollIntoView({ block: 'nearest' });
@@ -493,7 +523,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       <LymphCounts endpoint={endpoint} />}
     {info && !compareMode && !readOnlyEndpoint && <Pdl1Panel state={pdl1} />}
     {info && !compareMode && !readOnlyEndpoint && <IhcPanel state={ihc} readOnly={following}
-      onPickStart={() => { setAutopan(false); viewerRecords.chooseTool('pan'); }} />}
+      onPickStart={() => { setAutopan(false); skin.setMode(undefined); viewerRecords.chooseTool('pan'); }} />}
   </section>;
 }
 

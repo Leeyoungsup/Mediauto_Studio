@@ -15,20 +15,24 @@ from app.prostate_results import Archive, MAX_ARCHIVE_BYTES, result_root
 
 
 def import_result(organization, slide_name, export):
+    return import_verified_archive(organization, slide_name, export, DATA_ROOT, slide_signature, Archive, result_root)
+
+
+def import_verified_archive(organization, slide_name, export, data_root, read_signature, schema, archive_folder):
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", organization):
         raise ValueError("Invalid institution code")
-    slide = (DATA_ROOT.resolve() / slide_name).resolve(strict=True)
-    if not slide.is_relative_to(DATA_ROOT.resolve()) or slide.suffix.lower() not in (".ndpi", ".svs"):
+    slide = (data_root.resolve() / slide_name).resolve(strict=True)
+    if not slide.is_relative_to(data_root.resolve()) or slide.suffix.lower() not in (".ndpi", ".svs"):
         raise ValueError("Select a registered NDPI or SVS under data/")
     if export.stat().st_size > MAX_ARCHIVE_BYTES:
-        raise ValueError("Prostate AI export exceeds the size limit")
+        raise ValueError("Analysis export exceeds the size limit")
     raw = export.read_bytes()
-    archive = Archive.model_validate_json(raw)
-    signature = slide_signature(slide)
+    archive = schema.model_validate_json(raw)
+    signature = read_signature(slide)
     if archive.source.model_dump(mode="json") != signature:
         raise ValueError("Export does not match the slide filename, size, quickhash and Level 0 dimensions")
     source_id = hashlib.sha256(raw).hexdigest()
-    folder = result_root(organization, signature)
+    folder = archive_folder(organization, signature)
     folder.mkdir(mode=0o700, parents=True, exist_ok=True)
     target = folder / (source_id + ".json")
     with tempfile.NamedTemporaryFile(dir=folder) as staging:

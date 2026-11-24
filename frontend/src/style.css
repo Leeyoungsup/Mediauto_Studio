@@ -650,3 +650,18 @@ dialog::backdrop { background: #21193575; }
 .prostate-findings small { color: var(--muted); }
 .prostate-region-controls { display: grid; gap: 6px; }
 .prostate-panel dd { overflow-wrap: anywhere; }
+
+.skin-overlay [data-layer="orientation"] { stroke: #13a9a0; stroke-width: 3; }
+.skin-overlay [data-layer="epidermis"] { stroke: #13a9a0; fill: #13a9a0; }
+.skin-overlay [data-layer="tissue"] { stroke: #287fe3; fill: #287fe3; }
+.skin-overlay [data-layer="lesion"] { stroke: #ad44ae; fill: #ad44ae; }
+.skin-overlay [data-layer="count-field"] { stroke: #ffdf59; stroke-width: 2; fill: none; }
+.skin-overlay circle { stroke: #202125; stroke-width: 1; }
+.skin-overlay [data-status="pending"] { fill: #ffda63; }
+.skin-overlay [data-status="confirmed"] { fill: #36e2ba; }
+.skin-overlay [data-status="rejected"] { fill: #b0adb5; }
+.skin-layers, .image-actions { flex-wrap: wrap; }
+.skin-layers { display: flex; gap: 12px; }
+.skin-input { max-width: 440px; }
+.skin-candidates { display: grid; gap: 4px; }
+.skin-review p, .skin-review dd { overflow-wrap: anywhere; }

@@ -30,6 +30,10 @@ Worklist에서는 **Hide Case Preview**로 목록을 넓힐 수 있습니다. WS
 
 규칙과 파일 등록 정보는 개발 PostgreSQL에 저장되며, 이미 등록한 파일은 규칙을 다시 적용해도 유지됩니다. 등록 정보는 Worklist에서 Case ID로 묶어 확인합니다. 같은 Slide ID의 NDPI와 SVS는 서로 다른 원본 파일로 표시됩니다. 등록된 스캔은 케이스 상세의 WSI 뷰어에서 열 수 있습니다.
 
+### 37. Skin and Melanoma Review
+
+등록된 H&E 스캔의 **WSI Viewer → Skin Review**에서 표피 방향, 조직 영역, 유사분열 후보와 모델 Heatmap을 확인합니다. **Manual Review**에서는 0.2 또는 1 mm² 영역을 지정해 수기 확인과 계수를 시작할 수 있습니다. [37번 보관본 연결, 계수와 검증](work/skin-review-37.md)
+
 ### 36. Prostate Core and Level
 
 등록한 H&E 임상 스캔에서 **WSI Viewer → Prostate AI**를 열면 원천 분석 버전과 Core·Level별 영역을 선택하고 이동할 수 있습니다. 길이·Grade Group·PNI는 모델 출력과 해당 Core·Level의 기준 결과가 일치할 때 표시됩니다. [36번 결과 계약과 검증](work/prostate-results-36.md)
