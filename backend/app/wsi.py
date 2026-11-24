@@ -16,13 +16,22 @@ from sqlalchemy import select
 from app.auth import CurrentUser, Session
 from app.clinical import case_visibility, scan_metadata
 from app.intake import DATA_ROOT, INTAKE_PREFIX, require_intake, scan_files, source_id
-from app.scan_quality import BLOCKED_QC
-from app.models import ApplicationSetting, Case, Slide, SlideScan, Specimen
+from app.scan_quality import BLOCKED_QC, embedded_label
+from app.models import ApplicationSetting, Case, ScanLabel, Slide, SlideScan, Specimen
 
 TILE_SIZE = 1024
 STAGE_DOWNSAMPLES = (1, 4, 8)
 PRIVATE = {"Cache-Control": "private, no-store"}
 router = APIRouter(prefix="/api/wsi", tags=["WSI"])
+
+
+def visible_scan(user, scan_id, *columns):
+    return (select(*columns).select_from(SlideScan)
+            .join(Slide, SlideScan.slide_id == Slide.id)
+            .join(Specimen, Slide.specimen_id == Specimen.id)
+            .join(Case, Specimen.case_id == Case.id)
+            .where(SlideScan.id == scan_id, SlideScan.organization == user.organization,
+                   Case.organization == user.organization, case_visibility(Case, user)))
 
 
 async def registered_file(source, scan_id, user, session) -> tuple[Path, UUID]:
@@ -39,14 +48,9 @@ async def registered_file(source, scan_id, user, session) -> tuple[Path, UUID]:
         key = match.filename
         expected = None
     else:
-        record = (await session.execute(
-            select(SlideScan.storage_key, SlideScan.size_bytes, SlideScan.modified_ns, SlideScan.qc_status)
-            .join(Slide, SlideScan.slide_id == Slide.id)
-            .join(Specimen, Slide.specimen_id == Specimen.id)
-            .join(Case, Specimen.case_id == Case.id)
-            .where(SlideScan.id == scan_id, SlideScan.organization == user.organization,
-                   Case.organization == user.organization, case_visibility(Case, user))
-        )).one_or_none()
+        record = (await session.execute(visible_scan(
+            user, scan_id, SlideScan.storage_key, SlideScan.size_bytes, SlideScan.modified_ns, SlideScan.qc_status,
+        ))).one_or_none()
         if record is None:
             raise HTTPException(404, "Registered WSI not found.")
         key, size, modified, qc = record
@@ -107,6 +111,8 @@ def jpeg(region, output_size):
 
 
 def read_scan(path, operation, cancelled, coords=None):
+    if operation == "label":
+        return embedded_label(path)
     with openslide.OpenSlide(path) as slide:
         width, height = slide.dimensions
         if operation == "metadata":
@@ -183,6 +189,27 @@ async def overview(source: Source, scan_id: UUID, request: Request, user: Curren
                    size: Annotated[int, Query(ge=64, le=960)] = 960):
     path = await registered_path(source, scan_id, user, session)
     return await scan_response(request, path, "overview", size)
+
+
+@router.get("/{source}/{scan_id}/label.jpeg")
+async def label(source: Source, scan_id: UUID, request: Request, user: CurrentUser, session: Session):
+    path = await registered_path(source, scan_id, user, session)
+    if source == "clinical":
+        scan = (await session.execute(
+            visible_scan(user, scan_id, SlideScan.qc_status, ScanLabel.jpeg)
+            .outerjoin(ScanLabel, (ScanLabel.organization == SlideScan.organization) & (ScanLabel.scan_id == SlideScan.id))
+            .order_by(ScanLabel.version.desc()).limit(1)
+        )).one_or_none()
+        await session.rollback()
+        if scan is None:
+            raise HTTPException(404, "Registered WSI not found.")
+        if scan.qc_status in BLOCKED_QC:
+            raise HTTPException(409, "This scan is unavailable for review because of its QC status.")
+        if scan.jpeg is not None:
+            return Response(scan.jpeg, media_type="image/jpeg", headers={**PRIVATE, "X-Label-Source": "uploaded"})
+    response = await scan_response(request, path, "label")
+    response.headers["X-Label-Source"] = "embedded"
+    return response
 
 
 @router.get("/{source}/{scan_id}/{stage}/{x}/{y}.jpeg")

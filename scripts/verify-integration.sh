@@ -54,7 +54,10 @@ from test_clinical import create_account
 
 async def main():
     async with app.router.lifespan_context(app):
-        for account, role in (("integration-admin", "admin"), ("integration-doctor", "doctor"), ("integration-other", "doctor")):
+        for account, role in (
+            ("integration-admin", "admin"), ("integration-doctor", "doctor"), ("integration-other", "doctor"),
+            ("integration-viewer-admin", "admin"), ("integration-editor-admin", "admin"),
+        ):
             await create_account("local", account, role)
 
 asyncio.run(main())
@@ -80,6 +83,7 @@ if [[ "$mode" == --manual ]]; then
 else
     node scripts/integration-browser.mjs
     node scripts/workspace-layout-browser.mjs
+    node scripts/viewer-preferences-browser.mjs
     node scripts/viewer-records-browser.mjs
     node scripts/multi-view-browser.mjs
     node scripts/worklist-views-browser.mjs

@@ -13,7 +13,7 @@ try {
   const page = await browser.newPage({ baseURL, viewport: { width: 1500, height: 1020 } });
   page.setDefaultTimeout(15000);
   const login = await page.request.post('/api/auth/login', { data: {
-    organization: 'local', username: 'integration-admin', password: 'synthetic-test-password',
+    organization: 'local', username: 'integration-editor-admin', password: 'synthetic-test-password',
   }});
   assert.equal(login.status(), 200, await login.text());
   const patient = await page.request.post(clinical + '/patients', {
@@ -58,6 +58,14 @@ try {
   await button(page, 'Upload Label').click();
   assert.equal((await uploaded).status(), 200);
   await page.getByText('Uploaded Label', { exact: true }).waitFor();
+
+  const viewer = await browser.newPage({ baseURL, storageState: await page.context().storageState() });
+  await viewer.goto('/#viewer/' + caseId);
+  await button(viewer, 'Viewer Settings').click();
+  await viewer.getByLabel('Show label image').check();
+  await viewer.getByRole('img', { name: 'Scan label', exact: true }).waitFor({ timeout: 15000 });
+  await viewer.getByRole('complementary', { name: 'Scan Images' }).getByText('Uploaded', { exact: true }).waitFor();
+  await viewer.close();
 
   if (process.env.MEDIAUTO_TESSERACT) {
     await page.getByLabel('OCR Reason').fill('Synthetic label verification');
@@ -114,7 +122,7 @@ try {
   await page.getByText(replacement + ' · NDPI · Unassessed', { exact: true }).waitFor();
   await button(page, 'Open Viewer').click();
   await button(page, 'Pan using minimap').waitFor();
-  console.log('PASS: intake patient match, block and barcode editing, label retry and OCR confirmation, QC evidence, blocked review and real NDPI replacement');
+  console.log('PASS: intake patient match, block and barcode editing, label retry, OCR confirmation and uploaded label in WSI, QC evidence, blocked review and real NDPI replacement');
 } finally {
   await browser.close();
 }

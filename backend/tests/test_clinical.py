@@ -228,12 +228,13 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         # Use separately authenticated clients for sensitive endpoints and the parent case.
         viewer = await create_account(self.org, "wsi-viewer", "viewer")
         await login(self.client, self.org, viewer.username)
-        for suffix in ("", "/overview.jpeg", "/2/0/0.jpeg"):
+        for suffix in ("", "/overview.jpeg", "/label.jpeg", "/2/0/0.jpeg"):
             self.assertEqual((await self.client.get(path + suffix)).status_code, 404)
         async with app.state.engine.begin() as connection:
             await connection.execute(text("UPDATE cases SET assigned_to = :user WHERE id = CAST(:case AS uuid)"),
                                      {"user": viewer.id, "case": case["id"]})
         self.assertEqual((await self.client.get(path)).status_code, 422)
+        self.assertEqual((await self.client.get(path + "/label.jpeg")).status_code, 422)
         self.assertEqual((await self.client.get(path + "/7/0/0.jpeg")).status_code, 400)
         source.write_bytes(b"the registered file changed")
         self.assertEqual((await self.client.get(path + "/overview.jpeg")).status_code, 409)
@@ -241,6 +242,33 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.get(path)).status_code, 404)
         self.assertEqual((await self.client.post("/api/auth/logout")).status_code, 200)
         self.assertEqual((await self.client.get(path + "/2/0/0.jpeg")).status_code, 401)
+        self.assertEqual((await self.client.get(path + "/label.jpeg")).status_code, 401)
+
+    async def test_viewer_preferences_are_private_and_versioned(self):
+        endpoint = "/api/viewer/preferences"
+        response = await self.client.get(endpoint)
+        self.assertEqual(response.status_code, 200, response.text)
+        initial = response.json()
+        self.assertEqual(initial["version"], 0)
+        self.assertTrue(initial["settings"]["show_minimap"])
+        draft = {"version": 0, "settings": {**initial["settings"], "tray_orientation": "horizontal",
+            "show_label": True, "autopan_speed": 240, "autopan_direction": "down"}}
+        result = await self.client.put(endpoint, json=draft)
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(result.json(), {**draft, "version": 1})
+        self.assertEqual((await self.client.put(endpoint, json=draft)).status_code, 409)
+        invalid = {"version": 1, "settings": {**draft["settings"], "autopan_speed": 10000}}
+        self.assertEqual((await self.client.put(endpoint, json=invalid)).status_code, 422)
+        self.assertEqual((await self.client.get(endpoint)).json(), result.json())
+
+        other = await create_account(self.org, "viewer-preferences-other", "doctor")
+        await login(self.client, self.org, other.username)
+        self.assertEqual((await self.client.get(endpoint)).json(), initial)
+        await create_account(self.org + "-foreign", self.user.username, "admin")
+        await login(self.client, self.org + "-foreign", self.user.username)
+        self.assertEqual((await self.client.get(endpoint)).json(), initial)
+        await self.client.post("/api/auth/logout")
+        self.assertEqual((await self.client.get(endpoint)).status_code, 401)
 
     async def test_case_assign_reassign_and_review_audit(self):
         doctors = [await create_account(self.org, f"reviewer-{i}", "doctor") for i in range(2)]
@@ -928,6 +956,11 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         await expect(self.client.put(scan_url + "/label?version=1", content=image.getvalue()), 200)
         reply = await expect(self.client.get(scan_url + "/label.jpeg"), 200)
         self.assertEqual((reply.headers["content-type"], reply.headers["x-label-source"]), ("image/jpeg", "uploaded"))
+        wsi_label = "/api/wsi/clinical/" + scan["id"] + "/label.jpeg"
+        rendered = await expect(self.client.get(wsi_label), 200)
+        self.assertEqual(rendered.headers["x-label-source"], "uploaded")
+        self.assertEqual(rendered.headers["cache-control"], "private, no-store")
+        self.assertEqual(rendered.content, reply.content)
         with patch("app.case_editor.recognize_label", return_value="ABC-123"):
             result = await expect(self.client.post(scan_url + "/ocr", json={"version": 2, "reason": reason}), 200)
         self.assertEqual(result.json()["candidate"], "ABC-123")
@@ -944,6 +977,7 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         self.assertIn("error", result.json())
         await expect(self.client.post(scan_url + "/qc", json={"version": 5, "source": "manual", "outcome": "rescan_required", "reason": reason}), 200)
         await expect(self.client.get("/api/wsi/clinical/" + scan["id"]), 409)
+        await expect(self.client.get(wsi_label), 409)
         result = await expect(self.client.get("/api/worklist", params={"slide_state": "qc_blocked"}), 200)
         self.assertEqual(result.json()["rows"][0]["slide_state"], ["missing_scan", "qc_blocked"])
 
@@ -954,4 +988,5 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         doctor = await create_account(self.org, "editor-other", "doctor")
         await login(self.client, self.org, doctor.username)
         await expect(self.client.get(scan_url + "/label.jpeg"), 404)
+        await expect(self.client.get(wsi_label), 404)
         await expect(self.client.get(editor + "/cases/" + case["id"]), 404)

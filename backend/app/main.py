@@ -26,6 +26,7 @@ from app.worklist import router as worklist_router
 from app.worklist_views import router as worklist_views_router
 from app.workflow import router as workflow_router
 from app.workgroups import router as workgroups_router
+from app.viewer_preferences import router as viewer_preferences_router
 from app.wsi import router as wsi_router
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,7 @@ app.include_router(workgroups_router)
 app.include_router(worklist_router)
 app.include_router(wsi_router)
 app.include_router(viewer_records_router)
+app.include_router(viewer_preferences_router)
 app.include_router(pdl1_router)
 
 

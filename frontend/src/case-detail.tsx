@@ -4,21 +4,22 @@ import { ArrowLeft, ArrowRight, ClipboardList, PencilLine, MessageSquare, FileSy
 import { CaseAudit } from './case-audit';
 import { readyCount } from './demo';
 import type { DemoCase } from './demo';
-import { SlidePreview, StatusLabel } from './worklist';
+import { ScanReference, SlidePreview, StatusLabel } from './worklist';
 
-export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, onConfirm, patientIntegration, requests, report, initialTab, dates, routing, editor }: {
+export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, onConfirm, patientIntegration, requests, report, initialTab, dates, routing, editor, selectedScan }: {
   item: DemoCase; emr: string; onBack: () => void; onViewer: (slide?: string) => void;
-  onAssign?: () => void; onReview?: () => void; onConfirm?: () => void; patientIntegration?: ReactNode; requests?: ReactNode; report?: ReactNode; initialTab?: string; dates?: ReactNode; routing?: ReactNode; editor?: ReactNode;
+  onAssign?: () => void; onReview?: () => void; onConfirm?: () => void; patientIntegration?: ReactNode; requests?: ReactNode; report?: ReactNode; initialTab?: string; selectedScan?: string; dates?: ReactNode; routing?: ReactNode; editor?: ReactNode;
 }) {
   const [tab, setTab] = useState(initialTab ?? 'Slides');
   const available = readyCount(item);
+  const selected = item.slides.find((slide) => slide.id === selectedScan);
 
   return <>
     <button className="back-link" onClick={onBack}><ArrowLeft size={16} /> Worklist</button>
     <div className="page-heading"><div><h1>{item.id}</h1><p>{item.specimen} · Received {item.received}</p></div>
       <div className="actions"><StatusLabel status={item.status} />
         {onReview && <button className="button secondary" disabled={!available} onClick={onReview}>{item.status === 'In Review' ? 'Review Complete' : 'Start Review'}</button>}
-        <button className="button primary" disabled={!available} onClick={() => onViewer()}><ScanLine size={17} /> Open Viewer</button>
+        <button className="button primary" disabled={selected ? !selected.wsi : !available} onClick={() => onViewer(selected?.id)}><ScanLine size={17} /> Open Viewer</button>
       </div>
     </div>
     <div className="detail-layout">
@@ -31,8 +32,8 @@ export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, on
         </nav>
         {tab === 'Slides' && <div className="detail-content">{dates}<div className="preview-label"><div className="title-inline"><h2>Specimens and Slides</h2><span>{available}/{item.slides.length} Viewable</span></div>
         </div>
-          {item.slides.length ? <div className="detail-slides">{item.slides.map((slide) => <button className="detail-slide" key={slide.id} disabled={!slide.wsi} onClick={() => onViewer(slide.id)}>
-            <span className="slide-image"><SlidePreview slide={slide} /></span><span><strong>{slide.label ?? slide.id}</strong><small>Specimen {slide.specimen} · {slide.stain}{slide.wsi && ` · ${slide.wsi.format}`}</small></span><span className="muted">{slide.state}</span><ArrowRight size={16} />
+          {item.slides.length ? <div className="detail-slides">{item.slides.map((slide) => <button className="detail-slide" aria-current={selected?.id === slide.id ? "true" : undefined} data-scan-id={slide.wsi?.id} key={slide.id} disabled={!slide.wsi} onClick={() => onViewer(slide.id)}>
+            <span className="slide-image"><SlidePreview slide={slide} /></span><span><strong>{slide.label ?? slide.id}</strong><small>Specimen {slide.specimen} · {slide.stain}{slide.wsi && ` · ${slide.wsi.format}`}</small><ScanReference scan={slide.wsi} /></span><span className="muted">{slide.state}</span><ArrowRight size={16} />
           </button>)}</div> : <div className="empty"><ScanLine size={27} /><strong>No slides are linked to this case.</strong></div>}
         </div>}
         {tab === 'Patient Information' && <div className="detail-content"><div className="preview-label"><h2>Patient Information</h2>{item.source === 'files' && <a className="button secondary" href="#scans">Edit in Slide Registration</a>}</div>

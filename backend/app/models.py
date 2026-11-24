@@ -394,6 +394,18 @@ class WorklistPreference(Base):
     version: Mapped[int] = mapped_column(Integer)
 
 
+class ViewerPreference(Base):
+    __tablename__ = "viewer_preferences"
+    __table_args__ = (
+        ForeignKeyConstraint(("organization", "user_id"), ("auth_users.organization", "auth_users.id"), ondelete="CASCADE"),
+    )
+
+    organization: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    settings: Mapped[dict] = mapped_column(JSONB)
+    version: Mapped[int] = mapped_column(Integer)
+
+
 class CaseRequest(ClinicalRecord, Base):
     __tablename__ = "case_requests"
     __table_args__ = (

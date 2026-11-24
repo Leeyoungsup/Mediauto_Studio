@@ -23,6 +23,10 @@ export function slideEndpoint(scan: NonNullable<Slide['wsi']>) {
   return `/api/wsi/${scan.source}/${scan.id}`;
 }
 
+export function ScanReference({ scan }: { scan?: Slide['wsi'] }) {
+  return scan ? <small className="scan-reference" title={`Scan ID ${scan.id}`}>Scan {scan.id.slice(0, 8)}</small> : null;
+}
+
 export function SlidePreview({ slide }: { slide: Slide }) {
   const [failed, setFailed] = useState(false);
   return slide.wsi && !failed
@@ -221,8 +225,8 @@ export function Worklist({ cases, loading, total, counts, filteredCounts, queues
           <div className="preview-heading"><strong>{selected.id}</strong><StatusLabel status={selected.status} />{selected.worklist?.priority && columnValue(selected, 'priority')}</div>
           <dl className="key-values"><div><dt>Specimen</dt><dd>{selected.specimen}</dd></div><div><dt>Assignee</dt><dd>{selected.assignee || 'Unassigned'}</dd></div><div><dt>Patient Information</dt><dd>{selected.patient?.number || (selected.patient ? 'Registered' : 'Not Entered')}</dd></div></dl>
           <div className="preview-label"><h3>Slides</h3><span>{selected.source === 'files' ? `${selected.slides.length} files registered` : `${readyCount(selected)}/${selected.slides.length} Viewable`}</span></div>
-          {selected.slides.length ? <div className="preview-slides">{selected.slides.map((slide) => <button key={slide.id} className="slide-preview" disabled={!slide.wsi} onClick={() => onViewer(selected.id, slide.id)}>
-            <span className="slide-image"><SlidePreview slide={slide} /></span><strong>{slide.label ?? slide.id}</strong><span>{slide.stain}{slide.wsi && ` · ${slide.wsi.format}`}</span>
+          {selected.slides.length ? <div className="preview-slides">{selected.slides.map((slide) => <button key={slide.id} className="slide-preview" data-scan-id={slide.wsi?.id} title={slide.state} disabled={!slide.wsi} onClick={() => onViewer(selected.id, slide.id)}>
+            <span className="slide-image"><SlidePreview slide={slide} /></span><strong>{slide.label ?? slide.id}</strong><span>{slide.stain} · {slide.wsi?.format ?? slide.state}<ScanReference scan={slide.wsi} /></span>
           </button>)}</div> : <p className="empty-inline">No slides are linked to this case.</p>}
           <button className="button primary full" onClick={() => onOpen(selected.id)}>Open Case Details <ArrowRight size={16} /></button>
           {readyCount(selected) > 0 && <button className="button secondary full" onClick={() => onViewer(selected.id)}><ScanLine size={16} /> Open Viewer</button>}
