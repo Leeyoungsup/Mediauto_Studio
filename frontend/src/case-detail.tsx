@@ -1,15 +1,16 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
-import { ArrowLeft, ArrowRight, ClipboardList, PencilLine, MessageSquare, FileSymlink, History, ScanLine, UserRound } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ClipboardList, PencilLine, MessageSquare, FileSymlink, FileText, Camera, History, ScanLine, UserRound } from 'lucide-react';
+import { CaseAttachments } from './case-attachments';
 import { PatientHistory } from './patient-history';
 import { CaseAudit } from './case-audit';
 import { readyCount } from './demo';
 import type { DemoCase } from './demo';
 import { ScanReference, SlidePreview, StatusLabel } from './worklist';
 
-export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, onConfirm, patientIntegration, requests, report, initialTab, dates, routing, editor, selectedScan, historyEndpoint }: {
+export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, onConfirm, patientIntegration, requests, report, initialTab, dates, routing, editor, selectedScan, historyEndpoint, attachmentsEndpoint }: {
   item: DemoCase; emr: string; onBack: () => void; onViewer: (slide?: string) => void;
-  onAssign?: () => void; onReview?: () => void; onConfirm?: () => void; patientIntegration?: ReactNode; requests?: ReactNode; report?: ReactNode; initialTab?: string; selectedScan?: string; historyEndpoint?: string; dates?: ReactNode; routing?: ReactNode; editor?: ReactNode;
+  onAssign?: () => void; onReview?: () => void; onConfirm?: () => void; patientIntegration?: ReactNode; requests?: ReactNode; report?: ReactNode; initialTab?: string; selectedScan?: string; historyEndpoint?: string; attachmentsEndpoint?: string; dates?: ReactNode; routing?: ReactNode; editor?: ReactNode;
 }) {
   const [tab, setTab] = useState(initialTab ?? 'Slides');
   const available = readyCount(item);
@@ -27,6 +28,7 @@ export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, on
       <section className="panel detail-panel">
         <nav className="detail-tabs" aria-label="Case Information">
           {[{ name: 'Slides', icon: ScanLine }, { name: 'Patient Information', icon: UserRound }, { name: 'History', icon: History },
+            ...(attachmentsEndpoint ? [{ name: 'Media', icon: FileText }, { name: 'Gross Images', icon: Camera }] : []),
             ...(editor ? [{ name: 'Case Editor', icon: PencilLine }] : []),
             ...(requests ? [{ name: 'Requests', icon: MessageSquare }, { name: 'Report Draft', icon: ClipboardList }] : [])].map(({ name, icon: Icon }) =>
             <button key={name} aria-pressed={tab === name} onClick={() => setTab(name)}><Icon size={16} />{name}</button>)}
@@ -41,6 +43,9 @@ export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, on
           {!patientIntegration && <p className="integration-note"><FileSymlink size={16} /> EMR {emr}</p>}
           {item.patient ? <dl className="key-values"><div><dt>Patient Name</dt><dd>{item.patient.name || 'Not Entered'}</dd></div><div><dt>Patient ID</dt><dd>{item.patient.number || 'Not Entered'}</dd></div>{item.patient.localRef && <div><dt>Local Patient ID</dt><dd>{item.patient.localRef}</dd></div>}<div><dt>Date of Birth</dt><dd>{item.patient.birth || 'Not Entered'}</dd></div><div><dt>Source</dt><dd>{item.source === 'files' ? 'Slide Registration Details' : 'Patient Record'}</dd></div></dl> : <p className="empty-inline">No patient information is available.</p>}
           {patientIntegration}
+        </div>}
+        {attachmentsEndpoint && (tab === 'Media' || tab === 'Gross Images') && <div className="detail-content">
+          <CaseAttachments key={tab} endpoint={attachmentsEndpoint} kind={tab === 'Media' ? 'pdf' : 'gross'} heading />
         </div>}
         {tab === 'Case Editor' && <div className="detail-content">{editor}</div>}
         {tab === 'Requests' && <div className="detail-content">{requests}</div>}

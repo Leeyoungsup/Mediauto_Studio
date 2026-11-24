@@ -129,6 +129,7 @@ class Specimen(ClinicalRecord, Base):
     __table_args__ = (
         UniqueConstraint("organization", "id"),
         UniqueConstraint("organization", "case_id", "specimen_number"),
+        UniqueConstraint("organization", "case_id", "id", name="uq_specimen_case_id"),
         ForeignKeyConstraint(("organization", "case_id"), ("cases.organization", "cases.id")),
     )
 
@@ -137,6 +138,30 @@ class Specimen(ClinicalRecord, Base):
     case_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     description: Mapped[str | None] = mapped_column(String(160))
     status: Mapped[str] = mapped_column(String(24), server_default="registered")
+
+
+class CaseAttachment(ClinicalRecord, Base):
+    __tablename__ = "case_attachments"
+    __table_args__ = (
+        ForeignKeyConstraint(("organization", "case_id"), ("cases.organization", "cases.id")),
+        ForeignKeyConstraint(("organization", "case_id", "specimen_id"),
+                             ("specimens.organization", "specimens.case_id", "specimens.id")),
+        UniqueConstraint("organization", "case_id", "created_by", "request_key"),
+        CheckConstraint("(kind = 'pdf' AND specimen_id IS NULL AND pages BETWEEN 1 AND 50 AND pages IS NOT NULL) OR "
+                        "(kind = 'gross' AND specimen_id IS NOT NULL AND pages IS NULL)",
+                        name="case_attachment_scope"),
+        Index("ix_case_attachments_case", "organization", "case_id", "kind", "created_at"),
+    )
+
+    case_id: Mapped[UUID] = mapped_column(Uuid)
+    specimen_id: Mapped[UUID | None] = mapped_column(Uuid)
+    kind: Mapped[str] = mapped_column(String(8))
+    filename: Mapped[str] = mapped_column(String(160))
+    pages: Mapped[int | None] = mapped_column(Integer)
+    content: Mapped[bytes] = mapped_column(LargeBinary)
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    checksum: Mapped[str] = mapped_column(String(64))
+    request_key: Mapped[str] = mapped_column(String(128))
 
 
 class SpecimenBlock(ClinicalRecord, Base):

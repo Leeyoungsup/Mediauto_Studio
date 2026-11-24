@@ -520,6 +520,101 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.post(other_url + "/patient-confirm",
                           json={**confirm, "source_revision": 3, "confirm_differences": True})).status_code, 409)
 
+    async def test_case_attachments_validate_scope_contents_and_download_audit(self):
+        import io
+        from PIL import Image
+
+        case = await self.create("cases", {"case_number": "MEDIA-QA"})
+        other_case = await self.create("cases", {"case_number": "MEDIA-OTHER"})
+        specimen = await self.create("specimens", {"case_id": case["id"], "specimen_number": "A"})
+        other_specimen = await self.create("specimens", {"case_id": other_case["id"], "specimen_number": "A"})
+        path = self.url + "/cases/" + case["id"] + "/attachments"
+        other_path = self.url + "/cases/" + other_case["id"] + "/attachments"
+
+        async def check(pending, code):
+            response = await pending
+            self.assertEqual(response.status_code, code, response.text[:500])
+            return response
+
+        def upload(kind, content, key, target=None):
+            return self.client.post(path + "/" + kind, params={"specimen_id": target} if target else {},
+                content=content, headers={"Idempotency-Key": key, "X-File-Name": "synthetic%20attachment." + ("pdf" if kind == "pdf" else "png")})
+
+        raw_pdf, raw_png = io.BytesIO(), io.BytesIO()
+        with Image.new("RGB", (140, 100), "white") as first, Image.new("RGB", (120, 80), "blue") as second:
+            first.save(raw_pdf, "PDF", save_all=True, append_images=[second])
+            first.save(raw_png, "PNG")
+        pdf, png = raw_pdf.getvalue(), raw_png.getvalue()
+
+        await check(upload("pdf", png, "spoofed-pdf"), 415)
+        await check(upload("pdf", b"%PDF-1.7\ncorrupted", "damaged-pdf"), 422)
+        await check(upload("gross", b"\x89PNG\r\n\x1a\ncorrupt", "damaged-photo", specimen["id"]), 422)
+        await check(upload("gross", pdf, "spoofed-photo", specimen["id"]), 415)
+        await check(upload("gross", png, "missing-specimen"), 422)
+        await check(upload("pdf", pdf, "unexpected-specimen", specimen["id"]), 422)
+        await check(upload("gross", png, "wrong-specimen", other_specimen["id"]), 404)
+        await check(self.client.post(path + "/pdf", content=b"x", headers={"Idempotency-Key": "oversize",
+            "X-File-Name": "large.pdf", "Content-Length": str(10 * 1024 * 1024 + 1)}), 413)
+
+        document = (await check(upload("pdf", pdf, "pdf-one"), 201)).json()
+        self.assertEqual(document["pages"], 2)
+        self.assertEqual((await check(upload("pdf", pdf, "pdf-one"), 201)).json()["id"], document["id"])
+        image = (await check(upload("gross", png, "gross-one", specimen["id"]), 201)).json()
+        self.assertEqual(image["filename"], "synthetic attachment.jpg")
+        self.assertEqual(image["specimen_id"], specimen["id"])
+        await check(upload("gross", png, "pdf-one", specimen["id"]), 409)
+        with patch("app.case_attachments.MAX_ATTACHMENTS", 2):
+            await check(upload("pdf", pdf, "over-case-count"), 413)
+
+        pdf_route = path + "/pdf/" + document["id"]
+        gross_route = path + "/gross/" + image["id"]
+        listing = (await check(self.client.get(path + "/gross"), 200)).json()
+        self.assertEqual([row["id"] for row in listing["specimens"]], [specimen["id"]])
+        self.assertEqual(listing["records"][0], image)
+        await check(self.client.get(other_path + "/pdf/" + document["id"] + "/preview"), 404)
+        await check(self.client.post(other_path + "/pdf/" + document["id"] + "/download"), 404)
+        await check(self.client.get(path + "/gross/" + document["id"] + "/preview"), 404)
+        page = await check(self.client.get(pdf_route + "/preview?page=2"), 200)
+        self.assertEqual(page.headers["content-type"], "image/png")
+        self.assertTrue(page.content.startswith(b"\x89PNG"))
+        await check(self.client.get(pdf_route + "/preview?page=3"), 404)
+        photo = await check(self.client.get(gross_route + "/preview"), 200)
+        self.assertEqual(photo.headers["content-type"], "image/jpeg")
+        with Image.open(io.BytesIO(photo.content)) as decoded:
+            self.assertEqual(decoded.size, (140, 100))
+            self.assertFalse(decoded.getexif())
+        downloaded_photo = await check(self.client.post(gross_route + "/download"), 200)
+        self.assertNotEqual(downloaded_photo.content, photo.content)
+        events = (await check(self.client.get(pdf_route + "/activity"), 200)).json()
+        self.assertEqual([event["action"] for event in events], ["attachment_registered"])
+
+        viewer = await create_account(self.org, "attachment-viewer", "viewer")
+        await login(self.client, self.org, viewer.username)
+        await check(self.client.get(pdf_route + "/preview"), 404)
+        await check(self.client.post(pdf_route + "/download"), 404)
+        async with app.state.engine.begin() as connection:
+            await connection.execute(text("UPDATE cases SET assigned_to = :user WHERE id = CAST(:case AS uuid)"),
+                                     {"user": viewer.id, "case": case["id"]})
+        self.assertFalse((await check(self.client.get(path + "/pdf"), 200)).json()["can_upload"])
+        await check(upload("pdf", pdf, "viewer-write"), 403)
+        first, second = await asyncio.gather(
+            check(self.client.post(pdf_route + "/download"), 200),
+            check(self.client.post(pdf_route + "/download"), 200),
+        )
+        self.assertEqual((first.content, second.content), (pdf, pdf))
+        self.assertEqual(first.headers["cache-control"], "private, no-store")
+        self.assertTrue(first.headers["content-disposition"].startswith("attachment;"))
+        events = (await check(self.client.get(pdf_route + "/activity"), 200)).json()
+        self.assertEqual([event["action"] for event in events], ["attachment_downloaded", "attachment_downloaded", "attachment_registered"])
+        self.assertEqual(events[0]["actor"], viewer.username)
+
+        async with app.state.engine.begin() as connection:
+            await connection.execute(text("UPDATE case_attachments SET content = :broken WHERE id = CAST(:id AS uuid)"),
+                                     {"id": document["id"], "broken": b"broken"})
+        await check(self.client.get(pdf_route + "/preview"), 422)
+        await check(self.client.post(pdf_route + "/download"), 422)
+        self.assertEqual(len((await check(self.client.get(pdf_route + "/activity"), 200)).json()), 3)
+
     async def test_patient_history_matches_confirmed_source_and_case_permissions(self):
         root = f"/api/integration/{self.org}"
         patient = await self.create("patients", {"display_name": "Synthetic history patient"})

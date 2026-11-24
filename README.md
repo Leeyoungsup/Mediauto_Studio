@@ -30,6 +30,10 @@ Worklist에서는 **Hide Case Preview**로 목록을 넓힐 수 있습니다. WS
 
 규칙과 파일 등록 정보는 개발 PostgreSQL에 저장되며, 이미 등록한 파일은 규칙을 다시 적용해도 유지됩니다. 등록 정보는 Worklist에서 Case ID로 묶어 확인합니다. 같은 Slide ID의 NDPI와 SVS는 서로 다른 원본 파일로 표시됩니다. 등록된 스캔은 케이스 상세의 WSI 뷰어에서 열 수 있습니다.
 
+### 24. Media와 Gross Images
+
+등록된 임상 케이스의 **Case Details**와 **WSI Viewer**에서 **Media** 또는 **Gross Images**를 엽니다. **Attach PDF**에서 케이스 문서를 등록하고 **Add Gross Image**에서 검체를 선택해 JPEG·PNG를 올립니다. **Download Attachment** 요청은 **Attachment Activity**에 기록됩니다. 서버의 PDF 미리보기는 Poppler(`pdfinfo`, `pdftoppm`)와 Linux `prlimit`을 사용합니다. [24번 검증 기록](work/case-attachments-24.md)
+
 ### 23. 환자 임상 History
 
 **Case Details → History** 또는 **WSI Viewer → Patient History**에서 이전 진단 보고서와 진료 기록을 읽습니다. 로컬 환자를 연결한 뒤 **Add Clinical Record**로 수기 기록을 추가합니다. 외부 기록은 **Patient Information**에서 대조를 확인한 환자에 대해 수신 시각과 원천을 표시합니다. [23번 조회 계약과 검증 기록](work/patient-history-23.md)

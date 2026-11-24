@@ -128,4 +128,18 @@ image.save(sys.argv[1])
 PYLABEL
     node scripts/case-editor-browser.mjs
     node scripts/patient-history-browser.mjs
+    export MEDIAUTO_QA_PDF="$sandbox/qa-case-media.pdf" MEDIAUTO_QA_GROSS="$sandbox/qa-gross.png"
+    "$python" -s - "$MEDIAUTO_QA_PDF" "$MEDIAUTO_QA_GROSS" <<'PYMEDIA'
+import sys
+from PIL import Image, ImageDraw
+
+with Image.new("RGB", (400, 300), "white") as first, Image.new("RGB", (400, 300), "ivory") as second:
+    ImageDraw.Draw(first).text((30, 30), "Synthetic Media - Page 1", fill="black")
+    ImageDraw.Draw(second).text((30, 30), "Synthetic Media - Page 2", fill="black")
+    first.save(sys.argv[1], "PDF", save_all=True, append_images=[second])
+with Image.new("RGB", (480, 360), "ivory") as gross:
+    ImageDraw.Draw(gross).ellipse((40, 70, 420, 290), fill="sienna")
+    gross.save(sys.argv[2], "PNG")
+PYMEDIA
+    node scripts/case-attachments-browser.mjs
 fi
