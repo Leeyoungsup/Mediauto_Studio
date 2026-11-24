@@ -11,8 +11,9 @@ from app.auth import require_roles
 from app.clinical import (ClinicalInput, Organization, Reason, Session, add_event, find,
                           require_version, write)
 from app.integration_service import KIND, SYSTEM, digest, now
+from app.lymph_counts import count_view
 from app.models import (AuthUser, Case, CaseReport, CaseRequest, ExternalIdentifier, IntegrationConnection,
-                        ReportRevision, ReportTemplate, ReportTransmission)
+                        LymphNodeCount, ReportRevision, ReportTemplate, ReportTransmission, Specimen)
 from app.report_delivery import approved_adapter, status_view, step
 
 router = APIRouter(prefix="/api/clinical/{organization}", tags=["Case reports"])
@@ -136,9 +137,21 @@ async def evidence_choices(session, case):
     rows = (await session.scalars(select(CaseRequest).where(
         CaseRequest.organization == case.organization, CaseRequest.case_id == case.id, CaseRequest.status == "completed",
     ).order_by(CaseRequest.updated_at.desc(), CaseRequest.id))).all()
-    return [{"id": str(row.id), "kind": row.kind, "version": row.version, "completed_at": row.updated_at.isoformat(),
+    choices = [{"id": str(row.id), "kind": row.kind, "version": row.version, "completed_at": row.updated_at.isoformat(),
              "result_note": row.result_note, "snapshot": row.snapshot, "scan_id": str(row.scan_id) if row.scan_id else None}
             for row in rows if (row.kind == "ai" and row.snapshot) or (row.kind == "consult" and row.result_note)]
+
+    counts = (await session.execute(select(LymphNodeCount, Specimen.specimen_number)
+              .join(Specimen, (Specimen.organization == LymphNodeCount.organization) & (Specimen.id == LymphNodeCount.specimen_id))
+              .where(Specimen.organization == case.organization, Specimen.case_id == case.id)
+              .order_by(Specimen.specimen_number, LymphNodeCount.version.desc()))).all()
+    seen = set()
+    for row, specimen in counts:
+        choices.append({**count_view(row), "kind": "lymph_node_count", "specimen": specimen,
+                        "completed_at": row.created_at.isoformat(), "superseded": row.specimen_id in seen,
+                        "result_note": None, "snapshot": None})
+        seen.add(row.specimen_id)
+    return choices
 
 
 async def case_accession(session, case):
@@ -242,8 +255,12 @@ async def save_draft(organization: Organization, case_id: UUID, data: DraftInput
         selected_ids = list(dict.fromkeys(map(str, data.evidence_ids)))
         if set(selected_ids) - choices.keys():
             raise HTTPException(422, "Select completed results that belong to this case.")
+        selected = [{field: value for field, value in choices[key].items() if field != "superseded"} for key in selected_ids]
+        specimens = [entry["specimen_id"] for entry in selected if entry["kind"] == "lymph_node_count"]
+        if len(specimens) != len(set(specimens)):
+            raise HTTPException(422, "Select one lymph node count version per specimen.")
         content = {"template": template, "sections": {key: data.sections.get(key, "") for key in sorted(keys)},
-                   "evidence": [choices[key] for key in selected_ids], "dictated_sections": sorted(set(data.dictated_sections))}
+                   "evidence": selected, "dictated_sections": sorted(set(data.dictated_sections))}
         if previous and content == previous.content:
             return revision_view(previous)
         if report is None:

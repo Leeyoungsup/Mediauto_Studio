@@ -422,7 +422,7 @@ class ViewerAnnotation(Base):
     __tablename__ = "viewer_annotations"
     __table_args__ = (
         ForeignKeyConstraint(("organization", "author_id"), ("auth_users.organization", "auth_users.id")),
-        CheckConstraint("kind IN ('rectangle', 'distance')", name="viewer_annotation_kind"),
+        CheckConstraint("kind IN ('rectangle', 'distance', 'ellipse', 'point', 'arrow', 'polygon', 'brush', 'count', 'bookmark')", name="viewer_annotation_kind"),
         Index("ix_viewer_annotations_scan", "organization", "scan_key", "created_at"),
     )
 
@@ -434,12 +434,29 @@ class ViewerAnnotation(Base):
     points: Mapped[list] = mapped_column(JSONB)
     label: Mapped[str] = mapped_column(String(160))
     version: Mapped[int] = mapped_column(Integer)
+    zoom: Mapped[float | None] = mapped_column(Float)
     length: Mapped[float | None] = mapped_column(Float)
     unit: Mapped[str | None] = mapped_column(String(4))
     mpp_x: Mapped[float | None] = mapped_column(Float)
     mpp_y: Mapped[float | None] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class LymphNodeCount(ClinicalRecord, Base):
+    __tablename__ = "lymph_node_counts"
+    __table_args__ = (
+        ForeignKeyConstraint(("organization", "specimen_id"), ("specimens.organization", "specimens.id")),
+        ForeignKeyConstraint(("organization", "scan_id"), ("slide_scans.organization", "slide_scans.id")),
+        UniqueConstraint("organization", "specimen_id", "version"),
+        CheckConstraint("positive >= 0 AND total >= positive", name="lymph_node_count_values"),
+    )
+
+    specimen_id: Mapped[UUID] = mapped_column(Uuid)
+    scan_id: Mapped[UUID] = mapped_column(Uuid)
+    positive: Mapped[int] = mapped_column(Integer)
+    total: Mapped[int] = mapped_column(Integer)
+    reason: Mapped[str | None] = mapped_column(String(240))
 
 
 class WorklistView(Base):

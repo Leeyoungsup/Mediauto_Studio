@@ -10,7 +10,7 @@ from uuid import UUID
 
 import openslide
 from fastapi import APIRouter, HTTPException, Query, Request, Response
-from PIL import Image, ImageCms
+from PIL import Image, ImageCms, ImageDraw
 from sqlalchemy import select
 
 from app.auth import CurrentUser, Session
@@ -95,20 +95,78 @@ def positive_number(value):
     return number if math.isfinite(number) and number > 0 else None
 
 
+def apply_color_profile(rgb, profile):
+    if profile:
+        try:
+            ImageCms.profileToProfile(rgb, io.BytesIO(profile), ImageCms.createProfile("sRGB"), inPlace=True)
+        except (ImageCms.PyCMSError, OSError, ValueError):
+            pass
+
+
 def jpeg(region, output_size):
     # The base renderer composites OpenSlide's transparent padding onto white.
     with region.convert("RGBA") as rgba, Image.new("RGB", region.size, "white") as rgb:
         with rgba.getchannel("A") as alpha:
             rgb.paste(rgba, mask=alpha)
-        profile = region.info.get("icc_profile")
-        if profile:
-            try:
-                ImageCms.profileToProfile(rgb, io.BytesIO(profile), ImageCms.createProfile("sRGB"), inPlace=True)
-            except (ImageCms.PyCMSError, OSError, ValueError):
-                pass
+        apply_color_profile(rgb, region.info.get("icc_profile"))
         with rgb.resize(output_size, Image.Resampling.LANCZOS) as output:
             buffer = io.BytesIO()
             output.save(buffer, "JPEG", quality=85)
+            return buffer.getvalue()
+
+
+def capture_roi(slide, coords, cancelled):
+    kind, points, include_annotation, include_scale = coords
+    xs, ys = zip(*points)
+    left, top = math.floor(min(xs)), math.floor(min(ys))
+    width, height = max(1, math.ceil(max(xs)) - left), max(1, math.ceil(max(ys)) - top)
+    scale = min(1, 1600 / max(width, height))
+    output = (max(1, round(width * scale)), max(1, round(height * scale)))
+    level = slide.get_best_level_for_downsample(1 / scale)
+    level_scale = slide.level_downsamples[level]
+    size = (math.ceil(width / level_scale), math.ceil(height / level_scale))
+    if math.prod(size) > 16_000_000:
+        raise HTTPException(422, "This ROI needs a lower resolution pyramid level. Select a smaller region.")
+    if cancelled.is_set():
+        return None
+    with slide.read_region((left, top), level, size) as region:
+        if cancelled.is_set():
+            return None
+        # Clip the rounding padding before rendering so geometry uses the exact level-0 region.
+        crop = (0, 0, width / level_scale, height / level_scale)
+        with region.resize(output, Image.Resampling.LANCZOS, box=crop) as scaled, Image.new("RGB", output, "white") as image:
+            with scaled.getchannel("A") as alpha:
+                image.paste(scaled, mask=alpha)
+            apply_color_profile(image, region.info.get("icc_profile"))
+            draw = ImageDraw.Draw(image)
+            sx, sy = output[0] / width, output[1] / height
+            projected = [(min(output[0] - 1, (x - left) * sx), min(output[1] - 1, (y - top) * sy)) for x, y in points]
+            if include_annotation:
+                if kind in ("rectangle", "ellipse"):
+                    box = (min(x for x, _ in projected), min(y for _, y in projected),
+                           max(x for x, _ in projected), max(y for _, y in projected))
+                    shape = draw.rectangle if kind == "rectangle" else draw.ellipse
+                    shape(box, outline="#e66335", width=2)
+                else:
+                    draw.line(projected + ([projected[0]] if kind == "polygon" else []),
+                              fill="#e66335", width=2, joint="curve")
+            if include_scale:
+                mpp = positive_number(slide.properties.get("openslide.mpp-x"))
+                if not mpp:
+                    raise HTTPException(422, "The scan has no calibrated horizontal pixel size for a scale bar.")
+                if output[0] < 90 or output[1] < 28:
+                    raise HTTPException(422, "Select a larger ROI to include the scale bar.")
+                approximate = min(130, output[0] - 22) * mpp / sx
+                decade = 10 ** math.floor(math.log10(approximate))
+                microns = max(step * decade for step in (1, 2, 5) if step * decade <= approximate)
+                bar = round(microns * sx / mpp)
+                caption = f"{microns / 1000:g} mm" if microns >= 1000 else f"{microns:g} µm"
+                y = output[1] - 8
+                draw.rectangle((4, y - 17, min(output[0] - 1, max(80, 16 + bar)), y + 4), fill="white")
+                draw.line((9, y, 9 + bar, y), fill="black", width=2)
+                draw.text((9, y - 15), caption, fill="black")
+            buffer = io.BytesIO()
+            image.save(buffer, format="PNG")
             return buffer.getvalue()
 
 
@@ -117,6 +175,8 @@ def read_scan(path, operation, cancelled, coords=None):
         return embedded_label(path)
     with openslide.OpenSlide(path) as slide:
         width, height = slide.dimensions
+        if operation == "capture":
+            return capture_roi(slide, coords, cancelled)
         if operation == "metadata":
             return {"dimensions": [width, height], "format": path.suffix[1:].upper(),
                     "mpp_x": positive_number(slide.properties.get("openslide.mpp-x")),
@@ -174,7 +234,7 @@ async def scan_response(request, path, operation, coords=None):
             job.add_done_callback(lambda task: None if task.cancelled() else task.exception())
     if operation == "metadata":
         return data
-    return Response(data, media_type="image/jpeg", headers=PRIVATE)
+    return Response(data, media_type="image/png" if operation == "capture" else "image/jpeg", headers=PRIVATE)
 
 
 Source = Literal["clinical", "files"]

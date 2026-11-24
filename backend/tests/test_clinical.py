@@ -1245,6 +1245,98 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.get(root + "/messages")).status_code, 403)
         self.assertEqual((await self.client.put(config, json={"version": 2, "mode": "disabled"})).status_code, 403)
 
+    async def test_extended_viewer_geometry_capture_counts_and_report(self):
+        from io import BytesIO
+        from PIL import Image
+
+        async def check(request, status=200):
+            response = await request
+            self.assertEqual(response.status_code, status, response.text if response.headers.get("content-type") != "image/png" else "")
+            return response
+
+        from app.clinical import scan_metadata
+
+        app_root = Path(__file__).resolve().parents[2] / "data"
+        files = {"extended-viewer-qa.ndpi": "CODIPAI-STBX-SS-04364-I-PD-22.ndpi",
+                 "extended-viewer-qa.svs": "CODIPAI-STBX-SS-04364-I-PD-22.svs"}
+
+        def metadata_for(key):
+            return {**scan_metadata(files[key], app_root), "storage_key": key}
+
+        async def path_for(key, expected):
+            metadata = metadata_for(key)
+            self.assertEqual(expected, (metadata["size_bytes"], metadata["modified_ns"]))
+            return app_root / files[key], metadata
+
+        case = await self.create("cases", {"case_number": "EXTENDED-VIEWER-QA"})
+        specimen = await self.create("specimens", {"case_id": case["id"], "specimen_number": "A1"})
+        slide = await self.create("slides", {"specimen_id": specimen["id"], "slide_number": "S1"})
+        with patch("app.clinical.scan_metadata", side_effect=metadata_for), patch("app.wsi.verified_scan_path", side_effect=path_for):
+            scans = [await self.create("scans", {"slide_id": slide["id"], "storage_key": name}) for name in files]
+            wsi, alternate = ["/api/wsi/clinical/" + scan["id"] for scan in scans]
+            records = wsi + "/viewer-records"
+            annotations = records + "/annotations"
+            metadata = (await check(self.client.get(wsi))).json()
+            mx, my = metadata["mpp_x"], metadata["mpp_y"]
+            path = {"id": str(uuid4()), "kind": "distance", "points": [[45, 55], [145, 55], [145, 255]]}
+            measurement = (await check(self.client.post(annotations, json=path), 201)).json()
+            self.assertAlmostEqual(measurement["length"], 100 * mx + 200 * my)
+            self.assertEqual(measurement["unit"], "um")
+            self.assertEqual((await check(self.client.post(annotations, json=path), 201)).json()["id"], measurement["id"])
+            await check(self.client.post(annotations, json={**path, "id": str(uuid4()), "points": [[0, 0], [0, 0]]}), 422)
+            roi = (await check(self.client.post(annotations, json={"id": str(uuid4()), "kind": "ellipse",
+                "points": [[510, 610], [710, 710]], "label": "Synthetic ROI"}), 201)).json()
+            capture = f"{annotations}/{roi['id']}/capture.png"
+            plain = await check(self.client.get(capture, params={"annotations": "false", "scale_bar": "false"}))
+            overlay = await check(self.client.get(capture))
+            self.assertEqual(plain.headers["cache-control"], "private, no-store")
+            with Image.open(BytesIO(plain.content)) as original, Image.open(BytesIO(overlay.content)) as decorated:
+                self.assertEqual(original.size, (200, 100))
+                self.assertEqual(decorated.size, original.size)
+                self.assertNotEqual(original.tobytes(), decorated.tobytes())
+            await check(self.client.get(f"{annotations}/{measurement['id']}/capture.png"), 422)
+            bookmark = (await check(self.client.post(annotations, json={"id": str(uuid4()), "kind": "bookmark",
+                "points": [[450, 450]], "zoom": .2, "label": "Private fixture"}), 201)).json()
+            self.assertEqual(bookmark["zoom"], .2)
+            self.assertIn(bookmark["id"], [row["id"] for row in (await check(self.client.get(records))).json()["annotations"]])
+
+            count_path = wsi + "/lymph-node-counts"
+            alternative_path = alternate + "/lymph-node-counts"
+            await check(self.client.put(count_path, json={"version": 0, "positive": 9, "total": 8}), 422)
+            first_input = {"version": 0, "positive": 2, "total": 8}
+            first = (await check(self.client.put(count_path, json=first_input))).json()
+            self.assertEqual((await check(self.client.put(count_path, json=first_input))).json()["id"], first["id"])
+            self.assertEqual((await check(self.client.get(alternative_path))).json()["history"][0]["id"], first["id"])
+            report_url = f"{self.url}/cases/{case['id']}/report"
+            report = (await check(self.client.put(report_url, json={"version": 0, "sections": {"diagnosis": "Synthetic count evidence."},
+                                                                  "evidence_ids": [first["id"]]}))).json()
+            correction = {"version": 1, "positive": 3, "total": 9}
+            await check(self.client.put(alternative_path, json=correction), 422)
+            latest = (await check(self.client.put(alternative_path, json={**correction, "reason": "Synthetic correction"}))).json()
+            self.assertEqual((latest["version"], latest["scan_id"]), (2, scans[1]["id"]))
+            await check(self.client.put(count_path, json=first_input), 409)
+            choices = (await check(self.client.get(report_url))).json()["evidence"]
+            self.assertTrue(next(row for row in choices if row["id"] == first["id"])["superseded"])
+            history = (await check(self.client.get(report_url + "/versions/" + str(report["version"])))).json()
+            self.assertEqual(history["evidence"][0]["positive"], 2)
+            await check(self.client.put(report_url, json={"version": report["version"], "sections": {"diagnosis": "Synthetic"},
+                                                        "evidence_ids": [first["id"], latest["id"]]}), 422)
+            logs_url = f"{self.url}/cases/{case['id']}/logs"
+            for action in ("roi_capture_exported", "lymph_node_count_corrected"):
+                result = (await check(self.client.get(logs_url, params={"action": action, "result": "success"}))).json()
+                self.assertTrue(result["rows"])
+            private = (await check(self.client.get(logs_url, params={"target_id": bookmark["id"]}))).json()
+            self.assertEqual(private["rows"], [])
+            auditor = await create_account(self.org, "viewer-geometry-admin", "admin")
+            await login(self.client, self.org, auditor.username)
+            self.assertNotIn(bookmark["id"], [row["id"] for row in (await check(self.client.get(records))).json()["annotations"]])
+            labeler = await create_account(self.org, "viewer-geometry-labeler", "labeler")
+            await login(self.client, self.org, labeler.username)
+            await check(self.client.get(capture), 403)
+            await check(self.client.get(count_path), 403)
+            await self.client.post("/api/auth/logout")
+            await check(self.client.get(capture), 401)
+
     async def test_viewer_persistence_distance_and_permission(self):
         case = await self.create("cases", {"case_number": "VIEWER-TEST"})
         specimen = await self.create("specimens", {"case_id": case["id"], "specimen_number": "A"})

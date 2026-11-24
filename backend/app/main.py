@@ -33,6 +33,7 @@ from app.notification_delivery import poll_deliveries
 from app.notifications import router as notifications_router
 from app.report_delivery import poll_reports
 from app.models import ApplicationSetting, IntegrationConnection
+from app.lymph_counts import router as lymph_counts_router
 from app.viewer_records import router as viewer_records_router
 from app.worklist import router as worklist_router
 from app.worklist_views import router as worklist_views_router
@@ -99,6 +100,7 @@ app.include_router(workgroups_router)
 app.include_router(worklist_router)
 app.include_router(wsi_router)
 app.include_router(viewer_records_router)
+app.include_router(lymph_counts_router)
 app.include_router(viewer_preferences_router)
 app.include_router(pdl1_router)
 app.include_router(patient_history_router)

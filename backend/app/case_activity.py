@@ -61,6 +61,8 @@ CASE_OPERATIONS = {
 }
 SCAN_OPERATIONS = {
     "metadata": ("scan_viewed", "scan"),
+    "export_roi": ("roi_capture_exported", "annotation"),
+    "save_lymph_count": ("lymph_node_count_saved", "lymph_node_count"),
     "create_annotation": ("annotation_registered", "annotation"),
     "edit_annotation": ("annotation_updated", "annotation"),
     "delete_annotation": ("annotation_deleted", "annotation"),

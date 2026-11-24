@@ -6,7 +6,8 @@ import { ReportDictation } from './report-dictation';
 type Section = { key: string; label: string; required: boolean };
 type Template = { id: string | null; template_key: string | null; name: string; version: number; sections: Section[] };
 type Evidence = {
-  id: string; kind: 'ai' | 'consult'; version: number; completed_at: string; scan_id: string | null; result_note: string | null;
+  id: string; kind: 'ai' | 'consult' | 'lymph_node_count'; version: number; completed_at: string; scan_id: string | null; result_note: string | null;
+  specimen?: string; positive?: number; total?: number; superseded?: boolean; reason?: string | null;
   snapshot: { id: string; model?: string; model_version?: string; analysis_version?: string; score_type?: string; kind?: string } | null;
 };
 type History = { version: number; status: 'draft' | 'in_review' | 'approved'; author?: string; action: string; created_at: string; reason?: string; replaces_version?: number };
@@ -36,6 +37,15 @@ function draftOf(report: Report): Draft {
   return current ? { template: current.template, sections: current.sections, evidence_ids: current.evidence.map((item) => item.id),
     dictated_sections: current.dictated_sections }
     : { template: report.templates[0], sections: {}, evidence_ids: [], dictated_sections: [] };
+}
+
+function evidenceLabel(item: Evidence) {
+  if (item.kind === 'lymph_node_count') return `Lymph Node Count · Specimen ${item.specimen} · Positive / Total ${item.positive} / ${item.total}`;
+  return item.kind === 'ai' ? 'Archived AI Result' : 'Completed Consultation';
+}
+
+function evidenceRoute(item: Evidence, caseId: string) {
+  return item.kind === 'lymph_node_count' ? `#viewer/${caseId}/${item.scan_id}` : '#request/' + item.id;
 }
 
 export function CaseReport({ endpoint, caseId, caseVersion, caseChanged }: {
@@ -176,8 +186,8 @@ export function CaseReport({ endpoint, caseId, caseVersion, caseChanged }: {
               const selected = event.target.checked;
               setDraft({ ...draft, evidence_ids: selected ? [...draft.evidence_ids, item.id] : draft.evidence_ids.filter((id) => id !== item.id) });
             }} disabled={busy} />
-            {item.kind === 'ai' ? 'Archived AI Result' : 'Completed Consultation'} · Version {item.version} · {date.format(new Date(item.completed_at))}
-            <a href={'#request/' + item.id}>Open Evidence</a>
+            {evidenceLabel(item)} · Version {item.version}{item.superseded ? ' (Superseded)' : ''} · {date.format(new Date(item.completed_at))}
+            <a href={evidenceRoute(item, caseId)}>Open Evidence</a>
           </label>) : <p className="muted">No completed case results are available.</p>}
         </fieldset>
         <button className="button primary" type="submit" disabled={busy || (!!latest && !dirty)}>Save Draft</button>
@@ -259,7 +269,8 @@ function ReportSnapshot({ row, caseId }: { row: Revision; caseId: string }) {
       {row.dictated_sections.includes(section.key) && <small className="muted">Dictation draft used</small>}
     </div>)}
     {!!row.evidence.length && <><h3>Versioned Result Evidence</h3><ul className="timeline">{row.evidence.map((entry) => <li key={entry.id}>
-      <a href={'#request/' + entry.id}>{entry.kind === 'ai' ? 'Archived AI Result' : 'Completed Consultation'}</a> · Version {entry.version}
+      <a href={evidenceRoute(entry, caseId)}>{evidenceLabel(entry)}</a> · Version {entry.version}
+      {entry.kind === 'lymph_node_count' && entry.reason && <p>{entry.reason}</p>}
       {entry.snapshot && <p>{entry.snapshot.score_type ?? 'AI'} · {entry.snapshot.model ?? 'Model unavailable'} · {entry.snapshot.model_version ?? 'Version unavailable'}
         {entry.snapshot.analysis_version && ` · Analysis ${entry.snapshot.analysis_version}`}</p>}
       {entry.snapshot && entry.scan_id && <a className="button secondary"

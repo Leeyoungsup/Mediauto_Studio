@@ -21,7 +21,7 @@ ENTITY_NAMES = {
     "frozen_publications": "frozen_result", "frozen_recipients": "or_recipient",
     "frozen_receipts": "or_confirmation", "frozen_callbacks": "frozen_callback",
     "cases": "case", "case_reports": "report", "report_transmissions": "report_delivery", "specimens": "specimen", "specimen_blocks": "block", "slides": "slide",
-    "slide_scans": "scan", "viewer_annotations": "annotation", "case_attachments": "attachment",
+    "lymph_node_counts": "lymph_node_count", "slide_scans": "scan", "viewer_annotations": "annotation", "case_attachments": "attachment",
     "case_requests": "request", "case_notes": "note", "patient_history_records": "clinical_record",
 }
 
@@ -62,7 +62,7 @@ async def audit_rows(session, organization, case_id):
         in_scope("slides", slides),
         in_scope("slide_scans", select(SlideScan.id).where(*scans)),
         in_scope("viewer_annotations", select(ViewerAnnotation.id).where(
-            ViewerAnnotation.organization == organization, ViewerAnnotation.scan_key.in_(fingerprints))),
+            ViewerAnnotation.organization == organization, ViewerAnnotation.scan_key.in_(fingerprints), ViewerAnnotation.kind != "bookmark")),
         *(in_scope(model.__tablename__, select(model.id).where(model.organization == organization, model.case_id == case_id))
           for model in (CaseAttachment, CaseNote, CaseRequest, PatientHistoryRecord)),
     )

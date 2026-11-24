@@ -4,10 +4,11 @@ import { AlertTriangle, LocateFixed, Map, Minus, Pause, Play, Plus, ScanLine } f
 import type { WsiScan } from './demo';
 import { api, auditAttemptId, jsonBody, request } from './session';
 import { Pdl1Badge, Pdl1Overlay, Pdl1Panel, usePdl1 } from './pdl1';
+import { LymphCounts } from './lymph-counts';
 import { TileViewer } from './tile-viewer';
 import type { CameraFrame, SlideInfo, Viewport } from './tile-viewer';
-import { AnnotationOverlay, ViewerRecordsPanel, ViewerToolsBar, screenToSlide, useViewerRecords } from './viewer-tools';
-import type { Camera, Point, Tool } from './viewer-tools';
+import { AnnotationOverlay, ViewerRecordsPanel, ViewerToolsBar, hasVertices, screenToSlide, useViewerRecords } from './viewer-tools';
+import type { Camera, Geometry, Point } from './viewer-tools';
 import type { ViewerSettings } from './viewer-preferences';
 import { ScanReference, slideEndpoint } from './worklist';
 
@@ -48,7 +49,9 @@ function Navigator({ src, info, view, dynamic, onMove }: { src: string; info: Sl
 
 export type PaneComparison = {
   camera?: Camera;
-  onFrame: (frame: CameraFrame) => void;
+  captureLandmark?: (point: Point) => void;
+  landmarks?: Point[];
+  onFrame: (frame: CameraFrame, info?: SlideInfo) => void;
   onNavigate: (frame: CameraFrame) => void;
 };
 
@@ -67,8 +70,8 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   const canvas = useRef<HTMLCanvasElement>(null);
   const renderer = useRef<TileViewer | null>(null);
   const drag = useRef<{ id: number; x: number; y: number } | null>(null);
-  const drawing = useRef<{ id: number; kind: Exclude<Tool, 'pan'>; start: Point } | null>(null);
-  const [preview, setPreview] = useState<{ kind: Exclude<Tool, 'pan'>; points: [Point, Point] }>();
+  const drawing = useRef<{ id: number; kind: Geometry['kind']; points: Point[] } | null>(null);
+  const [preview, setPreview] = useState<Geometry>();
   const [view, setView] = useState<Viewport>();
   const [info, setInfo] = useState<SlideInfo>();
   const [overview, setOverview] = useState('');
@@ -155,7 +158,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         renderer.current = new TileViewer(element, metadata, endpoint, (viewport) => {
           setView(viewport);
           const viewer = renderer.current;
-          if (viewer) report.current?.onFrame(viewer.cameraFrame());
+          if (viewer) report.current?.onFrame(viewer.cameraFrame(), metadata);
         }, (status) => {
           setTileStatus(status);
           if (status !== 'loading') recordView(status === 'unavailable' ? 'failed' : 'success');
@@ -297,18 +300,28 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         </button>}
       </div>
     </div>
-    {info && !compareMode && !readOnlyEndpoint && <ViewerToolsBar state={viewerRecords} view={view} />}
+    {info && !compareMode && !readOnlyEndpoint && <ViewerToolsBar state={viewerRecords} view={view} info={info} />}
     <div className="image-surface">
       <canvas className={viewerRecords.tool === 'pan' ? 'wsi-canvas' : 'wsi-canvas drawing-tool'} ref={canvas} tabIndex={0} aria-label="WSI Canvas"
         onPointerDown={(event) => {
           if (event.button !== 0 || !info || drag.current || drawing.current) return;
           setAutopan(false);
           setAutopanNotice('');
-          if (viewerRecords.tool !== 'pan') {
+          if (report.current?.captureLandmark) {
+            const point = getPoint(event, false);
+            if (point) report.current.captureLandmark(point);
+            return;
+          }
+          const tool = viewerRecords.tool;
+          if (tool !== 'pan') {
             const start = getPoint(event, false);
-            if (start) {
+            if (!start) return;
+            if (hasVertices(tool)) viewerRecords.addVertex(start);
+            else if (tool === 'preset') viewerRecords.placePreset(start, info);
+            else if (tool === 'point') viewerRecords.complete('point', [start]);
+            else {
               event.currentTarget.setPointerCapture(event.pointerId);
-              drawing.current = { id: event.pointerId, kind: viewerRecords.tool, start };
+              drawing.current = { id: event.pointerId, kind: tool, points: [start] };
             }
             return;
           }
@@ -319,7 +332,12 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
           const gesture = drawing.current;
           if (gesture?.id === event.pointerId) {
             const point = getPoint(event, true);
-            if (point) setPreview({ kind: gesture.kind, points: [gesture.start, point] });
+            if (point) {
+              const last = gesture.points.at(-1)!;
+              if (gesture.kind === 'brush' && gesture.points.length < 255 &&
+                  Math.hypot(last[0] - point[0], last[1] - point[1]) * (view?.zoom ?? 1) >= 3) gesture.points.push(point);
+              setPreview({ kind: gesture.kind, points: [...gesture.points, point] });
+            }
             return;
           }
           const last = drag.current;
@@ -333,7 +351,11 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
           const end = getPoint(event, true);
           drawing.current = null;
           setPreview(undefined);
-          if (end) viewerRecords.complete(gesture.kind, gesture.start, end);
+          if (end) {
+            const last = gesture.points.at(-1)!;
+            const points = last[0] === end[0] && last[1] === end[1] ? gesture.points : [...gesture.points, end];
+            if (points.length >= 2) viewerRecords.complete(gesture.kind, points);
+          }
         }}
         onLostPointerCapture={(event) => {
           if (drag.current?.id === event.pointerId) drag.current = null;
@@ -345,6 +367,14 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         onKeyDown={(event) => {
           if (settings?.shortcuts === false || event.altKey || event.ctrlKey || event.metaKey || event.nativeEvent.isComposing) return;
           const key = event.key.toLowerCase();
+          if (key === 'escape' && viewerRecords.tool !== 'pan') {
+            viewerRecords.chooseTool('pan');
+            return;
+          }
+          if (key === 'enter' && hasVertices(viewerRecords.tool)) {
+            viewerRecords.finishVertices();
+            return;
+          }
           if (options && ['f', 'm', 'g', ' '].includes(key)) {
             event.preventDefault();
             if (event.repeat) return;
@@ -364,7 +394,15 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         }}
       />
       <Pdl1Overlay view={view} result={pdl1.result} cells={pdl1.cells} />
-      <AnnotationOverlay view={view} annotations={viewerRecords.records?.annotations ?? []} draft={viewerRecords.draft} drawing={preview} />
+      <AnnotationOverlay view={view} annotations={viewerRecords.records?.annotations ?? []} draft={viewerRecords.draft} drawing={preview ?? (viewerRecords.vertices.length ? {
+        kind: viewerRecords.tool === 'polygon' ? 'polygon' : viewerRecords.tool === 'count' ? 'count' : 'distance',
+        points: viewerRecords.vertices,
+      } : undefined)} />
+      {view && !!comparison?.landmarks?.length && <svg className="annotation-overlay" aria-label="Tissue Landmarks"
+        viewBox={`0 0 ${view.width * view.zoom} ${view.height * view.zoom}`}>
+        {comparison.landmarks.map(([x, y], index) => <text className="annotation-length" key={index}
+          x={(x - view.x) * view.zoom} y={(y - view.y) * view.zoom}>{index + 1}</text>)}
+      </svg>}
       {info && !readOnlyEndpoint && <Pdl1Badge state={pdl1} />}
       {tileStatus === 'loading' && !failure && <div className="wsi-overlay image-empty" role="status">Opening slide…</div>}
       {(failure || tileStatus === 'unavailable') && <div className="wsi-overlay image-empty" role="alert"><AlertTriangle size={25} />
@@ -391,12 +429,17 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       {overviewFailed && minimap && !settings?.show_overview && <span className="tile-warning" role="status">Minimap unavailable. <button className="button secondary" onClick={() => setOverviewAttempt((value) => value + 1)}>Retry Overview</button></span>}
       {tileStatus === 'partial' && <span className="tile-warning" role="status">Some tiles could not be loaded. <button className="button secondary" onClick={() => renderer.current?.retryTiles()}>Retry</button></span>}
     </footer>
-    {info && !compareMode && !readOnlyEndpoint && <ViewerRecordsPanel state={viewerRecords} info={info} move={([[x1, y1], [x2, y2]]) => {
+    {info && !compareMode && !readOnlyEndpoint && <ViewerRecordsPanel state={viewerRecords} info={info} move={(points, savedZoom) => {
       if (!view) return;
-      const zoom = Math.min(view.width * view.zoom * 0.65 / Math.max(1, Math.abs(x2 - x1)),
-        view.height * view.zoom * 0.65 / Math.max(1, Math.abs(y2 - y1)));
+      const xs = points.map(([x]) => x);
+      const ys = points.map(([, y]) => y);
+      const x1 = Math.min(...xs), x2 = Math.max(...xs), y1 = Math.min(...ys), y2 = Math.max(...ys);
+      const zoom = savedZoom ?? (points.length === 1 ? view.zoom : Math.min(
+        view.width * view.zoom * 0.65 / Math.max(1, x2 - x1), view.height * view.zoom * 0.65 / Math.max(1, y2 - y1)));
       navigate((viewer) => viewer.restoreCamera({ x: (x1 + x2) / 2, y: (y1 + y2) / 2, zoom }));
     }} />}
+    {info && !compareMode && !readOnlyEndpoint && scan.source === 'clinical' && viewerRecords.records?.can_annotate &&
+      <LymphCounts endpoint={endpoint} />}
     {info && !compareMode && !readOnlyEndpoint && <Pdl1Panel state={pdl1} />}
   </section>;
 }

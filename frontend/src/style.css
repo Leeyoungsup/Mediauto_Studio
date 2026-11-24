@@ -587,3 +587,11 @@ dialog::backdrop { background: #21193575; }
 @media (max-width: 680px) {
   .frozen-responses, .or-results-layout { grid-template-columns: minmax(0, 1fr); }
 }
+
+.viewer-record-buttons label { display: inline-flex; gap: 6px; align-items: center; }
+.roi-export-options { display: flex; flex-wrap: wrap; gap: 10px; border: 0; padding: 5px 0; }
+.roi-export-options legend { font-weight: 600; }
+.lymph-counts summary, .tissue-registration summary { cursor: pointer; font-weight: 650; }
+.lymph-counts .form-field { max-width: 160px; }
+.tissue-registration { padding: 8px 0; }
+.tissue-registration li { margin-top: 5px; }

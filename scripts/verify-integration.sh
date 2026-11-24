@@ -149,4 +149,5 @@ PYMEDIA
     node scripts/notifications-browser.mjs
     node scripts/case-report-browser.mjs
     node scripts/frozen-workflow-browser.mjs
+    node scripts/viewer-workflow-browser.mjs
 fi
