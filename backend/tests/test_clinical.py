@@ -8,10 +8,33 @@ from uuid import uuid4
 
 import httpx
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import DBAPIError
 
+from app.auth import hash_password
+from app.models import AuthUser
 from app.database import database_url
 from app.main import app
+
+
+PASSWORD = "synthetic-test-password"
+
+
+async def create_account(organization, username, role):
+    async with AsyncSession(app.state.engine, expire_on_commit=False) as session, session.begin():
+        user = AuthUser(organization=organization, username=username, display_name=username, role=role,
+                        password_hash=await asyncio.to_thread(hash_password, PASSWORD, app.state.auth_key))
+        session.add(user)
+        await session.flush()
+        return user
+
+
+async def login(client, organization, username):
+    response = await client.post("/api/auth/login", json={
+        "organization": organization, "username": username, "password": PASSWORD,
+    })
+    assert response.status_code == 200, response.text
+    return response
 
 
 @skipUnless(os.environ.get("MEDIAUTO_CLINICAL_TEST") == "1", "isolated PostgreSQL required")
@@ -35,6 +58,8 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         self.addAsyncCleanup(self.client.aclose)
         self.org = "test-" + uuid4().hex
         self.url = "/api/clinical/" + self.org
+        self.user = await create_account(self.org, "writer", "admin")
+        await login(self.client, self.org, self.user.username)
 
     async def create(self, category, data, key=None, organization_url=None, expected=201):
         response = await self.client.post(
@@ -82,7 +107,7 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         self.assertEqual([event["version"] for event in history], [2, 1])
         self.assertEqual(history[0]["before"], {"status": "unlinked", "specimen_id": None})
         self.assertEqual(history[0]["after"]["specimen_id"], specimen["id"])
-        self.assertEqual(history[0]["actor"], "local-development")
+        self.assertEqual(history[0]["actor"], str(self.user.id))
         self.assertIn("transaction_id", history[0])
 
     async def test_external_identifiers_are_scoped_and_conflicts_keep_existing_links(self):
@@ -101,6 +126,9 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         other_history = (await self.client.get(f"{self.url}/patients/{other['id']}/history")).json()
         self.assertEqual(len(other_history), 1)
         sibling_org = self.url + "-other"
+        self.assertEqual((await self.client.get(f"{sibling_org}/patients/{patient['id']}")).status_code, 403)
+        sibling = await create_account(self.org + "-other", "writer", "admin")
+        await login(self.client, sibling.organization, sibling.username)
         self.assertEqual((await self.client.get(f"{sibling_org}/patients/{patient['id']}")).status_code, 404)
         await self.create("cases", {"case_number": "CROSS-ORG", "patient_id": patient["id"]}, organization_url=sibling_org, expected=404)
         sibling_patient = await self.create("patients", {"local_reference": "SYNTH-LOCAL"}, organization_url=sibling_org)
@@ -143,4 +171,40 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
             base_url="http://localhost",
         ) as remote:
             response = await remote.get(self.url + "/patients", headers={"X-Forwarded-For":"127.0.0.1"})
-            self.assertEqual(response.status_code, 403)
+            self.assertEqual(response.status_code, 401)
+
+    async def test_authentication_and_worklist_scope(self):
+        doctor = await create_account(self.org, "doctor", "doctor")
+        viewer = await create_account(self.org, "viewer", "viewer")
+        mine = await self.create("cases", {"case_number": "Demo-ALPHA-01"})
+        other = await self.create("cases", {"case_number": "Demo-ALPHA-02"})
+        unassigned = await self.create("cases", {"case_number": "Demo-BETA"})
+        async with app.state.engine.begin() as connection:
+            for record, assignee, status in ((mine, doctor, "in_review"), (other, viewer, "assigned")):
+                await connection.execute(text(
+                    "UPDATE cases SET assigned_to = :user, status = :status WHERE id = CAST(:id AS uuid)"
+                ), {"id": record["id"], "user": assignee.id, "status": status})
+        self.assertEqual((await self.client.get("/api/worklist?scope=unassigned")).json()["rows"][0]["record_id"], unassigned["id"])
+        self.assertEqual((await self.client.get("/api/worklist?q=alpha")).json()["total"], 2)
+        self.assertEqual((await self.client.get("/api/worklist?q=alpha&status=in_review")).json()["total"], 1)
+        wrong_origin = await self.client.post("/api/auth/logout", headers={"Origin": "http://unrelated.example"})
+        self.assertEqual(wrong_origin.status_code, 403)
+        auth = await login(self.client, self.org, doctor.username)
+        self.assertIn("HttpOnly", auth.headers["set-cookie"])
+        self.assertIn("SameSite=strict", auth.headers["set-cookie"])
+        mine_only = (await self.client.get("/api/worklist?scope=mine&q=alPHA&status=in_review")).json()
+        self.assertEqual(mine_only["total"], 1)
+        self.assertEqual(mine_only["counts"]["all"], 1)
+        self.assertEqual(mine_only["rows"][0]["record_id"], mine["id"])
+        self.assertIsNone(mine_only["rows"][0]["patient"])
+        self.assertEqual((await self.client.get(f"/api/worklist/{other['id']}")).status_code, 404)
+        self.assertEqual((await self.client.get(f"{self.url}/cases/{other['id']}")).status_code, 404)
+        self.assertEqual((await self.client.get("/api/intake/slides")).status_code, 403)
+        await self.create("cases", {"case_number": "DENIED"}, expected=403)
+        await login(self.client, self.org, viewer.username)
+        self.assertEqual((await self.client.get(f"/api/worklist/{other['id']}")).status_code, 200)
+        await self.create("cases", {"case_number": "DENIED"}, expected=403)
+        cookie = self.client.cookies.get("mediauto_session")
+        self.assertEqual((await self.client.post("/api/auth/logout")).status_code, 200)
+        self.assertEqual((await self.client.get("/api/worklist")).status_code, 401)
+        self.assertEqual((await self.client.get("/api/worklist", headers={"Authorization": f"Bearer {cookie}"})).status_code, 401)

@@ -65,6 +65,6 @@ fi
 
 cd -- "$root/backend"
 "$python" -m alembic upgrade head
-"$python" -m uvicorn app.main:app --host "${MEDIAUTO_HOST:-0.0.0.0}" --port 9920 &
+"$python" -m uvicorn app.main:app --no-access-log --host "${MEDIAUTO_HOST:-0.0.0.0}" --port 9920 &
 server_pid=$!
 wait "$server_pid"

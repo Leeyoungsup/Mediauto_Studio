@@ -11,7 +11,7 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   if (response.status === 401 && path !== '/api/auth/login') window.dispatchEvent(new Event(expired));
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
-    throw new Error(typeof data.detail === 'string' ? data.detail : '요청을 처리하지 못했습니다.');
+    throw new Error(typeof data.detail === 'string' ? data.detail : response.status === 422 ? '필수값과 입력 형식을 확인하세요.' : '요청을 처리하지 못했습니다.');
   }
   return response.json();
 }

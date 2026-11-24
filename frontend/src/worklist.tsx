@@ -49,14 +49,14 @@ function columnValue(item: DemoCase, id: ColumnId) {
     case 'specimen': return item.specimen;
     case 'assignee': return item.assignee || <span className="muted">미배정</span>;
     case 'status': return <StatusLabel status={item.status} />;
-    case 'slides': return <span className="slide-count"><Layers3 size={14} />{item.source ? `${item.slides.length}개 파일` : `${readyCount(item)}/${item.slides.length}`}</span>;
-    case 'received': return item.source ? blank : item.received;
-    case 'created': return item.source ? item.received : blank;
+    case 'slides': return <span className="slide-count"><Layers3 size={14} />{item.source === 'files' ? `${item.slides.length}개 파일` : `${readyCount(item)}/${item.slides.length}`}</span>;
+    case 'received': return item.source === 'files' ? blank : item.received;
+    case 'created': return item.received;
     case 'patient': return item.patient?.name || blank;
     case 'mrn': return item.patient?.number || blank;
     case 'birth': return item.patient?.birth || blank;
     case 'slideState': return item.slides.length ? [...new Set(item.slides.map(({ state }) => state))].join(' · ') : '미연결';
-    case 'storage': return item.source ? '로컬 파일' : blank;
+    case 'storage': return item.source === 'files' ? '로컬 파일' : blank;
     default: return blank;
   }
 }
@@ -144,7 +144,7 @@ export function Worklist({ cases, loading, total, counts, assignees, onQuery, sc
             <td><button className="icon-button" aria-label={`${item.id} 상세 열기`} onClick={(event) => { event.stopPropagation(); onOpen(item.id); }}><ArrowRight size={16} /></button></td>
           </tr>)}</tbody></table></div>
         {!cases.length && <div className="empty"><FolderOpen size={28} />
-          <strong>{loading ? '케이스를 불러오는 중입니다.' : counts.all ? '조건에 맞는 케이스가 없습니다.' : '조회할 케이스가 없습니다.'}</strong>
+          <strong>{loading ? '케이스를 불러오는 중입니다.' : (search || status || assignee) ? '조건에 맞는 케이스가 없습니다.' : scope === 'mine' ? '내게 배정된 케이스가 없습니다.' : scope === 'unassigned' ? '미배정 케이스가 없습니다.' : '조회할 케이스가 없습니다.'}</strong>
           {!loading && (search || status || assignee) && <button className="button secondary" onClick={clearFilters}>필터 초기화</button>}
         </div>}
         <footer className="table-footer"><span>{total}건 중 {cases.length ? offset + 1 : 0}–{offset + cases.length}건 표시</span>
@@ -155,8 +155,8 @@ export function Worklist({ cases, loading, total, counts, assignees, onQuery, sc
         <div className="panel-title"><h2>케이스 미리보기</h2><ScanLine size={18} className="muted" /></div>
         {selected ? <div className="preview-content">
           <div className="preview-heading"><strong>{selected.id}</strong><StatusLabel status={selected.status} /></div>
-          <dl className="key-values"><div><dt>검체</dt><dd>{selected.specimen}</dd></div><div><dt>담당자</dt><dd>{selected.assignee || '미배정'}</dd></div><div><dt>환자 정보</dt><dd>{selected.patient?.number || '미입력'}</dd></div></dl>
-          <div className="preview-label"><h3>슬라이드</h3><span>{selected.source ? `${selected.slides.length}개 파일 등록` : `${readyCount(selected)}/${selected.slides.length} 열람 가능`}</span></div>
+          <dl className="key-values"><div><dt>검체</dt><dd>{selected.specimen}</dd></div><div><dt>담당자</dt><dd>{selected.assignee || '미배정'}</dd></div><div><dt>환자 정보</dt><dd>{selected.patient?.number || (selected.patient ? '등록됨' : '미입력')}</dd></div></dl>
+          <div className="preview-label"><h3>슬라이드</h3><span>{selected.source === 'files' ? `${selected.slides.length}개 파일 등록` : `${readyCount(selected)}/${selected.slides.length} 열람 가능`}</span></div>
           {selected.slides.length ? <div className="preview-slides">{selected.slides.map((slide) => <button key={slide.id} className="slide-preview" onClick={() => onViewer(selected.id, slide.id)}>
             <span className="slide-image"><SlidePreview slide={slide} /></span><strong>{slide.label ?? slide.id}</strong><span>{slide.stain}</span>
           </button>)}</div> : <p className="empty-inline">연결된 슬라이드가 없습니다.</p>}

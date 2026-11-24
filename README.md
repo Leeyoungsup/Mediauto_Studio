@@ -17,12 +17,9 @@ npm --prefix frontend run build
 ./start.sh
 ```
 
-브라우저에서 `http://서버IP:9920/`을 열면 React 화면이 표시됩니다. 서버 자체에서는 `http://127.0.0.1:9920/`으로 접속합니다. `/api/health`에서 FastAPI·PostgreSQL과 EMR 설정 상태를 확인할 수 있습니다.
+브라우저에서 `http://서버IP:9920/`을 열면 로그인 화면이 표시됩니다. 서버 자체에서는 `http://127.0.0.1:9920/`으로 접속합니다. `/api/health`에서 FastAPI·PostgreSQL과 EMR 설정 상태를 확인할 수 있습니다.
 
-Worklist에서 직접 만든 시연용 케이스와 입력값은 페이지를 새로고침할 때 초기화됩니다. 뷰어는 아래 공개 조직 사진을 WebP로 변환해 미리보기에 사용합니다.
-
-- CoRus13, [Colon, low mag.jpg](https://commons.wikimedia.org/wiki/File:Colon,_low_mag.jpg), [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)
-- Nephron, [Colorectal adenocarcinoma — low mag.jpg](https://commons.wikimedia.org/wiki/File:Colorectal_adenocarcinoma_--_low_mag.jpg), [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/)
+Worklist에서 등록한 케이스는 개발 PostgreSQL에 저장됩니다.
 
 ### 예제 슬라이드 등록
 
@@ -32,9 +29,35 @@ Worklist에서 직접 만든 시연용 케이스와 입력값은 페이지를 �
 
 Worklist의 `열`에서 PDF 기반 열을 검색하고 표시 여부와 순서를 설정할 수 있습니다. 이 설정은 브라우저별로 유지됩니다.
 
+### 07. 로그인과 Worklist
+
+베이스 `d3741bc`에서 확인한 JWT 및 역할을 현재 IMS의 개발 계정에 적용합니다. 계정과 세션은 개발 PostgreSQL에 저장합니다. 로그인 세션은 15분 뒤 만료되고 로그아웃 시 바로 폐기됩니다. 기존 SaaS 계정 연동과 MFA는 후속 검증이 필요합니다. 9920은 HTTP 개발 주소이므로 신뢰할 수 있는 개발망과 비식별 샘플에서 사용합니다.
+
+| 역할 | 조회 범위 | 허용 작업 |
+| --- | --- | --- |
+| `admin` | 소속 기관 전체 | 임상 레코드 등록·변경. `local` 기관은 파일 등록과 파일명 규칙 설정 |
+| `labeler` | 소속 기관 전체 | 임상 레코드 등록·변경. `local` 기관은 슬라이드 등록 |
+| `doctor`, `viewer` | 본인에게 배정된 케이스 및 그 하위 기록 | 조회 |
+
+`Worklist → 내 배정 건`은 계정 UUID를 사용합니다. 목록에서 Case ID를 대소문자 구분 없이 부분 검색하고 상태와 담당자 필터를 함께 사용할 수 있습니다. 슬라이드 등록으로 만든 기존 케이스는 미배정으로 표시합니다. 새 배정과 검토 상태 변경은 09번 범위입니다.
+
+개발 계정은 서버에서 생성합니다. 아래 명령은 기존 계정과 겹치지 않는 이름으로 실행합니다. 서버 실행 중에 같은 작업공간의 DB 소켓과 인증 키를 사용합니다.
+
+```bash
+conda activate mediauto-studio
+export MEDIAUTO_DB_SOCKET="$(pwd -P)/.runtime/pgsocket"
+export MEDIAUTO_DB_USER="$(id -un)"
+cd backend
+python -m app.manage_users --organization local --username pathologist --display-name '개발 병리의' --role doctor
+```
+
+초기 개발 관리자 비밀번호를 자동 생성한 경우 파일 위치는 `.runtime/admin-initial-password`입니다. `.runtime/auth.key`는 계정 해싱과 서명에 사용하므로 개발 DB 백업과 함께 접근 권한을 제한해 보관합니다.
+
+`0003_auth_worklist`는 계정·세션 테이블과 `cases.assigned_to`를 추가합니다. 이전 코드로 돌아갈 경우 서비스를 내리고 개발 DB를 먼저 백업한 뒤, 같은 DB에서 `python -m alembic downgrade 0002_clinical_records`를 실행합니다. 다운그레이드하면 계정·세션·배정 연결이 제거됩니다. 이후 이전 코드로 서비스를 시작합니다.
+
 ### 06. 정규 케이스 등록·조회 API
 
-서버 내부에서 `http://127.0.0.1:9920/docs`를 열어 API를 확인합니다. 경로의 `{organization}`에는 개발용 기관 코드를 지정합니다. 이 단계의 작성자와 이벤트 행위자는 `local-development`로 기록하며, 계정별 인증과 권한 매핑은 07번에서 연결합니다.
+로그인한 브라우저에서 `http://127.0.0.1:9920/docs`를 열어 API를 확인합니다. 경로의 `{organization}`에는 로그인 계정의 기관 코드를 지정합니다. 새 등록과 변경 이력에는 수행한 계정 UUID가 기록됩니다.
 
 | 데이터 | 연결과 필드 | 등록 시 출처와 제약 |
 | --- | --- | --- |
@@ -45,13 +68,13 @@ Worklist의 `열`에서 PDF 기반 열을 검색하고 표시 여부와 순서�
 | 스캔 | `scan.id`, `slide_id`, `storage_key`, 형식, 파일 크기·수정 시각 | 상대 경로 기준으로 동일 파일의 이중 등록을 막습니다. 하나의 슬라이드에서 NDPI와 SVS를 각각 등록할 수 있습니다. |
 | 외부 식별자 | 기관 코드, 원천 시스템, 식별자 종류, 원문 값, 로컬 레코드 UUID | 식별자 조합의 유일성은 개발 DB 기준입니다. 수기 연결 시각을 기록하며 외부 동기화 시각은 비워둡니다. 병원별 정규화와 식별자 정책은 기관 인터페이스에 맞춰 확정합니다. |
 
-`Patient (선택) ← Case ← Specimen ← Slide ← Scan` 관계입니다. 검체에 연결되기 전의 슬라이드도 별도로 조회할 수 있습니다. 생성 API는 `Idempotency-Key` 헤더를 사용하며 같은 요청을 다시 보내면 같은 UUID를 반환합니다. 연결을 바꿀 때는 최신 `version`과 `reason`을 보냅니다. 중복·충돌·이전 버전 저장은 HTTP `409`를 반환합니다. 현재 상태는 등록 단계의 `registered`와 슬라이드의 `unlinked`만 사용합니다. 상태와 연결 변경 전후 값은 추가 전용 `history`에 기록합니다.
+`Patient (선택) ← Case ← Specimen ← Slide ← Scan` 관계입니다. 검체에 연결되기 전의 슬라이드도 별도로 조회할 수 있습니다. 생성 API는 `Idempotency-Key` 헤더를 사용하며 같은 요청을 다시 보내면 같은 UUID를 반환합니다. 연결을 바꿀 때는 최신 `version`과 `reason`을 보냅니다. 중복·충돌·이전 버전 저장은 HTTP `409`를 반환합니다. 현재 상태는 등록 단계의 `registered`와 슬라이드의 `unlinked`만 사용합니다. 상태와 연결 변경 전후 값은 추가 전용 `history`에 기록합니다. 아래 명령은 로그인 응답 쿠키를 저장한 `MEDIAUTO_COOKIE_JAR`를 사용합니다.
 
 ```bash
-curl -X POST http://127.0.0.1:9920/api/clinical/local/cases \
+curl -b "$MEDIAUTO_COOKIE_JAR" -X POST http://127.0.0.1:9920/api/clinical/local/cases \
   -H 'Content-Type: application/json' -H 'Idempotency-Key: case-example-1' \
   -d '{"case_number":"DEMO-001"}'
-curl 'http://127.0.0.1:9920/api/clinical/local/cases?unlinked=true'
+curl -b "$MEDIAUTO_COOKIE_JAR" 'http://127.0.0.1:9920/api/clinical/local/cases?unlinked=true'
 ```
 
 등록·조회 경로는 `/api/clinical/{organization}/{patients|cases|specimens|slides|scans}`입니다. 하위 목록은 `?parent_id=<UUID>`로 조회하고 `PATCH /cases/{id}/patient`와 `PATCH /slides/{id}/specimen`으로 연결합니다. 기관별 외부 ID는 `POST /{종류}/{id}/external-identifiers`로 연결하고 `POST /{종류}/external-identifiers/lookup`으로 조회합니다. 두 경로 모두 케이스·검체·슬라이드와 환자에 적용됩니다. 조회 본문에는 `system`, `kind`, `value`를 보냅니다. 등록·변경 이력은 `GET /{종류}/{id}/history`에서 조회합니다.

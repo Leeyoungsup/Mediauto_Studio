@@ -8,7 +8,7 @@ from sqlalchemy import select
 from app.auth import CurrentUser, Session, WRITERS
 from app.clinical import case_visibility
 from app.intake import DATA_ROOT, scan_files, slide_entries
-from app.models import AuthUser, Case, Patient, Slide, Specimen
+from app.models import AuthUser, Case, ClinicalEvent, Patient, Slide, Specimen
 
 router = APIRouter(prefix="/api/worklist", tags=["Worklist"])
 
@@ -19,6 +19,8 @@ async def legacy_rows(session, user, case_numbers):
     sources = await asyncio.to_thread(scan_files, DATA_ROOT)
     entries = await slide_entries(session, sources)
     groups = {}
+    specimens = {}
+    patients = {}
     for source in sources:
         entry = entries.get(source.id)
         if not entry:
@@ -32,10 +34,27 @@ async def legacy_rows(session, user, case_numbers):
             "assignee": None, "status": "registered", "source": "files",
             "created_at": entry["updated_at"], "specimen": "", "patient": None, "slides": [], "history": [],
         })
+        if fields.get("specimen"):
+            specimens.setdefault(case_number, {})[fields["specimen"]] = None
+        name, number = fields.get("patient_name", ""), fields.get("patient_number", "")
+        if name or number:
+            patients.setdefault(case_number, set()).add((name, number))
+        if entry["updated_at"] > group["created_at"]:
+            group["created_at"] = entry["updated_at"]
+        source_label = "수기 등록" if entry["source"] == "manual" else "파일명 규칙 등록"
+        group["history"].append(f"{source_label} · {fields['slide_id']} ({source.format})")
         group["slides"].append({
             "id": source.id, "label": fields["slide_id"], "stain": fields.get("stain") or "미입력",
             "specimen": fields.get("specimen") or "미입력", "state": "뷰어 연동 전",
         })
+    for case_number, group in groups.items():
+        group["specimen"] = ", ".join(specimens.get(case_number, {}))
+        identities = patients.get(case_number, set())
+        if len(identities) == 1:
+            name, number = next(iter(identities))
+            group["patient"] = {"name": name, "number": number, "birth": ""}
+        elif len(identities) > 1:
+            group["history"].append("파일별 환자 정보가 다릅니다. 슬라이드 목록에서 확인하세요.")
     return list(groups.values())
 
 
@@ -136,4 +155,11 @@ async def worklist_case(case_id: UUID, user: CurrentUser, session: Session):
     if record is None:
         raise HTTPException(404, "케이스를 찾을 수 없습니다.")
     result = (await clinical_details(session, user.organization, [record]))[record.id]
+    events = await session.scalars(select(ClinicalEvent).where(
+        ClinicalEvent.organization == user.organization, ClinicalEvent.record_type == "cases",
+        ClinicalEvent.record_id == record.id,
+    ).order_by(ClinicalEvent.version.desc()))
+    result["history"] = [
+        f"{event.occurred_at.isoformat()} · {event.action}" for event in events
+    ]
     return result

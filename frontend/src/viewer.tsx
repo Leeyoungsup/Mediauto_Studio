@@ -85,14 +85,13 @@ function ImageViewport({ slide }: { slide: Slide }) {
   </section>;
 }
 
-export function Viewer({ item, activeSlide, onSlide, onBack, onReview }: {
-  item: DemoCase; activeSlide?: string; onSlide: (id: string) => void; onBack: () => void; onReview: () => void;
+export function Viewer({ item, activeSlide, onSlide, onBack }: {
+  item: DemoCase; activeSlide?: string; onSlide: (id: string) => void; onBack: () => void;
 }) {
   const slide = item.slides.find(({ id }) => id === activeSlide) ?? item.slides[0];
   return <>
     <button className="back-link" onClick={onBack}><ArrowLeft size={16} /> 케이스 상세</button>
     <div className="page-heading"><div><h1>WSI 뷰어</h1><p>{item.id} · {item.specimen}</p></div><div className="actions"><StatusLabel status={item.status} />
-      {item.assignee && (item.status === '배정됨' || item.status === '검토 중') && <button className="button primary" onClick={onReview}>{item.status === '배정됨' ? '검토 시작' : '검토 완료'}</button>}
     </div></div>
     <div className="viewer-layout">
       <aside className="panel viewer-tray"><div className="panel-title"><h2>슬라이드</h2><span className="count">{item.slides.length}</span></div>

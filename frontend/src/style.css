@@ -251,3 +251,10 @@ dialog::backdrop { background: #21193575; }
   .column-menu { position: static; }
   .column-options { right: 13px; min-width: min(245px, 74vw); }
 }
+
+.login-page { min-height: 100dvh; display: grid; place-items: center; padding: 24px; }
+.login-panel { width: min(100%, 400px); padding: 28px; }
+.login-panel h1 { font-size: 22px; margin: 0; }
+.login-form { display: grid; margin-top: 24px; gap: 10px; }
+.login-form .button { justify-content: center; margin-top: 8px; }
+.identity { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }

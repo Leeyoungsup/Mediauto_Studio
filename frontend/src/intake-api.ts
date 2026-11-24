@@ -1,4 +1,5 @@
 import type { DemoCase } from './demo';
+import { api } from './session';
 
 export type SlideFields = {
   case_id: string;
@@ -24,17 +25,10 @@ export const codipaiRule: FilenameRule = {
 };
 
 export async function requestIntake<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
-  const response = await fetch('/api/intake' + path, {
-    method, signal, cache: 'no-store', body: body === undefined ? undefined : JSON.stringify(body),
+  return api('/api/intake' + path, {
+    method, signal, body: body === undefined ? undefined : JSON.stringify(body),
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
   });
-  if (!response.ok) {
-    const failure = await response.json().catch(() => ({}));
-    const detail = typeof failure.detail === 'string' ? failure.detail
-      : response.status === 422 ? '필수값과 입력 형식을 확인하세요.' : '요청을 처리하지 못했습니다. 다시 시도하세요.';
-    throw new Error(detail);
-  }
-  return response.json();
 }
 
 const dateLabel = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
