@@ -40,6 +40,7 @@ export MEDIAUTO_DATABASE_URL="postgresql+asyncpg://$(id -un)@/mediauto_clinical_
 export MEDIAUTO_AUTH_SECRET_FILE="$sandbox/auth.key"
 export MEDIAUTO_PDL1_ROOT="$sandbox/pdl1"
 export MEDIAUTO_IHC_ROOT="$sandbox/ihc" MEDIAUTO_IHC_VALIDATION_FILE="$sandbox/ihc-validation.json"
+export MEDIAUTO_PROSTATE_ROOT="$sandbox/prostate"
 export MEDIAUTO_NOTIFICATION_CONFIG_FILE="$sandbox/notifications.json"
 export MEDIAUTO_SMTP_HOST="" MEDIAUTO_VAPID_PRIVATE_KEY=""
 export MEDIAUTO_DEMO_URL="http://127.0.0.1:$port"
@@ -164,4 +165,6 @@ PYMEDIA
     export MEDIAUTO_BIOMARKER_TEST_DIR="$sandbox"
     (cd -- "$root/backend" && PYTHONPATH="$PWD" "$python" -s "$root/scripts/seed-biomarker-fixtures.py")
     node scripts/biomarker-evidence-browser.mjs
+    export MEDIAUTO_PROSTATE_TEST_PYTHON="$python" MEDIAUTO_PROSTATE_TEST_DIR="$sandbox"
+    node scripts/prostate-results-browser.mjs
 fi

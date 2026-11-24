@@ -639,3 +639,14 @@ dialog::backdrop { background: #21193575; }
 .ihc-score { display: grid; gap: 3px; }
 .ihc-score strong { font-size: 19px; }
 .ihc-score small, .ihc-digest { overflow-wrap: anywhere; }
+
+.prostate-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.prostate-overlay polygon { vector-effect: non-scaling-stroke; stroke-width: 2; fill-opacity: .17; }
+.prostate-region-tissue { stroke: #068674; fill: #30ccab; }
+.prostate-region-tumor { stroke: #ae2655; fill: #fb5a97; }
+.prostate-region-pni { stroke: #7546b9; fill: #c894f6; }
+.prostate-overlay .is-selected { stroke-width: 4; fill-opacity: .27; }
+.prostate-findings dd { display: grid; gap: 3px; }
+.prostate-findings small { color: var(--muted); }
+.prostate-region-controls { display: grid; gap: 6px; }
+.prostate-panel dd { overflow-wrap: anywhere; }

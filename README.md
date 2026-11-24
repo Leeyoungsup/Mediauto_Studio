@@ -30,6 +30,10 @@ Worklist에서는 **Hide Case Preview**로 목록을 넓힐 수 있습니다. WS
 
 규칙과 파일 등록 정보는 개발 PostgreSQL에 저장되며, 이미 등록한 파일은 규칙을 다시 적용해도 유지됩니다. 등록 정보는 Worklist에서 Case ID로 묶어 확인합니다. 같은 Slide ID의 NDPI와 SVS는 서로 다른 원본 파일로 표시됩니다. 등록된 스캔은 케이스 상세의 WSI 뷰어에서 열 수 있습니다.
 
+### 36. Prostate Core and Level
+
+등록한 H&E 임상 스캔에서 **WSI Viewer → Prostate AI**를 열면 원천 분석 버전과 Core·Level별 영역을 선택하고 이동할 수 있습니다. 길이·Grade Group·PNI는 모델 출력과 해당 Core·Level의 기준 결과가 일치할 때 표시됩니다. [36번 결과 계약과 검증](work/prostate-results-36.md)
+
 ### 35. HER2·PD-L1 결과 계약
 
 **WSI Viewer → Result Contract and Validation**에서 HER2 강도·막염색 패턴과 PD-L1 CPS·TPS의 적용 범위, 원본 및 기준 검증 기록을 확인할 수 있습니다. HER2 Composite와 CPS·TPS 공동 표시의 조건은 [35번 보관본·검증 자료 연결 절차](work/biomarker-contracts-35.md)에 있습니다.

@@ -4,6 +4,7 @@ import { AlertTriangle, LocateFixed, Map, Minus, Pause, Play, Plus, ScanLine } f
 import type { WsiScan } from './demo';
 import { api, auditAttemptId, jsonBody, request } from './session';
 import { IhcOverlay, IhcPanel, useIhcResults } from './ihc-results';
+import { ProstateOverlay, ProstatePanel, useProstateResults } from './prostate-results';
 import { Pdl1Badge, Pdl1Overlay, Pdl1Panel, usePdl1 } from './pdl1';
 import { roiSearchHref } from './roi-search';
 import { LymphCounts } from './lymph-counts';
@@ -86,6 +87,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   const [labelError, setLabelError] = useState('');
   const [labelAttempt, setLabelAttempt] = useState(0);
   const [autopan, setAutopan] = useState(false);
+  const [showProstate, setShowProstate] = useState(false);
   const [autopanNotice, setAutopanNotice] = useState('');
   const settings = options?.settings;
   const autopanSpeed = settings?.autopan_speed;
@@ -118,6 +120,8 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   useEffect(() => {
     if (info && sharedCamera) renderer.current?.restoreCamera(sharedCamera);
   }, [info, sharedCamera?.x, sharedCamera?.y, sharedCamera?.zoom]);
+  const canOpenProstate = Boolean(info) && !readOnlyEndpoint && !compareMode && scan.source === 'clinical';
+  const prostate = useProstateResults(endpoint, canOpenProstate && showProstate);
   const ihc = useIhcResults(endpoint, Boolean(info) && !readOnlyEndpoint && !compareMode, view);
   const pdl1 = usePdl1(endpoint, Boolean(info) && !readOnlyEndpoint, view, initialSnapshot);
   const restoreCamera = useCallback((camera: Camera) => {
@@ -322,6 +326,8 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     data-view-zoom={view?.zoom}>
     <div className="image-toolbar"><span><ScanLine size={17} /> {label} <span className="image-stain">{stain} · {scan.format}</span>{options && <ScanReference scan={scan} />}</span>
       <div className="image-actions">
+        {canOpenProstate && <button type="button" className="button secondary" aria-expanded={showProstate}
+          onClick={() => setShowProstate((open) => !open)}>Prostate AI</button>}
         <button className="icon-button" title="Zoom Out" aria-label="Zoom Out" disabled={!info || following} onClick={() => navigate((viewer) => viewer.magnify(0.7))}><Minus size={18} /></button>
         <output aria-label="Zoom relative to scan" className="zoom-value">{view ? `${(view.zoom * 100).toFixed(view.zoom < 0.1 ? 1 : 0)}%` : '—'}</output>
         <button className="icon-button" title="Zoom In" aria-label="Zoom In" disabled={!info || following} onClick={() => navigate((viewer) => viewer.magnify(1.4))}><Plus size={18} /></button>
@@ -438,6 +444,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       />
       <Pdl1Overlay view={view} result={pdl1.result} cells={pdl1.cells} />
       <IhcOverlay state={ihc} view={view} />
+      {canOpenProstate && showProstate && <ProstateOverlay state={prostate} view={view} />}
       <AnnotationOverlay view={view} annotations={viewerRecords.records?.annotations ?? []} draft={viewerRecords.draft} drawing={preview ?? (viewerRecords.vertices.length ? {
         kind: viewerRecords.tool === 'polygon' ? 'polygon' : viewerRecords.tool === 'count' ? 'count' : 'distance',
         points: viewerRecords.vertices,
@@ -473,6 +480,11 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       {overviewFailed && minimap && !settings?.show_overview && <span className="tile-warning" role="status">Minimap unavailable. <button className="button secondary" onClick={() => setOverviewAttempt((value) => value + 1)}>Retry Overview</button></span>}
       {tileStatus === 'partial' && <span className="tile-warning" role="status">Some tiles could not be loaded. <button className="button secondary" onClick={() => renderer.current?.retryTiles()}>Retry</button></span>}
     </footer>
+    {canOpenProstate && showProstate && <ProstatePanel state={prostate} canNavigate={Boolean(view) && !following}
+      focus={(points) => {
+        if (view) navigate((viewer) => viewer.restoreCamera(cameraFor(points, view)));
+        canvas.current?.scrollIntoView({ block: 'nearest' });
+      }} />}
     {roiUnavailable && <p className="notice" role="status">The linked ROI is unavailable. The scan is still open.</p>}
     {info && !compareMode && !readOnlyEndpoint && !following && <ViewerRecordsPanel state={viewerRecords} info={info}
       searchHref={roiCaseId && scan.source === 'clinical' ? (roiId) => roiSearchHref({ caseId: roiCaseId, scanId: scan.id, roiId }) : undefined}
