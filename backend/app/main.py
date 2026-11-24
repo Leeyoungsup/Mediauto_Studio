@@ -37,6 +37,7 @@ from app.notifications import router as notifications_router
 from app.report_delivery import poll_reports
 from app.models import ApplicationSetting, IntegrationConnection
 from app.lymph_counts import router as lymph_counts_router
+from app.review_room import router as review_room_router
 from app.roi_search import router as roi_search_router
 from app.viewer_records import router as viewer_records_router
 from app.worklist import router as worklist_router
@@ -98,6 +99,7 @@ app.include_router(case_requests_router)
 app.include_router(analysis_execution_router)
 app.include_router(frozen_router)
 app.include_router(case_collections_router)
+app.include_router(review_room_router)
 app.include_router(clinical_router)
 app.include_router(workflow_router)
 app.include_router(intake_router)

@@ -624,3 +624,11 @@ dialog::backdrop { background: #21193575; }
 .collection-note { white-space: pre-wrap; overflow-wrap: anywhere; }
 .collection-links { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
 @media (max-width: 760px) { .collection-layout, .collection-links { grid-template-columns: minmax(0, 1fr); } }
+
+.review-room { margin-bottom: 10px; }
+.review-room-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 12px; align-items: start; }
+.review-people { list-style: none; padding: 0; }
+.review-people li { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-block: 6px; }
+.review-people small { color: var(--muted); }
+.review-room-controls form { margin-top: 8px; align-items: end; }
+@media (max-width: 760px) { .review-room-layout { grid-template-columns: minmax(0, 1fr); } }

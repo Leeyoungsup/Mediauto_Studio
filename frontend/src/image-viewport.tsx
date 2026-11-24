@@ -65,8 +65,9 @@ type ViewerOptions = {
 
 const autopanVectors = { right: [-1, 0], left: [1, 0], down: [0, -1], up: [0, 1] } as const;
 
-export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint, initialSnapshot, initialRoi, roiCaseId, options }: {
+export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint, initialSnapshot, initialRoi, roiCaseId, options, sharedReview }: {
   scan: WsiScan; label: string; stain: string; comparison?: PaneComparison; readOnlyEndpoint?: string; initialSnapshot?: string; initialRoi?: string; roiCaseId?: string; options?: ViewerOptions;
+  sharedReview?: { locked: boolean; camera?: Camera; onFrame: (camera: Camera) => void };
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const focusedRoi = useRef<string>(undefined);
@@ -96,10 +97,13 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   const compareMode = Boolean(comparison);
   const report = useRef(comparison);
   report.current = comparison;
+  const reviewFrame = useRef(sharedReview);
+  reviewFrame.current = sharedReview;
+  const following = !!sharedReview?.locked;
 
   function navigate(action: (viewer: TileViewer) => void) {
     const viewer = renderer.current;
-    if (!viewer) return;
+    if (!viewer || reviewFrame.current?.locked) return;
     setAutopan(false);
     setAutopanNotice('');
     action(viewer);
@@ -109,9 +113,13 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   useEffect(() => {
     if (info && comparison?.camera) renderer.current?.restoreCamera(comparison.camera);
   }, [info, comparison?.camera]);
+  const sharedCamera = sharedReview?.camera;
+  useEffect(() => {
+    if (info && sharedCamera) renderer.current?.restoreCamera(sharedCamera);
+  }, [info, sharedCamera?.x, sharedCamera?.y, sharedCamera?.zoom]);
   const pdl1 = usePdl1(endpoint, Boolean(info) && !readOnlyEndpoint, view, initialSnapshot);
   const restoreCamera = useCallback((camera: Camera) => {
-    if (!compareMode) {
+    if (!compareMode && !reviewFrame.current?.locked) {
       setAutopan(false);
       renderer.current?.restoreCamera(camera);
     }
@@ -179,7 +187,10 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         renderer.current = new TileViewer(element, metadata, endpoint, (viewport) => {
           setView(viewport);
           const viewer = renderer.current;
-          if (viewer) report.current?.onFrame(viewer.cameraFrame(), metadata);
+          if (viewer) {
+            report.current?.onFrame(viewer.cameraFrame(), metadata);
+            reviewFrame.current?.onFrame(viewer.cameraFrame());
+          }
         }, (status) => {
           setTileStatus(status);
           if (status !== 'loading') recordView(status === 'unavailable' ? 'failed' : 'success');
@@ -292,14 +303,14 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   }, [autopan, autopanDirection, autopanSpeed]);
 
   function toggleAutopan() {
-    if (!info || viewerRecords.tool !== 'pan' || tileStatus === 'unavailable') return;
+    if (!info || following || viewerRecords.tool !== 'pan' || tileStatus === 'unavailable') return;
     setAutopanNotice('');
     setAutopan((running) => !running);
   }
 
   useEffect(() => {
-    if (viewerRecords.tool !== 'pan' || tileStatus === 'unavailable') setAutopan(false);
-  }, [viewerRecords.tool, tileStatus]);
+    if (following || viewerRecords.tool !== 'pan' || tileStatus === 'unavailable') setAutopan(false);
+  }, [following, viewerRecords.tool, tileStatus]);
 
   const minimap = settings?.show_minimap ?? showNavigator;
   const toggleMinimap = options?.toggleMinimap ?? (() => setShowNavigator(!showNavigator));
@@ -309,23 +320,23 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     data-view-zoom={view?.zoom}>
     <div className="image-toolbar"><span><ScanLine size={17} /> {label} <span className="image-stain">{stain} · {scan.format}</span>{options && <ScanReference scan={scan} />}</span>
       <div className="image-actions">
-        <button className="icon-button" title="Zoom Out" aria-label="Zoom Out" disabled={!info} onClick={() => navigate((viewer) => viewer.magnify(0.7))}><Minus size={18} /></button>
+        <button className="icon-button" title="Zoom Out" aria-label="Zoom Out" disabled={!info || following} onClick={() => navigate((viewer) => viewer.magnify(0.7))}><Minus size={18} /></button>
         <output aria-label="Zoom relative to scan" className="zoom-value">{view ? `${(view.zoom * 100).toFixed(view.zoom < 0.1 ? 1 : 0)}%` : '—'}</output>
-        <button className="icon-button" title="Zoom In" aria-label="Zoom In" disabled={!info} onClick={() => navigate((viewer) => viewer.magnify(1.4))}><Plus size={18} /></button>
-        <button className="icon-button" title="Fit to Window" aria-label="Fit to Window" disabled={!info} onClick={() => navigate((viewer) => viewer.fitToWindow())}><LocateFixed size={17} /></button>
+        <button className="icon-button" title="Zoom In" aria-label="Zoom In" disabled={!info || following} onClick={() => navigate((viewer) => viewer.magnify(1.4))}><Plus size={18} /></button>
+        <button className="icon-button" title="Fit to Window" aria-label="Fit to Window" disabled={!info || following} onClick={() => navigate((viewer) => viewer.fitToWindow())}><LocateFixed size={17} /></button>
         <button className="icon-button" title="Minimap" aria-label="Minimap" aria-pressed={minimap} disabled={!overview && !options} onClick={toggleMinimap}><Map size={17} /></button>
         {options && <button type="button" className="icon-button" title={autopan ? 'Pause Autopan' : 'Start Autopan'}
           aria-label={autopan ? 'Pause Autopan' : 'Start Autopan'} aria-pressed={autopan}
-          disabled={!info || viewerRecords.tool !== 'pan' || tileStatus === 'unavailable'} onClick={toggleAutopan}>
+          disabled={!info || following || viewerRecords.tool !== 'pan' || tileStatus === 'unavailable'} onClick={toggleAutopan}>
           {autopan ? <Pause size={17} /> : <Play size={17} />}
         </button>}
       </div>
     </div>
-    {info && !compareMode && !readOnlyEndpoint && <ViewerToolsBar state={viewerRecords} view={view} info={info} />}
+    {info && !compareMode && !readOnlyEndpoint && !following && <ViewerToolsBar state={viewerRecords} view={view} info={info} />}
     <div className="image-surface">
       <canvas className={viewerRecords.tool === 'pan' ? 'wsi-canvas' : 'wsi-canvas drawing-tool'} ref={canvas} tabIndex={0} aria-label="WSI Canvas"
         onPointerDown={(event) => {
-          if (event.button !== 0 || !info || drag.current || drawing.current) return;
+          if (following || event.button !== 0 || !info || drag.current || drawing.current) return;
           setAutopan(false);
           setAutopanNotice('');
           if (report.current?.captureLandmark) {
@@ -362,7 +373,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
             return;
           }
           const last = drag.current;
-          if (!last || last.id !== event.pointerId) return;
+          if (following || !last || last.id !== event.pointerId) return;
           navigate((viewer) => viewer.pan(event.clientX - last.x, event.clientY - last.y));
           drag.current = { id: last.id, x: event.clientX, y: event.clientY };
         }}
@@ -386,7 +397,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
           }
         }}
         onKeyDown={(event) => {
-          if (settings?.shortcuts === false || event.altKey || event.ctrlKey || event.metaKey || event.nativeEvent.isComposing) return;
+          if (following || settings?.shortcuts === false || event.altKey || event.ctrlKey || event.metaKey || event.nativeEvent.isComposing) return;
           const key = event.key.toLowerCase();
           if (key === 'escape' && viewerRecords.tool !== 'pan') {
             viewerRecords.chooseTool('pan');
@@ -451,7 +462,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       {tileStatus === 'partial' && <span className="tile-warning" role="status">Some tiles could not be loaded. <button className="button secondary" onClick={() => renderer.current?.retryTiles()}>Retry</button></span>}
     </footer>
     {roiUnavailable && <p className="notice" role="status">The linked ROI is unavailable. The scan is still open.</p>}
-    {info && !compareMode && !readOnlyEndpoint && <ViewerRecordsPanel state={viewerRecords} info={info}
+    {info && !compareMode && !readOnlyEndpoint && !following && <ViewerRecordsPanel state={viewerRecords} info={info}
       searchHref={roiCaseId && scan.source === 'clinical' ? (roiId) => roiSearchHref({ caseId: roiCaseId, scanId: scan.id, roiId }) : undefined}
       move={(points, savedZoom) => { if (view) navigate((viewer) => viewer.restoreCamera(cameraFor(points, view, savedZoom))); }} />}
     {info && !compareMode && !readOnlyEndpoint && scan.source === 'clinical' && viewerRecords.records?.can_annotate &&

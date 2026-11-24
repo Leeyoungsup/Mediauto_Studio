@@ -1245,6 +1245,110 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.get(root + "/messages")).status_code, 403)
         self.assertEqual((await self.client.put(config, json={"version": 2, "mode": "disabled"})).status_code, 403)
 
+    async def test_collaborative_review_camera_handoff_reconnect_and_revocation(self):
+        doctor = await create_account(self.org, "review-doctor", "doctor")
+        independent = await create_account(self.org, "review-independent", "doctor")
+        other_admin = await create_account(self.org, "review-other-admin", "admin")
+        foreign = await create_account(self.org + "-foreign", "review-foreign", "admin")
+        case = await self.create("cases", {"case_number": "COLLAB-QA"})
+        scope = self.url + "/cases/" + case["id"]
+        url = scope + "/review-room"
+        assigned = await self.client.patch(scope + "/assignment", json={
+            "version": case["version"], "assignee_id": str(doctor.id), "reason": "Synthetic review assignment",
+        })
+        self.assertEqual(assigned.status_code, 200, assigned.text)
+        case_version = assigned.json()["version"]
+        unrelated = await self.create("cases", {"case_number": "COLLAB-OUTSIDE"})
+
+        async def scan_for(case_id, name):
+            specimen = await self.create("specimens", {"case_id": case_id, "specimen_number": "QA"})
+            slide = await self.create("slides", {"specimen_id": specimen["id"], "slide_number": "S1"})
+            (self.root / name).write_bytes(b"synthetic collaboration scan")
+            return await self.create("scans", {"slide_id": slide["id"], "storage_key": name})
+
+        scan = await scan_for(case["id"], "collaborative.svs")
+        outside = await scan_for(unrelated["id"], "elsewhere.ndpi")
+        owner_tab, doctor_tab, doctor_reload, other_tab = [{"X-Review-Client": str(uuid4())} for _ in range(4)]
+
+        async def check(response, status=200):
+            result = await response
+            self.assertEqual(result.status_code, status, result.text)
+            return result.json()
+
+        transport = httpx.ASGITransport(app=app, client=("127.0.0.1", 12346))
+        async with (httpx.AsyncClient(transport=transport, base_url="http://localhost") as peer,
+                    httpx.AsyncClient(transport=transport, base_url="http://localhost") as admin_peer):
+            await login(peer, self.org, doctor.username)
+            await login(admin_peer, self.org, other_admin.username)
+            self.assertEqual((await check(peer.get(url, headers=doctor_tab)))["state"], "available")
+            created = await check(self.client.post(url, headers=owner_tab), 201)
+            self.assertEqual(await check(self.client.post(url, headers=owner_tab), 201), created)
+            room = url + "/" + created["id"]
+
+            async def invite(user_id, active=True, status=200):
+                await check(self.client.put(room + "/participants/" + str(user_id), headers=owner_tab,
+                                            json={"active": active}), status)
+
+            await invite(independent.id, status=404)
+            await invite(foreign.id, status=404)
+            self.assertEqual(await check(admin_peer.get(url, headers=other_tab)), {"state": "unavailable", "room": None})
+            await invite(doctor.id)
+            await invite(other_admin.id)
+            self.assertEqual((await check(peer.get(url, headers=doctor_tab)))["state"], "invited")
+            await check(peer.post(room + "/join", headers=doctor_tab))
+            await check(admin_peer.post(room + "/join", headers=other_tab))
+            frame = {"scan_id": scan["id"], "epoch": 1, "sequence": 0, "x": 312.5, "y": 210.125, "zoom": .8}
+            with patch("app.review_room.scan_response", return_value={"dimensions": [900, 700]}):
+                await check(peer.put(room + "/camera", headers=doctor_tab, json=frame), 403)
+                await check(self.client.put(room + "/camera", headers=owner_tab, json={**frame, "scan_id": outside["id"]}), 404)
+                await check(self.client.put(room + "/camera", headers=owner_tab, json={**frame, "x": 900}), 422)
+                await check(self.client.put(room + "/camera", headers=owner_tab, json=frame))
+                await check(self.client.put(room + "/camera", headers=owner_tab, json=frame), 409)
+                await check(peer.put(room + "/follow", headers=doctor_tab, json={"follow": True}))
+                followed = (await check(peer.get(url, headers=doctor_tab)))["room"]
+                self.assertTrue(followed["follow"])
+                self.assertEqual((followed["frame"]["x"], followed["frame"]["y"], followed["frame"]["zoom"]), (312.5, 210.125, .8))
+
+                await check(peer.post(room + "/join", headers=doctor_reload))
+                previous = await check(peer.get(url, headers=doctor_tab))
+                self.assertEqual((previous["state"], previous["room"]["frame"]), ("invited", None))
+                resumed = (await check(peer.get(url, headers=doctor_reload)))["room"]
+                self.assertTrue(resumed["follow"])
+                self.assertEqual(resumed["frame"], followed["frame"])
+                conflict = await asyncio.gather(*[
+                    self.client.put(room + "/drive", headers=owner_tab, json={"epoch": 1, "driver_id": str(target)})
+                    for target in (doctor.id, other_admin.id)
+                ])
+                self.assertEqual(sorted(reply.status_code for reply in conflict), [200, 409])
+                driver = (await check(self.client.get(url, headers=owner_tab)))["room"]
+                if driver["driver_id"] == str(other_admin.id):
+                    await check(admin_peer.put(room + "/drive", headers=other_tab,
+                                               json={"epoch": driver["epoch"], "driver_id": str(doctor.id)}))
+                    driver = (await check(self.client.get(url, headers=owner_tab)))["room"]
+                self.assertEqual(driver["driver_id"], str(doctor.id))
+                latest = {**frame, "epoch": driver["epoch"], "sequence": 1, "x": 351}
+                await check(self.client.put(room + "/camera", headers=owner_tab, json=latest), 403)
+                await check(peer.put(room + "/camera", headers=doctor_tab, json=latest), 409)
+                await check(peer.put(room + "/camera", headers=doctor_reload, json=latest))
+                await invite(doctor.id, active=False)
+                self.assertEqual(await check(peer.get(url, headers=doctor_reload)), {"state": "unavailable", "room": None})
+                await check(peer.post(room + "/join", headers=doctor_reload), 404)
+                self.assertEqual((await check(self.client.get(url, headers=owner_tab)))["room"]["driver_id"], str(self.user.id))
+
+            await invite(doctor.id)
+            await check(peer.post(room + "/join", headers=doctor_reload))
+            await check(self.client.patch(scope + "/assignment", json={
+                "version": case_version, "assignee_id": str(independent.id), "reason": "Synthetic scope loss",
+            }))
+            await check(peer.get(url, headers=doctor_reload), 404)
+            audit = await check(self.client.get(scope + "/logs", params={"action": "review_drive_changed"}))
+            self.assertTrue(audit["rows"])
+            await check(self.client.post(room + "/end", headers=owner_tab))
+            self.assertEqual((await check(admin_peer.get(url, headers=other_tab)))["state"], "available")
+            self.assertNotEqual((await check(self.client.post(url, headers=owner_tab), 201))["id"], created["id"])
+            await login(peer, foreign.organization, foreign.username)
+            await check(peer.get(url, headers=doctor_reload), 403)
+
     async def test_collections_board_scope_membership_and_concurrent_edits(self):
         async def checked(call, expected=200):
             response = await call

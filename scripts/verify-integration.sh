@@ -157,4 +157,5 @@ PYMEDIA
     node scripts/roi-search-browser.mjs
     node scripts/analysis-execution-browser.mjs
     node scripts/case-collections-browser.mjs
+    node scripts/collaborative-review-browser.mjs
 fi

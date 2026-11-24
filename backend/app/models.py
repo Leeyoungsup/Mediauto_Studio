@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, ForeignKeyConstraint, Index, Integer, LargeBinary, String, Text, UniqueConstraint, Uuid, func
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, ForeignKeyConstraint, Index, Integer, LargeBinary, String, Text, UniqueConstraint, Uuid, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -501,6 +501,39 @@ class ViewerPreference(Base):
     user_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
     settings: Mapped[dict] = mapped_column(JSONB)
     version: Mapped[int] = mapped_column(Integer)
+
+
+class ReviewRoom(ClinicalRecord, Base):
+    __tablename__ = "review_rooms"
+    __table_args__ = (
+        UniqueConstraint("organization", "id"),
+        ForeignKeyConstraint(("organization", "case_id"), ("cases.organization", "cases.id")),
+        ForeignKeyConstraint(("organization", "owner_id"), ("auth_users.organization", "auth_users.id")),
+        ForeignKeyConstraint(("organization", "driver_id"), ("auth_users.organization", "auth_users.id")),
+        Index("ix_one_active_review_room", "organization", "case_id", unique=True, postgresql_where=text("closed_at IS NULL")),
+    )
+    case_id: Mapped[UUID] = mapped_column(Uuid)
+    owner_id: Mapped[UUID] = mapped_column(Uuid)
+    driver_id: Mapped[UUID] = mapped_column(Uuid)
+    drive_epoch: Mapped[int] = mapped_column(Integer, server_default="1")
+    frame_seq: Mapped[int] = mapped_column(Integer, server_default="0")
+    frame: Mapped[dict | None] = mapped_column(JSONB)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ReviewParticipant(ClinicalRecord, Base):
+    __tablename__ = "review_participants"
+    __table_args__ = (
+        UniqueConstraint("organization", "room_id", "user_id"),
+        ForeignKeyConstraint(("organization", "room_id"), ("review_rooms.organization", "review_rooms.id")),
+        ForeignKeyConstraint(("organization", "user_id"), ("auth_users.organization", "auth_users.id")),
+    )
+    room_id: Mapped[UUID] = mapped_column(Uuid)
+    user_id: Mapped[UUID] = mapped_column(Uuid)
+    client_id: Mapped[UUID | None] = mapped_column(Uuid)
+    follow: Mapped[bool] = mapped_column(Boolean, server_default="false")
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class CaseCollection(ClinicalRecord, Base):

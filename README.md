@@ -30,6 +30,10 @@ Worklist에서는 **Hide Case Preview**로 목록을 넓힐 수 있습니다. WS
 
 규칙과 파일 등록 정보는 개발 PostgreSQL에 저장되며, 이미 등록한 파일은 규칙을 다시 적용해도 유지됩니다. 등록 정보는 Worklist에서 Case ID로 묶어 확인합니다. 같은 Slide ID의 NDPI와 SVS는 서로 다른 원본 파일로 표시됩니다. 등록된 스캔은 케이스 상세의 WSI 뷰어에서 열 수 있습니다.
 
+### 33. Collaborative Review
+
+같은 케이스의 **WSI Viewer → Collaborative Review**에서 세션을 열고 케이스 권한이 있는 동료를 초대합니다. **Follow Driver**, **Stop Following**, **Hand Off Drive**로 스캔·위치·배율 공유를 제어합니다. [33번 공동 판독과 Teams 검토](work/collaborative-review-33.md)
+
 ### 32. Collections와 Tumor Board
 
 **Collections and Tumor Board**에서 개인·공유 컬렉션과 Board 회차를 관리합니다. **Worklist → Add to Collection or Board**에서 원본 케이스를 참조로 추가합니다. 회차에서 순서, 메모, **Presented**를 기록하고 기존 케이스·WSI·완료 결과를 엽니다. [32번 권한과 검증 기록](work/case-collections-32.md)
