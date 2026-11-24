@@ -24,6 +24,7 @@ from app.viewer_records import router as viewer_records_router
 from app.worklist import router as worklist_router
 from app.worklist_views import router as worklist_views_router
 from app.workflow import router as workflow_router
+from app.workgroups import router as workgroups_router
 from app.wsi import router as wsi_router
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,7 @@ app.include_router(workflow_router)
 app.include_router(intake_router)
 app.include_router(integration_router)
 app.include_router(worklist_views_router)
+app.include_router(workgroups_router)
 app.include_router(worklist_router)
 app.include_router(wsi_router)
 app.include_router(viewer_records_router)

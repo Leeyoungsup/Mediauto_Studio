@@ -13,6 +13,8 @@ import { buildFileCases, requestIntake } from './intake-api';
 import type { SourceFile } from './intake-api';
 import { Viewer } from './viewer';
 import { Worklist } from './worklist';
+import { CaseRouting, WorkgroupSettings } from './workgroups';
+import type { Queue } from './workgroups';
 import type { Scope } from './worklist';
 import { defaultOrder } from './worklist-config';
 import { api, canWrite, jsonBody, SessionGate } from './session';
@@ -24,7 +26,7 @@ import './style.css';
 const emrLabels = { unconfigured: 'Not Configured', disabled: 'Disabled', connected: 'Connected', unavailable: 'Connection Unavailable', unknown: 'Unavailable' };
 type Health = { status: 'ok' | 'degraded'; database: 'connected' | 'unavailable'; emr: keyof typeof emrLabels };
 type Page = { view: 'worklist'; scope: Scope } | { view: 'case'; id: string; files: boolean; tab?: 'requests' | 'report' } | { view: 'request'; id: string }
-  | { view: 'viewer'; id: string; slide?: string; snapshot?: string; files: boolean } | { view: 'scans' } | { view: 'settings' };
+  | { view: 'viewer'; id: string; slide?: string; snapshot?: string; files: boolean } | { view: 'scans' } | { view: 'settings'; section?: 'groups' };
 type WorkflowAction = 'assignment' | 'review' | 'confirm';
 type Modal = 'register' | 'system' | null;
 
@@ -34,7 +36,8 @@ function decodeRoute(value: string) {
 
 function readPage(): Page {
   const [view, id, slide, snapshot] = location.hash.slice(1).split('/');
-  if (view === 'scans' || view === 'settings') return { view };
+  if (view === 'scans') return { view };
+  if (view === 'settings') return { view, section: id === 'groups' ? 'groups' : undefined };
   if (view === 'request' && id) return { view, id: decodeRoute(id) };
   if ((view === 'case' || view === 'file-case') && id) return { view: 'case', id: decodeRoute(id), files: view === 'file-case', tab: slide === 'requests' || slide === 'report' ? slide : undefined };
   if ((view === 'viewer' || view === 'file-viewer') && id) return { view: 'viewer', id: decodeRoute(id), slide: slide ? decodeRoute(slide) : undefined, snapshot: /^[a-f0-9]{64}$/.test(snapshot ?? '') ? snapshot : undefined, files: view === 'file-viewer' };
@@ -78,6 +81,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
   const [workflowError, setWorkflowError] = useState('');
   const [health, setHealth] = useState<Health | null>(null);
   const [integration, setIntegration] = useState<IntegrationStatus>();
+  const [queues, setQueues] = useState<Queue[]>([]);
   const [serviceError, setServiceError] = useState(false);
   const [checkAttempt, setCheckAttempt] = useState(0);
   const [lastScope, setLastScope] = useState<Scope>('all');
@@ -111,14 +115,17 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
     return () => window.clearInterval(interval);
   }, [refreshIntegration, page.view]);
 
+  const refreshQueues = useCallback(async () => setQueues(await api<Queue[]>('/api/worklist/queues')), []);
+  useEffect(() => { refreshQueues().catch(() => {}); }, [refreshQueues]);
+
   function patientChanged() {
     setRevision((value) => value + 1);
     refreshIntegration();
   }
   const worklistTabs = [
     { id: 'all', href: '#worklist/all', label: 'All Cases', count: result.counts.all, icon: LayoutList },
-    { id: 'mine', href: '#worklist/mine', label: 'Assigned to Me', count: result.counts.mine, icon: UserRoundCheck },
-    { id: 'unassigned', href: '#worklist/unassigned', label: 'Unassigned', count: result.counts.unassigned, icon: ClipboardList },
+    ...(user.role !== 'labeler' ? [{ id: 'mine', href: '#worklist/mine', label: 'Assigned to Me', count: result.counts.mine, icon: UserRoundCheck }] : []),
+    ...(writable ? [{ id: 'unassigned', href: '#worklist/unassigned', label: 'Unassigned', count: result.counts.unassigned, icon: ClipboardList }] : []),
     ...(intakeAllowed ? [{ id: 'scans', href: '#scans', label: 'Slide Registration', count: files.filter(({ entry }) => !entry).length, icon: ScanLine }] : []),
   ];
 
@@ -138,7 +145,9 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
     }) : api<Result>('/api/worklist?' + params, { signal: controller.signal });
     request
       .then((data) => { if (!controller.signal.aborted) setResult(data); })
-      .catch(() => { if (!controller.signal.aborted) { setResult(emptyResult); setListError('Unable to load the Worklist.'); } })
+      .catch((failure) => { if (!controller.signal.aborted) {
+        setResult(emptyResult); setListError(failure instanceof Error ? failure.message : 'Unable to load the Worklist.');
+      } })
       .finally(() => { if (!controller.signal.aborted) setListLoading(false); });
     return () => controller.abort();
   }, [scope, query, revision, openRevision]);
@@ -315,15 +324,17 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
         <div className="worklist-page" hidden={page.view !== 'worklist'}>
           {listError && <div className="notice" role="alert">{listError}<button className="button secondary" onClick={() => setRevision((value) => value + 1)}>Retry</button></div>}
           <Worklist onScope={setWorklistScope} mayShare={user.role === 'admin'} cases={worklistCases} loading={listLoading} scope={scope} current={selectedCase} onSelect={setSelected}
-            total={result.total} counts={result.counts} filteredCounts={result.filtered_counts} assignees={result.assignees} onQuery={setQuery}
+            total={result.total} counts={result.counts} filteredCounts={result.filtered_counts} queues={queues} workload={result.workload} onQueueChanged={refreshQueues} assignees={result.assignees} onQuery={setQuery}
             onOpen={(id) => { const item = worklistCases.find((row) => row.id === id); if (item) navigateCase(item); }}
             onViewer={(id, slide) => { const item = worklistCases.find((row) => row.id === id); if (item) navigateViewer(item, slide); }}
             onRegister={writable ? () => showModal('register') : undefined} />
         </div>
-        {page.view === 'settings' && settingsAllowed && <>
+        {page.view === 'settings' && settingsAllowed && (page.section === 'groups'
+          ? <WorkgroupSettings onChanged={refreshQueues} /> : <>
+          <div className="settings-actions"><a className="button secondary" href="#settings/groups">Manage Workgroups</a></div>
           {intakeAllowed && <IntakeSettings refresh={refreshFiles} emrConnected={integration?.emr.state === 'connected'} />}
           <IntegrationSettings org={user.organization} status={integration} onRefresh={refreshIntegration} />
-        </>}
+        </>)}
         {page.view === 'scans' && intakeAllowed && <IntakePage files={files} loading={filesLoading} problem={fileProblem} refresh={refreshFiles} />}
         {((page.view === 'settings' && !settingsAllowed) || (page.view === 'scans' && !intakeAllowed)) && <div className="panel empty"><strong>You do not have permission to open this page.</strong><button className="button secondary" onClick={goBack}>Back to Worklist</button></div>}
         {page.view === 'request' && <RequestPage key={page.id} id={page.id} organization={user.organization} />}
@@ -337,6 +348,8 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
             patientIntegration={current.recordId ? <PatientIntegration item={current} org={user.organization}
               editable={writable} status={integration} onChanged={patientChanged} /> : undefined}
             dates={current.recordId ? <CaseDates item={current} organization={user.organization} editable={writable} onChanged={patientChanged} /> : undefined}
+            routing={current.recordId ? <CaseRouting item={current} editable={writable} organization={user.organization}
+              queues={queues} onChanged={patientChanged} /> : undefined}
             onAssign={mayAssign ? () => openWorkflow(current, 'assignment') : undefined}
             onReview={mayReview ? () => openWorkflow(current, 'review') : undefined}
             onConfirm={intakeAllowed && current.source === 'files' ? () => openWorkflow(current, 'confirm') : undefined} />

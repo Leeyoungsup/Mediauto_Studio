@@ -801,3 +801,80 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         old_version = await self.client.patch(f"{self.url}/specimens/{earliest['id']}/collection-date",
                                              json={"version": 1, "collection_date": None})
         self.assertEqual(old_version.status_code, 409)
+
+    async def test_workgroup_subscription_classification_and_workload_permissions(self):
+        first = await create_account(self.org, "group-first", "doctor")
+        second = await create_account(self.org, "group-second", "doctor")
+        outside = await create_account(self.org + "-outside", "group-outsider", "admin")
+        endpoint = "/api/worklist"
+        roster = endpoint + "/workgroups/breast/members/"
+        case = await self.create("cases", {"case_number": "GROUP-ONE"})
+        specimen = await self.create("specimens", {"case_id": case["id"], "specimen_number": "QA"})
+        slide = await self.create("slides", {"specimen_id": specimen["id"], "slide_number": "QA"})
+        for ext in ("ndpi", "svs"):
+            sample = self.root / f"group.{ext}"
+            sample.write_bytes(b"synthetic")
+            await self.create("scans", {"slide_id": slide["id"], "storage_key": sample.name})
+        classify = f"{self.url}/cases/{case['id']}/classification"
+        assignment = f"{self.url}/cases/{case['id']}/assignment"
+
+        async def expect(response, status):
+            result = await response
+            self.assertEqual(result.status_code, status, result.text)
+            return result.json()
+
+        async def change_role(account, version, member=True, status=200):
+            return await expect(self.client.put(roster + str(account.id), json={"version": version, "member": member}), status)
+
+        await change_role(outside, 0, status=404)
+        roster_version = (await change_role(first, 0))["version"]
+        await change_role(second, 0, status=409)
+        roster_version = (await change_role(second, roster_version))["version"]
+        classified = await expect(self.client.patch(classify, json={
+            "version": 1, "group_key": "breast", "priority": "frozen", "reason": "Synthetic frozen routing",
+        }), 200)
+        self.assertEqual((classified["priority_source"], classified["status"]), ("manual", "registered"))
+        active = await expect(self.client.patch(assignment, json={
+            "version": 2, "assignee_id": str(first.id), "reason": "Synthetic assignment",
+        }), 200)
+        await change_role(first, roster_version, False, 409)
+        review = await expect(self.client.patch(classify, json={
+            "version": active["version"], "group_key": "cytology", "priority": "urgent", "reason": "Synthetic wrong group",
+        }), 409)
+        self.assertIn("not a member", review["detail"])
+        excluded = await create_account(self.org, "group-excluded", "doctor")
+        await expect(self.client.patch(assignment, json={
+            "version": active["version"], "assignee_id": str(excluded.id), "reason": "Synthetic unauthorized assignment",
+        }), 422)
+        result = await expect(self.client.get(endpoint, params={"priority": "frozen", "group_key": "breast"}), 200)
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["rows"][0]["group_name"], "Breast")
+        self.assertEqual(result["workload"][0], {"assigned_to": str(first.id), "name": first.display_name,
+            "cases": 1, "open_cases": 1, "in_review": 0, "completed": 0, "slides": 1, "frozen": 1})
+        detail = await expect(self.client.get(endpoint + "/" + case["id"]), 200)
+        audit = next(event for event in detail["audit"] if event["action"] == "classification_changed")
+        self.assertIsNone(audit["before"]["priority"])
+        self.assertEqual(audit["after"]["priority_source"], "manual")
+
+        await login(self.client, self.org, first.username)
+        subscription = endpoint + "/queues/breast/subscription"
+        for _ in range(2):
+            await expect(self.client.put(subscription, json={"subscribed": True}), 200)
+        catalog = await expect(self.client.get(endpoint + "/queues"), 200)
+        self.assertTrue(next(queue for queue in catalog if queue["key"] == "breast")["subscribed"])
+        await expect(self.client.get(endpoint, params={"group_key": "cytology"}), 404)
+        await expect(self.client.get(endpoint + "/workgroups"), 403)
+        await login(self.client, self.org, second.username)
+        result = await expect(self.client.get(endpoint, params={"group_key": "breast"}), 200)
+        self.assertEqual((result["total"], result["workload"]), (0, []))
+        await expect(self.client.get(endpoint + "/" + case["id"]), 404)
+        await login(self.client, self.org, self.user.username)
+        await expect(self.client.patch(assignment, json={
+            "version": active["version"], "assignee_id": str(second.id), "reason": "Synthetic reassignment",
+        }), 200)
+        await change_role(first, roster_version, False)
+        await login(self.client, self.org, first.username)
+        catalog = await expect(self.client.get(endpoint + "/queues"), 200)
+        self.assertNotIn("breast", {queue["key"] for queue in catalog})
+        await expect(self.client.get(endpoint, params={"group_key": "breast"}), 404)
+        await expect(self.client.put(subscription, json={"subscribed": True}), 404)

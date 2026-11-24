@@ -8,12 +8,14 @@ export type Slide = {
 };
 export type AuditEvent = {
   id: string; action: string; version: number; occurred_at: string; actor: string; actor_name?: string;
-  source: string; reason?: string; before: { status?: string; assigned_to?: string | null };
-  after: { status?: string; assigned_to?: string | null; review_note?: string }; before_assignee?: string; after_assignee?: string;
+  source: string; reason?: string; before: { status?: string; assigned_to?: string | null; priority?: string | null; group_key?: string | null };
+  after: { status?: string; assigned_to?: string | null; review_note?: string; priority?: string | null; group_key?: string | null }; before_assignee?: string; after_assignee?: string;
   transaction_id: string;
 };
 export type Candidate = { id: string; name: string; username: string };
 export type WorklistData = {
+  group_key?: string | null; group_name?: string | null;
+  priority?: import('./workgroups').Priority | null; priority_source?: string | null;
   accessioned_at?: string | null; collection_date?: string | null; age?: number | null;
   last_opened?: string | null; created_at?: string;
   mrns?: { value: string; source: string }[]; lis_status?: string | null;

@@ -8,6 +8,8 @@ import { columns, defaultColumns, defaultOrder, loadLegacyColumns, normalizeColu
 import type { ColumnId, ColumnSetting, Preferences, Scope, SortTerm, ViewConfig } from './worklist-config';
 import { SavedViewControls, SortControls, useSavedViews } from './worklist-preferences';
 import { stateLabel, states } from './worklist-api';
+import { QueueNavigation, Workload, priorityLabels } from './workgroups';
+import type { AssignmentLoad, Queue } from './workgroups';
 import { MoreFilters, normalizeFilters, sexLabels, slideStates } from './worklist-filters';
 import type { AdvancedFilters } from './worklist-filters';
 
@@ -53,6 +55,10 @@ function columnValue(item: DemoCase, id: ColumnId) {
     case 'birth': return value(item.patient?.birth, patientSource);
     case 'sex': return value(item.patient?.sex ? sexLabels[item.patient.sex] : null, patientSource);
     case 'age': return value(data?.age, 'Completed Years at Earliest Recorded Collection Date');
+    case 'group': return value(data?.group_name, 'IMS Workgroup Classification');
+    case 'priority': return data?.priority
+      ? <span className={`priority-badge priority-${data.priority}`} title={data.priority_source === 'manual' ? 'Manual Classification' : 'IMS Classification'}>{priorityLabels[data.priority]}</span>
+      : blank;
     case 'slideState': return value(data?.slide_state?.map((key) => slideStates[key]).join(' · '), provenance);
     case 'lis': return value(data?.lis_data === 'conflict' ? 'Conflicting Sources' : data?.lis_status,
       data?.lis_sources?.map(({ value, source, received_at }) => `${value} · ${source} · ${worklistDate.format(new Date(received_at))}`).join('; ') || 'No Linked LIS Status');
@@ -70,6 +76,9 @@ type Props = {
   total: number;
   counts: Counts;
   filteredCounts?: Counts['statuses'];
+  queues: Queue[];
+  workload?: AssignmentLoad[] | null;
+  onQueueChanged: () => Promise<void>;
   assignees: Assignee[];
   onQuery: (query: WorklistQuery) => void;
   scope: Scope;
@@ -82,7 +91,7 @@ type Props = {
   onRegister?: () => void;
 };
 
-export function Worklist({ cases, loading, total, counts, filteredCounts, assignees, onQuery, scope, onScope, mayShare, current, onSelect, onOpen, onViewer, onRegister }: Props) {
+export function Worklist({ cases, loading, total, counts, filteredCounts, queues, workload, onQueueChanged, assignees, onQuery, scope, onScope, mayShare, current, onSelect, onOpen, onViewer, onRegister }: Props) {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<CaseStatus | ''>('');
   const [assignee, setAssignee] = useState('');
@@ -129,6 +138,18 @@ export function Worklist({ cases, loading, total, counts, filteredCounts, assign
     { label: 'Review Complete', count: (filteredCounts ?? counts.statuses).reviewed, icon: CheckCircle2, tone: 'green', value: 'Review Complete' },
   ] as const;
 
+  const activeQueue = queues.find((queue) => queue.priority && queue.priority === filters.priority)?.key
+    ?? queues.find((queue) => queue.group_key && queue.group_key === filters.group_key)?.key;
+
+  function selectQueue(queue?: Queue) {
+    edited.current = true;
+    clearFilters();
+    setFilters(normalizeFilters({ group_key: queue?.group_key, priority: queue?.priority }));
+    if (queue) onScope('all');
+    setOrder(queue?.priority ? [{ field: 'priority', direction: 'asc' }, { field: 'created_at', direction: 'desc' }]
+      : saved.preferences.sort_order ?? defaultOrder);
+  }
+
   function clearFilters() {
     setSearch(''); setStatus(''); setAssignee(''); setFilters({}); setOffset(0);
   }
@@ -144,6 +165,7 @@ export function Worklist({ cases, loading, total, counts, filteredCounts, assign
         {onRegister && <button className="button primary" onClick={onRegister}><Plus size={17} /> Register Case</button>}
       </div>
     </div>
+    <QueueNavigation queues={queues} active={activeQueue} isAdmin={mayShare} onSelect={selectQueue} onChanged={onQueueChanged} />
     <SavedViewControls controller={saved} configuration={configuration} mayShare={mayShare} />
     <div className="worklist-layout" data-preview={previewVisible}>
       <section className="panel worklist-panel" aria-label="Case List">
@@ -177,10 +199,11 @@ export function Worklist({ cases, loading, total, counts, filteredCounts, assign
             <button className="button secondary" disabled={saved.busy || !saved.ready} onClick={() => saved.saveColumns(columnSettings)}>Save My Default Columns</button>
           </div></details>
         </div>
-        <MoreFilters filters={filters} onApply={(value) => { edited.current = true; setFilters(value); setOffset(0); }} />
+        {workload && <Workload rows={workload} />}
+        <MoreFilters filters={filters} queues={queues} onApply={(value) => { edited.current = true; setFilters(value); setOffset(0); }} />
         <div className="table-scroll"><table><thead><tr><th scope="col">Case ID</th>{shownColumns.map(({ id, label }) => <th scope="col" key={id}>{label}</th>)}<th scope="col"><span className="sr-only">Open</span></th></tr></thead>
           <tbody>{cases.map((item) => <tr key={item.id} className={selected?.id === item.id ? 'selected-row' : undefined} onClick={() => onSelect(item.id)}>
-            <td><button className="case-id" onClick={(event) => { event.stopPropagation(); onSelect(item.id); }} aria-pressed={selected?.id === item.id}>{item.id}</button></td>
+            <td><button className="case-id" onClick={(event) => { event.stopPropagation(); onSelect(item.id); }} aria-pressed={selected?.id === item.id}>{item.id}</button>{item.worklist?.priority && !shownColumns.some(({ id }) => id === 'priority') && <span className="case-priority-inline">{columnValue(item, 'priority')}</span>}</td>
             {shownColumns.map(({ id }) => <td className="nowrap" key={id}>{columnValue(item, id)}</td>)}
             <td><button className="icon-button" aria-label={`${item.id} details`} onClick={(event) => { event.stopPropagation(); onOpen(item.id); }}><ArrowRight size={16} /></button></td>
           </tr>)}</tbody></table></div>
@@ -195,7 +218,7 @@ export function Worklist({ cases, loading, total, counts, filteredCounts, assign
       <aside className="panel case-preview" id="worklist-preview" aria-label="Selected Case Preview" hidden={!previewVisible}>
         <div className="panel-title"><h2>Case Preview</h2><ScanLine size={18} className="muted" /></div>
         {selected ? <div className="preview-content">
-          <div className="preview-heading"><strong>{selected.id}</strong><StatusLabel status={selected.status} /></div>
+          <div className="preview-heading"><strong>{selected.id}</strong><StatusLabel status={selected.status} />{selected.worklist?.priority && columnValue(selected, 'priority')}</div>
           <dl className="key-values"><div><dt>Specimen</dt><dd>{selected.specimen}</dd></div><div><dt>Assignee</dt><dd>{selected.assignee || 'Unassigned'}</dd></div><div><dt>Patient Information</dt><dd>{selected.patient?.number || (selected.patient ? 'Registered' : 'Not Entered')}</dd></div></dl>
           <div className="preview-label"><h3>Slides</h3><span>{selected.source === 'files' ? `${selected.slides.length} files registered` : `${readyCount(selected)}/${selected.slides.length} Viewable`}</span></div>
           {selected.slides.length ? <div className="preview-slides">{selected.slides.map((slide) => <button key={slide.id} className="slide-preview" disabled={!slide.wsi} onClick={() => onViewer(selected.id, slide.id)}>

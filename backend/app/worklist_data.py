@@ -103,7 +103,7 @@ async def read_metadata(session, user, authorized_cases, records):
             "specimen_terms": [value for item in case_specimens for value in (item.specimen_number, item.description) if value],
             "specimen_label": ", ".join(item.description or item.specimen_number for item in case_specimens),
             "slide_ids": [number for number, _ in scan_rows], "slide_state": slide_state,
-            "slide_count": sum(max(1, total) for _, total in scan_rows),
+            "slide_count": sum(max(1, total) for _, total in scan_rows), "workload_slides": len(scan_rows),
             "has_storage": any(total for _, total in scan_rows),
             "lis_status": next(iter(lis_values)) if len(lis_values) == 1 else None,
             "lis_data": "available" if len(lis_values) == 1 else "conflict" if lis_values else "missing",
@@ -120,6 +120,7 @@ def file_metadata(row):
         "collection_date": None, "age": None, "specimen_terms": row["specimen_terms"],
         "specimen_label": row["specimen"], "slide_ids": [slide["label"] for slide in row["slides"]],
         "slide_state": ["viewable"], "slide_count": len(row["slides"]), "has_storage": True,
+        "workload_slides": len({(slide["specimen"], slide["label"]) for slide in row["slides"]}),
         "lis_status": None, "lis_data": "missing", "lis_sources": [], "request_count": None, "review_note": None,
     }
 
@@ -136,6 +137,10 @@ def matches_advanced(row, filters, today):
         folded = keyword.casefold()
         return not folded or any(folded in value.casefold() for value in values if value)
 
+    if filters.group_key and row.get("group_key") != filters.group_key:
+        return False
+    if filters.priority and (row.get("priority") or "unset") != filters.priority:
+        return False
     patient = row["patient"] or {}
     if not includes(filters.patient_name, patient.get("name")) or not includes(
         filters.patient_id, patient.get("localRef"), *(item["value"] for item in row["mrns"])
@@ -175,3 +180,21 @@ def row_fields(row):
     keys = ("mrns", "collection_date", "age", "slide_state", "slide_count", "has_storage", "lis_status", "lis_data",
             "lis_sources", "request_count", "review_note", "last_opened")
     return {key: row.get(key) for key in keys}
+
+
+def assignment_workload(rows, staff):
+    people = {item.id: item.display_name for item in staff}
+    totals = {}
+    for row in rows:
+        key = row["assigned_to"]
+        workload = totals.setdefault(key, {
+            "assigned_to": key, "name": people.get(key, "Unassigned"), "cases": 0, "open_cases": 0,
+            "in_review": 0, "completed": 0, "slides": 0, "frozen": 0,
+        })
+        workload["cases"] += 1
+        workload["open_cases"] += row["status"] != "reviewed"
+        workload["in_review"] += row["status"] == "in_review"
+        workload["completed"] += row["status"] == "reviewed"
+        workload["slides"] += row["workload_slides"]
+        workload["frozen"] += row.get("priority") == "frozen"
+    return sorted(totals.values(), key=lambda row: (row["assigned_to"] is None, row["name"].casefold()))

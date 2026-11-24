@@ -12,15 +12,16 @@ from sqlalchemy.dialects.postgresql import insert
 from app.auth import CurrentUser, Session, require_roles
 from app.clinical import ClinicalInput
 from app.models import WorklistPreference, WorklistView
+from app.workgroup_policy import GroupKey, Priority
 
 router = APIRouter(prefix="/api/worklist", tags=["Worklist settings"])
 Scope = Literal["all", "mine", "unassigned"]
 CaseStatus = Literal["registered", "assigned", "in_review", "reviewed"]
 SortField = Literal["created_at", "case_number", "status", "assignee", "slide_count",
-                    "accessioned_at", "collection_date", "last_opened", "age", "patient_name", "specimen", "lis_status"]
+                    "accessioned_at", "collection_date", "last_opened", "age", "patient_name", "specimen", "lis_status", "priority", "group"]
 Column = Literal["specimen", "assignee", "status", "slides", "received", "patient", "mrn", "sex", "birth", "age",
                  "slideState", "group", "lis", "storage", "tags", "created", "comments", "requests", "notes",
-                 "collected", "lastOpened", "localPatientId", "source"]
+                 "collected", "lastOpened", "localPatientId", "source", "priority"]
 Visibility = Literal["private", "shared"]
 Version = Annotated[int, Field(ge=1)]
 Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
@@ -36,7 +37,7 @@ class ColumnSetting(ClinicalInput):
     visible: bool
 
 
-Columns = Annotated[list[ColumnSetting], Field(max_length=23)]
+Columns = Annotated[list[ColumnSetting], Field(max_length=24)]
 SortOrder = Annotated[list[SortTerm], Field(min_length=1, max_length=3)]
 
 
@@ -50,6 +51,8 @@ FilterText = Annotated[str, StringConstraints(strip_whitespace=True, max_length=
 
 
 class AdvancedFilters(ClinicalInput):
+    group_key: GroupKey | None = None
+    priority: Priority | Literal["unset"] | None = None
     patient_name: FilterText = ""
     patient_id: FilterText = ""
     sex: Literal["female", "male", "intersex", "other", "unknown", "missing"] | None = None

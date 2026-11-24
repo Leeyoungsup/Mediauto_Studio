@@ -67,6 +67,37 @@ class Patient(ClinicalRecord, Base):
     source: Mapped[str] = mapped_column(String(24), nullable=False)
 
 
+class Workgroup(ClinicalRecord, Base):
+    __tablename__ = "workgroups"
+    __table_args__ = (UniqueConstraint("organization", "key"),)
+
+    key: Mapped[str] = mapped_column(String(48))
+    name: Mapped[str] = mapped_column(String(80))
+
+
+class WorkgroupMember(Base):
+    __tablename__ = "workgroup_members"
+    __table_args__ = (
+        ForeignKeyConstraint(("organization", "group_key"), ("workgroups.organization", "workgroups.key")),
+        ForeignKeyConstraint(("organization", "user_id"), ("auth_users.organization", "auth_users.id")),
+    )
+
+    organization: Mapped[str] = mapped_column(String(64), primary_key=True)
+    group_key: Mapped[str] = mapped_column(String(48), primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+
+
+class QueueSubscription(Base):
+    __tablename__ = "queue_subscriptions"
+    __table_args__ = (
+        ForeignKeyConstraint(("organization", "user_id"), ("auth_users.organization", "auth_users.id"), ondelete="CASCADE"),
+    )
+
+    organization: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    queue_key: Mapped[str] = mapped_column(String(48), primary_key=True)
+
+
 class Case(ClinicalRecord, Base):
     __tablename__ = "cases"
     __table_args__ = (
@@ -76,8 +107,16 @@ class Case(ClinicalRecord, Base):
         ForeignKeyConstraint(("organization", "assigned_to"), ("auth_users.organization", "auth_users.id"), name="fk_cases_assignee"),
         Index("ix_cases_patient", "organization", "patient_id"),
         Index("ix_cases_assignee", "organization", "assigned_to"),
+        Index("ix_cases_workgroup", "organization", "group_key"),
+        ForeignKeyConstraint(("organization", "group_key"), ("workgroups.organization", "workgroups.key"), name="fk_cases_workgroup"),
+        CheckConstraint("priority IN ('routine', 'urgent', 'frozen')", name="case_priority"),
+        CheckConstraint("(priority IS NULL AND priority_source IS NULL) OR "
+                        "(priority IS NOT NULL AND priority_source IS NOT NULL)", name="case_priority_source"),
     )
 
+    group_key: Mapped[str | None] = mapped_column(String(48))
+    priority: Mapped[str | None] = mapped_column(String(16))
+    priority_source: Mapped[str | None] = mapped_column(String(24))
     accessioned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     case_number: Mapped[str] = mapped_column(String(80), nullable=False)
     patient_id: Mapped[UUID | None] = mapped_column(Uuid)

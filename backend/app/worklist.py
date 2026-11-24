@@ -11,9 +11,10 @@ from pydantic import Field, StringConstraints
 from app.auth import CurrentUser, Session, WRITERS
 from app.clinical import case_visibility
 from app.intake import DATA_ROOT, scan_files, slide_entries
-from app.models import AuthUser, Case, ClinicalEvent, Patient, Slide, SlideScan, Specimen, WorklistOpen
+from app.models import AuthUser, Case, ClinicalEvent, Patient, Slide, SlideScan, Specimen, Workgroup, WorklistOpen
 from app.workflow import eligible_assignees
-from app.worklist_data import WORKLIST_ZONE, add_open_times, file_metadata, matches_advanced, read_metadata, record_key, row_fields
+from app.workgroup_policy import get_groups
+from app.worklist_data import WORKLIST_ZONE, add_open_times, assignment_workload, file_metadata, matches_advanced, read_metadata, record_key, row_fields
 from app.worklist_views import AdvancedFilters, CaseStatus, Scope, SortTerm, ensure_unique
 
 router = APIRouter(prefix="/api/worklist", tags=["Worklist"])
@@ -119,7 +120,8 @@ def reference_row(record):
     return {
         "record_id": record.id, "case_number": record.case_number, "status": record.status,
         "assigned_to": record.assigned_to, "version": record.version, "created_at": record.created_at.isoformat(),
-        "accessioned_at": record.accessioned_at,
+        "accessioned_at": record.accessioned_at, "group_key": record.group_key, "priority": record.priority,
+        "priority_source": record.priority_source,
     }
 
 
@@ -132,6 +134,7 @@ LEGACY_ORDER = {
     "oldest": [SortTerm(field="created_at", direction="asc"), SortTerm(field="case_number", direction="asc")],
     "case": [SortTerm(field="case_number", direction="asc")],
 }
+PRIORITY_ORDER = {"frozen": 0, "urgent": 1, "routine": 2}
 STATUS_ORDER = {state: index for index, state in enumerate(("registered", "assigned", "in_review", "reviewed"))}
 
 
@@ -171,7 +174,9 @@ def sorted_rows(filtered, staff, terms):
             "age": lambda row: row["age"],
             "patient_name": lambda row: ((row["patient"] or {}).get("name") or "").casefold() or None,
             "specimen": lambda row: row["specimen_label"].casefold() or None,
-            "lis_status": lambda row: row["lis_status"].casefold() if row["lis_status"] else None}
+            "lis_status": lambda row: row["lis_status"].casefold() if row["lis_status"] else None,
+            "priority": lambda row: PRIORITY_ORDER.get(row.get("priority")),
+            "group": lambda row: row["group_name"].casefold() if row.get("group_name") else None}
     ordered = sorted(filtered, key=lambda row: (row["case_number"].casefold(), row["case_number"], str(row["record_id"] or "")))
     for term in reversed(terms):
         values, missing = [], []
@@ -209,11 +214,15 @@ async def search_worklist(filters: WorklistParameters, user: CurrentUser, sessio
 
 async def query_worklist(user, session, filters):
     terms = parse_order(filters.order, filters.sort)
+    if filters.group_key is not None and filters.group_key not in await get_groups(session, user):
+        raise HTTPException(404, "Workgroup not found.")
     authorized = accessible_cases(user)
     records = (await session.scalars(authorized)).all()
     lookup = {record.id: record for record in records}
+    names = dict((await session.execute(select(Workgroup.key, Workgroup.name).where(
+        Workgroup.organization == user.organization, Workgroup.key.in_({record.group_key for record in records if record.group_key})))).all())
     metadata = await read_metadata(session, user, authorized, records) if records else {}
-    rows = [{**reference_row(record), **metadata[record.id]} for record in records]
+    rows = [{**reference_row(record), **metadata[record.id], "group_name": names.get(record.group_key)} for record in records]
     files = await legacy_rows(session, user, {record.case_number for record in records})
     rows.extend({**row, **file_metadata(row)} for row in files)
     await add_open_times(session, user, rows)
@@ -244,9 +253,10 @@ async def query_worklist(user, session, filters):
         base = details.get(row["record_id"], row)
         if not row["record_id"]:
             base = {key: value for key, value in row.items() if key not in ("slide_ids", "specimen_terms", "specimen_label")}
-        result.append({**base, **row_fields(row), "patient": row["patient"]})
+        result.append({**base, **row_fields(row), "patient": row["patient"], "group_name": row.get("group_name")})
     return {"rows": result, "total": len(filtered), "counts": counts, "filtered_counts": filtered_counts,
-            "assignees": [{"id": item.id, "name": item.display_name} for item in staff]}
+            "assignees": [{"id": item.id, "name": item.display_name} for item in staff],
+            "workload": assignment_workload(filtered, staff) if user.role in ("admin", "doctor") else None}
 
 
 async def remember_open(session, user, key):
@@ -285,6 +295,9 @@ async def worklist_case(case_id: UUID, user: CurrentUser, session: Session):
     if record is None:
         raise HTTPException(404, "Case not found.")
     result = (await clinical_details(session, user.organization, [record]))[record.id]
+    if record.group_key:
+        result["group_name"] = await session.scalar(select(Workgroup.name).where(
+            Workgroup.organization == user.organization, Workgroup.key == record.group_key))
     events = (await session.scalars(select(ClinicalEvent).where(
         ClinicalEvent.organization == user.organization, ClinicalEvent.record_type == "cases",
         ClinicalEvent.record_id == record.id,
@@ -312,6 +325,6 @@ async def worklist_case(case_id: UUID, user: CurrentUser, session: Session):
     } for event in events]
     if user.role == "admin" and record.status != "reviewed":
         result["candidates"] = [{"id": doctor.id, "name": doctor.display_name, "username": doctor.username}
-                                for doctor in await session.scalars(eligible_assignees(user.organization)
+                                for doctor in await session.scalars(eligible_assignees(user.organization, record.group_key)
                                 .order_by(AuthUser.display_name, AuthUser.username))]
     return result

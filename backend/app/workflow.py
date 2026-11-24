@@ -15,6 +15,7 @@ from app.clinical import (
     require_version, scan_metadata, write,
 )
 from app.models import AuthUser, Case, Patient, Slide, SlideScan, Specimen
+from app.workgroup_policy import GroupKey, Priority, group_member, lock_group, member_filter
 
 router = APIRouter(prefix="/api/clinical/{organization}", tags=["Case workflow"])
 
@@ -33,10 +34,11 @@ class Review(CaseChange):
     note: Annotated[str, StringConstraints(strip_whitespace=True, max_length=2000)] = ""
 
 
-def eligible_assignees(organization):
-    return select(AuthUser).where(
+def eligible_assignees(organization, group_key=None):
+    query = select(AuthUser).where(
         AuthUser.organization == organization, AuthUser.role == "doctor", AuthUser.active.is_(True),
     )
+    return query.where(member_filter(organization, group_key)) if group_key else query
 
 
 def record_change(session, case, action, before, reason, *, note=""):
@@ -55,9 +57,11 @@ async def assign_case(organization: Organization, case_id: UUID, data: Assignmen
         require_version(case, data.version)
         if case.status not in ("registered", "assigned", "in_review"):
             raise HTTPException(409, "Assignment cannot be changed in the current status.")
-        assignee = await session.scalar(eligible_assignees(organization).where(AuthUser.id == data.assignee_id).with_for_update())
+        if case.group_key:
+            await lock_group(session, session.info["user"], case.group_key)
+        assignee = await session.scalar(eligible_assignees(organization, case.group_key).where(AuthUser.id == data.assignee_id).with_for_update())
         if assignee is None:
-            raise HTTPException(422, "Select an active pathologist in your organization.")
+            raise HTTPException(422, "Select an active pathologist eligible for this workgroup.")
         if case.assigned_to == assignee.id:
             return public_fields(case)
         before = relationship_state(case)
@@ -65,6 +69,40 @@ async def assign_case(organization: Organization, case_id: UUID, data: Assignmen
         case.assigned_to = assignee.id
         case.status = "assigned"
         return record_change(session, case, action, before, data.reason)
+
+
+class Classification(CaseChange):
+    group_key: GroupKey | None
+    priority: Priority | None
+
+
+@router.patch("/cases/{case_id}/classification")
+async def classify_case(organization: Organization, case_id: UUID, data: Classification, session: Session):
+    async with write(session):
+        user = session.info["user"]
+        case = await find(session, Case, organization, case_id, lock=True)
+        require_version(case, data.version)
+        if case.status == "reviewed":
+            raise HTTPException(409, "Classification is locked after review.")
+        if data.group_key != case.group_key:
+            keys = {data.group_key}
+            if user.role != "admin":
+                keys.add(case.group_key)
+            for key in sorted(keys - {None}):
+                await lock_group(session, user, key)
+            if data.group_key:
+                if case.assigned_to and not await group_member(session, organization, data.group_key, case.assigned_to):
+                    raise HTTPException(409, "The assigned pathologist is not a member of the selected workgroup.")
+        elif data.group_key and user.role != "admin":
+            await lock_group(session, user, data.group_key)
+        if (case.group_key, case.priority) == (data.group_key, data.priority):
+            return public_fields(case)
+        before = relationship_state(case)
+        case.group_key = data.group_key
+        if case.priority != data.priority:
+            case.priority = data.priority
+            case.priority_source = "manual" if data.priority else None
+        return record_change(session, case, "classification_changed", before, data.reason)
 
 
 @router.patch("/cases/{case_id}/review")

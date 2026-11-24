@@ -5,7 +5,7 @@ export const columns = [
   { id: 'status', label: 'Review Status' }, { id: 'slides', label: 'Slides' }, { id: 'received', label: 'Accessioned At' },
   { id: 'patient', label: 'Patient Name' }, { id: 'mrn', label: 'Medical Record Number (MRN)' },
   { id: 'sex', label: 'Sex' }, { id: 'birth', label: 'Date of Birth' }, { id: 'age', label: 'Age at Collection' },
-  { id: 'slideState', label: 'Slide Status' }, { id: 'group', label: 'Group' }, { id: 'lis', label: 'LIS Case Status' },
+  { id: 'priority', label: 'Priority' }, { id: 'slideState', label: 'Slide Status' }, { id: 'group', label: 'Group' }, { id: 'lis', label: 'LIS Case Status' },
   { id: 'storage', label: 'Storage Status' }, { id: 'tags', label: 'Tags' }, { id: 'created', label: 'Registered At' },
   { id: 'collected', label: 'Collection Date' }, { id: 'lastOpened', label: 'Last Opened' },
   { id: 'localPatientId', label: 'Local Patient ID' }, { id: 'source', label: 'Data Source' },
@@ -40,7 +40,7 @@ export type Scope = 'all' | 'mine' | 'unassigned';
 export const sortFields = {
   created_at: 'Registered At', case_number: 'Case ID', status: 'Review Status', assignee: 'Assignee', slide_count: 'Slide Count',
   accessioned_at: 'Accessioned At', collection_date: 'Collection Date', last_opened: 'Last Opened', age: 'Age at Collection',
-  patient_name: 'Patient Name', specimen: 'Specimen', lis_status: 'LIS Case Status',
+  patient_name: 'Patient Name', specimen: 'Specimen', lis_status: 'LIS Case Status', priority: 'Priority', group: 'Workgroup',
 } as const;
 export type SortField = keyof typeof sortFields;
 export type SortTerm = { field: SortField; direction: 'asc' | 'desc' };

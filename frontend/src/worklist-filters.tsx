@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { priorityLabels } from './workgroups';
+import type { Priority, Queue } from './workgroups';
 import { ListFilter, X } from 'lucide-react';
 import type { FormEvent } from 'react';
 
@@ -14,6 +16,7 @@ const lisOptions = { available: 'Available', missing: 'Not Available', conflict:
 const sexOptions = { ...sexLabels, missing: 'Not Recorded' };
 
 export type AdvancedFilters = {
+  group_key?: string; priority?: Priority | 'unset';
   patient_name?: string; patient_id?: string; sex?: keyof typeof sexOptions;
   specimen?: string; slide_id?: string; slide_state?: keyof typeof slideStates;
   lis_status?: string; lis_data?: keyof typeof lisOptions;
@@ -45,7 +48,7 @@ function rangeLabel(from: number | string | undefined, to: number | string | und
   return from != null && to != null ? `${from}–${to}` : from != null ? `≥ ${from}` : `≤ ${to}`;
 }
 
-export function MoreFilters({ filters, onApply }: { filters: AdvancedFilters; onApply: (value: AdvancedFilters) => void }) {
+export function MoreFilters({ filters, queues, onApply }: { filters: AdvancedFilters; queues: Queue[]; onApply: (value: AdvancedFilters) => void }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<AdvancedFilters>(filters);
   const [error, setError] = useState('');
@@ -73,9 +76,12 @@ export function MoreFilters({ filters, onApply }: { filters: AdvancedFilters; on
     const value = filters[key as keyof AdvancedFilters];
     if (value) chips.push({ keys: [key], label: `${label}: ${value}` });
   }
-  for (const { key, label, options } of selects) {
+  const groupOptions = Object.fromEntries(queues.filter((queue) => queue.group_key).map((queue) => [queue.group_key!, queue.name]));
+  const extraSelects = [{ key: 'group_key', label: 'Workgroup', options: groupOptions },
+    { key: 'priority', label: 'Priority', options: { ...priorityLabels, unset: 'Not Set' } }];
+  for (const { key, label, options } of [...selects, ...extraSelects]) {
     const value = filters[key as keyof AdvancedFilters];
-    if (typeof value === 'string') chips.push({ keys: [key], label: `${label}: ${(options as Record<string, string>)[value]}` });
+    if (typeof value === 'string') chips.push({ keys: [key], label: `${label}: ${((options as Record<string, string>)[value] ?? value)}` });
   }
   if (filters.age_min != null || filters.age_max != null) {
     chips.push({ keys: ['age_min', 'age_max'], label: 'Age at Collection: ' + rangeLabel(filters.age_min, filters.age_max) });
@@ -97,7 +103,7 @@ export function MoreFilters({ filters, onApply }: { filters: AdvancedFilters; on
       <div className="advanced-filter-fields">
         {textInputs.map(({ key, label }) => <label className="form-field" key={key}>{label}
           <input maxLength={160} value={draft[key as keyof AdvancedFilters] ?? ''} onChange={(event) => set(key, event.target.value)} /></label>)}
-        {selects.map(({ key, label, options }) => <label className="form-field" key={key}>{label}
+        {[...extraSelects, ...selects].map(({ key, label, options }) => <label className="form-field" key={key}>{label}
           <select value={draft[key as keyof AdvancedFilters] ?? ''} onChange={(event) => set(key, event.target.value)}>
             <option value="">Any</option>{Object.entries(options).map(([value, display]) => <option key={value} value={value}>{display}</option>)}
           </select></label>)}

@@ -1,3 +1,4 @@
+import type { AssignmentLoad } from './workgroups';
 import type { AdvancedFilters } from './worklist-filters';
 import type { SortTerm } from './worklist-config';
 import type { CaseStatus, DemoCase, Slide, WorklistData } from './demo';
@@ -16,7 +17,7 @@ export type WorklistEntry = WorklistData & {
   created_at: string; history: string[]; version?: number; assigned_to?: string | null;
   candidates?: DemoCase['candidates']; audit?: DemoCase['audit'];
 };
-export type Result = { rows: WorklistEntry[]; counts: Counts; total: number; assignees: Assignee[]; filtered_counts?: Record<State, number> };
+export type Result = { rows: WorklistEntry[]; counts: Counts; total: number; assignees: Assignee[]; filtered_counts?: Record<State, number>; workload?: AssignmentLoad[] | null };
 export const emptyResult: Result = { rows: [], total: 0, assignees: [],
   counts: { all: 0, mine: 0, unassigned: 0, statuses: { registered: 0, assigned: 0, in_review: 0, reviewed: 0 } } };
 

@@ -111,4 +111,5 @@ import_snapshot(options)
 PYFIXTURE
     )
     node scripts/case-requests-browser.mjs
+    node scripts/workgroups-browser.mjs
 fi

@@ -6,9 +6,9 @@ import { readyCount } from './demo';
 import type { DemoCase } from './demo';
 import { SlidePreview, StatusLabel } from './worklist';
 
-export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, onConfirm, patientIntegration, requests, report, initialTab, dates }: {
+export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, onConfirm, patientIntegration, requests, report, initialTab, dates, routing }: {
   item: DemoCase; emr: string; onBack: () => void; onViewer: (slide?: string) => void;
-  onAssign?: () => void; onReview?: () => void; onConfirm?: () => void; patientIntegration?: ReactNode; requests?: ReactNode; report?: ReactNode; initialTab?: string; dates?: ReactNode;
+  onAssign?: () => void; onReview?: () => void; onConfirm?: () => void; patientIntegration?: ReactNode; requests?: ReactNode; report?: ReactNode; initialTab?: string; dates?: ReactNode; routing?: ReactNode;
 }) {
   const [tab, setTab] = useState(initialTab ?? 'Slides');
   const available = readyCount(item);
@@ -46,6 +46,7 @@ export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, on
       <aside className="panel"><div className="panel-title"><h2>Assignment Details</h2><ClipboardList className="muted" size={18} /></div>
         <div className="preview-content">
           <dl className="key-values"><div><dt>Assigned Pathologist</dt><dd>{item.assignee || 'Unassigned'}</dd></div><div><dt>Review Status</dt><dd><StatusLabel status={item.status} /></dd></div><div><dt>Viewable</dt><dd>{available}/{item.slides.length} slides</dd></div></dl>
+          {routing}
           {onAssign && <button className="button primary full" onClick={onAssign}>{item.assignedTo ? 'Reassign' : 'Assign Case'}</button>}
           {onConfirm && <button className="button secondary full" onClick={onConfirm}>Confirm Case from Registered Files</button>}
         </div>

@@ -169,7 +169,7 @@ def add_event(session: AsyncSession, record, action: str, before: dict, after: d
 
 def relationship_state(record) -> dict:
     state = {}
-    for field in ("status", "assigned_to", "patient_id", "case_id", "specimen_id", "slide_id", "accessioned_at", "collection_date"):
+    for field in ("status", "assigned_to", "patient_id", "case_id", "specimen_id", "slide_id", "accessioned_at", "collection_date", "group_key", "priority", "priority_source"):
         if hasattr(record, field):
             value = getattr(record, field)
             state[field] = str(value) if isinstance(value, UUID) else value.isoformat() if isinstance(value, date) else value

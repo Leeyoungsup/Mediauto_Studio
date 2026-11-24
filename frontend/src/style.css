@@ -401,3 +401,30 @@ dialog::backdrop { background: #21193575; }
 .case-dates { border: 1px solid var(--line); padding: 8px 10px; border-radius: 8px; }
 .case-dates summary { cursor: pointer; font-weight: 600; }
 .case-dates form { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin-top: 8px; }
+
+.queue-navigation { padding: 0 0 8px; }
+.queue-menu { position: relative; }
+.queue-menu > summary { list-style: none; }
+.queue-menu > summary::-webkit-details-marker { display: none; }
+.queue-menu-items { position: absolute; inset-block-start: calc(100% + 5px); inset-inline-start: 0; z-index: 5;
+  width: min(340px, 86vw); max-height: 55vh; overflow-y: auto; padding: 8px; box-shadow: 0 8px 16px #33245117; }
+.queue-menu-row, .group-members li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; align-items: center; margin-bottom: 5px; }
+.queue-pin[aria-pressed=true] { color: var(--accent-dark); border-color: #c3b3ef; background: var(--accent-soft); }
+.workload-panel { padding: 0 12px 8px; }
+.workload-panel > summary, .case-routing > summary { cursor: pointer; font-weight: 650; }
+.workload-panel .table-scroll { margin-top: 5px; max-height: 240px; overflow: auto; }
+.workload-panel tbody th { position: static; }
+.case-priority-inline { margin-inline-start: 5px; }
+.priority-badge { display: inline-block; border-radius: 5px; padding: 2px 6px; font-size: 12px; font-weight: 650; }
+.priority-frozen { color: #28539c; background: #e5f0ff; }
+.priority-urgent { color: #8a4121; background: #fff0df; }
+.priority-routine { color: #4a4562; background: #f2eff9; }
+.case-routing { min-width: 0; border: 1px solid var(--line); padding: 7px; border-radius: 7px; }
+.case-routing form, .case-routing dl { display: grid; gap: 6px; margin-top: 8px; }
+.workgroup-settings { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); align-items: start; gap: 12px; }
+.workgroup-settings .actions { align-items: end; }
+.group-members { list-style: none; padding: 0; margin: 0; }
+.settings-actions { margin-bottom: 10px; }
+@media (max-width: 720px) {
+  .workgroup-settings { grid-template-columns: minmax(0, 1fr); }
+}
