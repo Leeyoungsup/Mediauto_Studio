@@ -30,6 +30,10 @@ Worklist에서는 **Hide Case Preview**로 목록을 넓힐 수 있습니다. WS
 
 규칙과 파일 등록 정보는 개발 PostgreSQL에 저장되며, 이미 등록한 파일은 규칙을 다시 적용해도 유지됩니다. 등록 정보는 Worklist에서 Case ID로 묶어 확인합니다. 같은 Slide ID의 NDPI와 SVS는 서로 다른 원본 파일로 표시됩니다. 등록된 스캔은 케이스 상세의 WSI 뷰어에서 열 수 있습니다.
 
+### 41. Institutional Integration Contract
+
+[41번 기관 연동 계약 초안과 수락 시험](work/institution-integration-41.md)에 스캐너·EMR/LIS·PACS/VNA의 AP/CP 범위, 상태 원천, 장애·복구와 보존 조건을 정리했습니다. 기관 접속 및 수락 시험은 승인된 환경과 명세 확인을 기다리고 있습니다.
+
 ### 40. Related Pap and Biopsy Cases
 
 **Case Details** 또는 **WSI Viewer → Related Pap and Biopsy Cases**에서 같은 환자의 Pap·조직생검 연결을 대조하고 승인합니다. **Open Independent Comparison**은 별도 탭에 두 스캔을 표시하며 각각 독립적으로 확대하고 이동할 수 있습니다. [40번 연결 기준과 검증](work/related-cases-40.md)

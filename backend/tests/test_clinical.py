@@ -743,7 +743,15 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         failed = await wait_delivery(original_version, "failed")
         self.assertEqual((failed["error"], failed["attempts"], failed["ack_id"]), ("invalid_ack", 3, None))
         await action("correct", original_version, 409, reason="Cannot cross unresolved delivery")
-        await check(self.client.put(lis, json={"version": 1, "mode": "mock", "scenario": "normal", "report_delivery_enabled": True}))
+        disabled = await check(self.client.put(lis, json={"version": 1, "mode": "disabled"}))
+        self.assertFalse(disabled["report_delivery_enabled"])
+        await check(self.client.post(path + "/retry", json={"version": original_version}), 409)
+        self.assertEqual(await wait_delivery(original_version, "failed"), failed)
+        retained = await check(self.client.get(f"{path}/versions/{original_version}"))
+        self.assertEqual(retained["sections"]["diagnosis"], dictation)
+        await check(self.client.put(lis, json={
+            "version": disabled["version"], "mode": "mock", "scenario": "normal", "report_delivery_enabled": True,
+        }))
         retried = await check(self.client.post(path + "/retry", json={"version": original_version}), 202)
         self.assertEqual(retried["id"], queued["id"])
         original_ack = await wait_delivery(original_version, "acknowledged")
