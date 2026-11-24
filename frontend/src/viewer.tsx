@@ -56,7 +56,7 @@ function ImageViewport({ slide }: { slide: Slide }) {
   const imageSource = slide.image && (attempt ? `${slide.image}?retry=${attempt}` : slide.image);
 
   return <section className="image-panel" aria-label="슬라이드 미리보기">
-    <div className="image-toolbar"><span><ScanLine size={17} /> {slide.id} <span className="image-stain">{slide.stain}</span></span>
+    <div className="image-toolbar"><span><ScanLine size={17} /> {slide.label ?? slide.id} <span className="image-stain">{slide.stain}</span></span>
       <div className="image-actions">
         <button className="icon-button" title="축소" aria-label="축소" disabled={!canView || failed || position.zoom === 1} onClick={() => setPosition(magnify(position, 1 / 1.3))}><Minus size={18} /></button>
         <output aria-label="미리보기 배율" className="zoom-value">{position.zoom.toFixed(1)}×</output>
@@ -69,8 +69,8 @@ function ImageViewport({ slide }: { slide: Slide }) {
       onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }} onLostPointerCapture={() => { drag.current = null; }}>
       {canView && !failed ? <img className="tissue-image" alt={`${slide.id} 조직 영상`} src={imageSource} draggable={false}
         onError={() => setFailed(true)} style={{ transform: `translate(${position.x}px, ${position.y}px) scale(${position.zoom})` }} />
-        : <div className="image-empty" role="status"><AlertTriangle size={25} /><strong>{slide.state === '준비 중' ? '슬라이드 준비 중' : '슬라이드를 열 수 없습니다.'}</strong>
-          <p>{slide.state === '준비 중' ? '다른 슬라이드를 선택할 수 있습니다.' : '슬라이드 연결 상태를 확인하거나 다른 슬라이드를 선택하세요.'}</p>
+        : <div className="image-empty" role="status"><AlertTriangle size={25} /><strong>{slide.state === '뷰어 연동 전' ? '파일 정보가 등록되었습니다.' : slide.state === '준비 중' ? '슬라이드 준비 중' : '슬라이드를 열 수 없습니다.'}</strong>
+          <p>{slide.state === '뷰어 연동 전' ? '등록 정보는 슬라이드 등록에서 확인할 수 있습니다.' : slide.state === '준비 중' ? '다른 슬라이드를 선택할 수 있습니다.' : '슬라이드 연결 상태를 확인하거나 다른 슬라이드를 선택하세요.'}</p>
           {failed && <button className="button secondary" onClick={() => { setFailed(false); setAttempt(attempt + 1); }}>다시 시도</button>}
         </div>}
       {canView && !failed && navigatorVisible && <button className="minimap" aria-label="미니맵에서 이동" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => {
@@ -81,7 +81,7 @@ function ImageViewport({ slide }: { slide: Slide }) {
         setPosition(move(-x, -y, position.zoom));
       }}><img alt="" src={slide.image} draggable={false} /><span style={{ width: `${100 / position.zoom}%`, height: `${100 / position.zoom}%`, left: `${50 - position.x / (width * position.zoom) * 100}%`, top: `${50 - position.y / (height * position.zoom) * 100}%` }} /></button>}
     </div>
-    <footer className="image-footer"><span>공개 조직 이미지 · 시연용 미리보기</span><span>{slide.state}</span></footer>
+    <footer className="image-footer"><span>{slide.state === '뷰어 연동 전' ? 'data/ 스캔 파일' : '공개 조직 이미지 · 시연용 미리보기'}</span><span>{slide.state}</span></footer>
   </section>;
 }
 
@@ -97,7 +97,7 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview }: {
     <div className="viewer-layout">
       <aside className="panel viewer-tray"><div className="panel-title"><h2>슬라이드</h2><span className="count">{item.slides.length}</span></div>
         <div className="tray-items">{item.slides.map((entry) => <button className="tray-item" key={entry.id} onClick={() => onSlide(entry.id)} aria-pressed={slide?.id === entry.id}>
-          <span className="slide-image"><SlidePreview slide={entry} /></span><span><strong>{entry.id}</strong><small>{entry.stain} · {entry.state}</small></span>
+          <span className="slide-image"><SlidePreview slide={entry} /></span><span><strong>{entry.label ?? entry.id}</strong><small>{entry.stain} · {entry.state}</small></span>
         </button>)}</div>
       </aside>
       {slide ? <ImageViewport key={slide.id} slide={slide} /> : <div className="panel empty"><ScanLine size={30} /><strong>연결된 슬라이드가 없습니다.</strong><button className="button secondary" onClick={onBack}>케이스 상세로 이동</button></div>}

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from starlette.staticfiles import StaticFiles
 
 from app.database import database_url
+from app.intake import router as intake_router
 from app.models import ApplicationSetting
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Mediauto Studio", lifespan=lifespan)
+app.include_router(intake_router)
 
 
 @app.get("/api/health", responses={503: {"model": Health}})
