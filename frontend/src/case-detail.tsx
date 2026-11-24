@@ -1,14 +1,14 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
-import { ArrowLeft, ArrowRight, ClipboardList, MessageSquare, FileSymlink, History, ScanLine, UserRound } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ClipboardList, PencilLine, MessageSquare, FileSymlink, History, ScanLine, UserRound } from 'lucide-react';
 import { CaseAudit } from './case-audit';
 import { readyCount } from './demo';
 import type { DemoCase } from './demo';
 import { SlidePreview, StatusLabel } from './worklist';
 
-export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, onConfirm, patientIntegration, requests, report, initialTab, dates, routing }: {
+export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, onConfirm, patientIntegration, requests, report, initialTab, dates, routing, editor }: {
   item: DemoCase; emr: string; onBack: () => void; onViewer: (slide?: string) => void;
-  onAssign?: () => void; onReview?: () => void; onConfirm?: () => void; patientIntegration?: ReactNode; requests?: ReactNode; report?: ReactNode; initialTab?: string; dates?: ReactNode; routing?: ReactNode;
+  onAssign?: () => void; onReview?: () => void; onConfirm?: () => void; patientIntegration?: ReactNode; requests?: ReactNode; report?: ReactNode; initialTab?: string; dates?: ReactNode; routing?: ReactNode; editor?: ReactNode;
 }) {
   const [tab, setTab] = useState(initialTab ?? 'Slides');
   const available = readyCount(item);
@@ -25,6 +25,7 @@ export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, on
       <section className="panel detail-panel">
         <nav className="detail-tabs" aria-label="Case Information">
           {[{ name: 'Slides', icon: ScanLine }, { name: 'Patient Information', icon: UserRound }, { name: 'History', icon: History },
+            ...(editor ? [{ name: 'Case Editor', icon: PencilLine }] : []),
             ...(requests ? [{ name: 'Requests', icon: MessageSquare }, { name: 'Report Draft', icon: ClipboardList }] : [])].map(({ name, icon: Icon }) =>
             <button key={name} aria-pressed={tab === name} onClick={() => setTab(name)}><Icon size={16} />{name}</button>)}
         </nav>
@@ -39,6 +40,7 @@ export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, on
           {item.patient ? <dl className="key-values"><div><dt>Patient Name</dt><dd>{item.patient.name || 'Not Entered'}</dd></div><div><dt>Patient ID</dt><dd>{item.patient.number || 'Not Entered'}</dd></div>{item.patient.localRef && <div><dt>Local Patient ID</dt><dd>{item.patient.localRef}</dd></div>}<div><dt>Date of Birth</dt><dd>{item.patient.birth || 'Not Entered'}</dd></div><div><dt>Source</dt><dd>{item.source === 'files' ? 'Slide Registration Details' : 'Patient Record'}</dd></div></dl> : <p className="empty-inline">No patient information is available.</p>}
           {patientIntegration}
         </div>}
+        {tab === 'Case Editor' && <div className="detail-content">{editor}</div>}
         {tab === 'Requests' && <div className="detail-content">{requests}</div>}
         {tab === 'Report Draft' && <div className="detail-content">{report}</div>}
         {tab === 'History' && <div className="detail-content"><h2>Case History</h2><CaseAudit item={item} /></div>}

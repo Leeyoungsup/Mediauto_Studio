@@ -13,6 +13,7 @@ from app.clinical import case_visibility
 from app.intake import DATA_ROOT, scan_files, slide_entries
 from app.models import AuthUser, Case, ClinicalEvent, Patient, Slide, SlideScan, Specimen, Workgroup, WorklistOpen
 from app.workflow import eligible_assignees
+from app.scan_quality import BLOCKED_QC
 from app.workgroup_policy import get_groups
 from app.worklist_data import WORKLIST_ZONE, add_open_times, assignment_workload, file_metadata, matches_advanced, read_metadata, record_key, row_fields
 from app.worklist_views import AdvancedFilters, CaseStatus, Scope, SortTerm, ensure_unique
@@ -101,6 +102,7 @@ async def clinical_details(session, organization, references):
     scans_by_slide = {}
     scans = await session.scalars(select(SlideScan).where(
         SlideScan.organization == organization, SlideScan.slide_id.in_([slide.id for slide in slides]),
+        SlideScan.qc_status != "replaced",
     ).order_by(SlideScan.created_at, SlideScan.id))
     for scan in scans:
         scans_by_slide.setdefault(scan.slide_id, []).append(scan)
@@ -111,6 +113,9 @@ async def clinical_details(session, organization, references):
         if slide.id not in scans_by_slide:
             tray.append({**base, "id": slide.id, "state": "No scan registered"})
         for scan in scans_by_slide.get(slide.id, []):
+            if scan.qc_status in BLOCKED_QC:
+                tray.append({**base, "id": scan.id, "state": "QC Hold" if scan.qc_status == "hold" else "Rescan Required"})
+                continue
             tray.append({**base, "id": scan.id, "state": "Viewable",
                          "wsi": {"id": scan.id, "source": "clinical", "format": scan.format}})
     return details

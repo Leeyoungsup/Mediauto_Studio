@@ -6,6 +6,8 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, func, select
 
+from app.scan_quality import BLOCKED_QC
+
 from app.integration_service import KIND, SYSTEM
 from app.models import Case, CaseRequest, ClinicalEvent, ExternalIdentifier, ExternalSnapshot, Patient, Slide, SlideScan, Specimen, WorklistOpen
 
@@ -44,14 +46,16 @@ async def read_metadata(session, user, authorized_cases, records):
     ).order_by(Specimen.specimen_number)):
         specimens[specimen.case_id].append(specimen)
 
-    slide_query = (select(Specimen.case_id, Slide.slide_number, func.count(SlideScan.id))
+    slide_query = (select(Specimen.case_id, Slide.slide_number, func.count(SlideScan.id),
+                           func.count(SlideScan.id).filter(SlideScan.qc_status.not_in(BLOCKED_QC)))
                    .join(Slide, Slide.specimen_id == Specimen.id)
-                   .outerjoin(SlideScan, and_(SlideScan.slide_id == Slide.id, SlideScan.status == "registered"))
+                   .outerjoin(SlideScan, and_(SlideScan.slide_id == Slide.id, SlideScan.status == "registered",
+                                              SlideScan.qc_status != "replaced"))
                    .where(Specimen.organization == organization, Specimen.case_id.in_(case_ids))
                    .group_by(Specimen.case_id, Slide.id))
     slides = defaultdict(list)
-    for case_id, number, scan_count in await session.execute(slide_query):
-        slides[case_id].append((number, scan_count))
+    for case_id, number, scan_count, available_count in await session.execute(slide_query):
+        slides[case_id].append((number, scan_count, available_count))
 
     identifiers = defaultdict(list)
     for row in await session.scalars(select(ExternalIdentifier).where(
@@ -91,7 +95,7 @@ async def read_metadata(session, user, authorized_cases, records):
         case_specimens = specimens[record.id]
         collected = min((item.collection_date for item in case_specimens if item.collection_date), default=None)
         scan_rows = slides[record.id]
-        slide_state = sorted({"viewable" if total else "missing_scan" for _, total in scan_rows}) or ["no_slides"]
+        slide_state = sorted({"viewable" if available else "qc_blocked" if total else "missing_scan" for _, total, available in scan_rows}) or ["no_slides"]
         lis_values = {item["value"] for item in lis[record.id]}
         result[record.id] = {
             "patient": {"id": patient.id, "name": patient.display_name or "", "number": ", ".join(
@@ -102,9 +106,9 @@ async def read_metadata(session, user, authorized_cases, records):
             "age": clinical_age(patient, collected),
             "specimen_terms": [value for item in case_specimens for value in (item.specimen_number, item.description) if value],
             "specimen_label": ", ".join(item.description or item.specimen_number for item in case_specimens),
-            "slide_ids": [number for number, _ in scan_rows], "slide_state": slide_state,
-            "slide_count": sum(max(1, total) for _, total in scan_rows), "workload_slides": len(scan_rows),
-            "has_storage": any(total for _, total in scan_rows),
+            "slide_ids": [number for number, _, _ in scan_rows], "slide_state": slide_state,
+            "slide_count": sum(max(1, total) for _, total, _ in scan_rows), "workload_slides": len(scan_rows),
+            "has_storage": any(total for _, total, _ in scan_rows),
             "lis_status": next(iter(lis_values)) if len(lis_values) == 1 else None,
             "lis_data": "available" if len(lis_values) == 1 else "conflict" if lis_values else "missing",
             "lis_sources": lis[record.id], "request_count": requests.get(record.id, 0) if may_read_requests else None,

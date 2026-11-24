@@ -27,7 +27,7 @@ export function IntakePage({ files, loading, problem, refresh }: {
   useEffect(() => { if (opened) caseField.current?.focus(); }, [opened]);
 
   function edit(file: SourceFile) {
-    setOpened({ id: file.id, version: file.entry?.version ?? 0 }); setDraft(file.entry?.fields ?? { ...emptyFields }); setNotice(''); setProblemForm('');
+    setOpened({ id: file.id, version: file.entry?.version ?? 0 }); setDraft({ ...emptyFields, ...file.entry?.fields }); setNotice(''); setProblemForm('');
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -93,6 +93,7 @@ const ruleFields: { key: keyof FilenameRule; label: string; hint?: string }[] = 
   { key: 'slide_id', label: 'Slide ID Format', hint: '{block}-{slide}' },
   { key: 'specimen', label: 'Specimen Format' }, { key: 'stain', label: 'Stain Code Format' },
   { key: 'patient_number', label: 'Patient ID Format' },
+  { key: 'block_number', label: 'Block Number Format' }, { key: 'barcode', label: 'Barcode Format' },
 ];
 
 export function IntakeSettings({ refresh, emrConnected }: { refresh: () => Promise<void>; emrConnected: boolean }) {
@@ -138,7 +139,7 @@ export function IntakeSettings({ refresh, emrConnected }: { refresh: () => Promi
   }
 
   const hasExample = rules.some((rule) => rule.name === codipaiRule.name
-    || ruleFields.every(({ key }) => key === 'name' || rule[key] === codipaiRule[key]));
+    || ruleFields.every(({ key }) => key === 'name' || (rule[key] ?? '') === codipaiRule[key]));
 
   return <>
     <div className="page-heading"><div><h1>Settings</h1><p>Define filename rules to use when EMR is disconnected.</p></div><a className="button secondary" href="#scans">Go to Slide Registration</a></div>
@@ -147,7 +148,7 @@ export function IntakeSettings({ refresh, emrConnected }: { refresh: () => Promi
     <section className="panel" aria-label="Filename Rules">
       <div className="panel-title"><div className="title-inline"><h2>Filename Rules</h2><span className="count">{rules.length}</span></div>
         <div className="actions"><button className="button secondary" disabled={!saved || working || rules.length >= 20 || hasExample} onClick={() => update([...rules, codipaiRule])}>Load CODIPAI Example</button>
-          <button className="button secondary" disabled={!saved || working || rules.length >= 20} onClick={() => update([...rules, { name: '', pattern: '', case_id: '', slide_id: '', specimen: '', stain: '', patient_number: '' }])}><Plus size={15} /> Add Rule</button></div>
+          <button className="button secondary" disabled={!saved || working || rules.length >= 20} onClick={() => update([...rules, { name: '', pattern: '', case_id: '', slide_id: '', specimen: '', stain: '', block_number: '', barcode: '', patient_number: '' }])}><Plus size={15} /> Add Rule</button></div>
       </div>
       <div className="detail-content">
         <p className="muted">Wrap filename tokens in braces and use them in the output fields. Rules run from top to bottom on unregistered files. Existing registrations are preserved.</p>
@@ -160,7 +161,7 @@ export function IntakeSettings({ refresh, emrConnected }: { refresh: () => Promi
             <button type="button" className="icon-button" aria-label={`Rule ${index + 1} Delete`} onClick={() => update(rules.filter((_, position) => position !== index))}><Trash2 size={16} /></button>
           </div>
           <div className="form-grid">{ruleFields.map(({ key, label, hint }) => <label className={`form-field ${key === 'pattern' ? 'pattern-field' : ''}`} key={key}>{label}
-            <input value={rule[key]} placeholder={hint} maxLength={120} onChange={(event) => update(rules.map((item, position) => position === index ? { ...item, [key]: event.target.value } : item))} />
+            <input value={rule[key] ?? ''} placeholder={hint} maxLength={120} onChange={(event) => update(rules.map((item, position) => position === index ? { ...item, [key]: event.target.value } : item))} />
           </label>)}</div>
         </fieldset>)}
         <div className="actions">

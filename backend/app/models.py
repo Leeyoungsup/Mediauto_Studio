@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, ForeignKeyConstraint, Index, Integer, String, UniqueConstraint, Uuid, func
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, ForeignKeyConstraint, Index, Integer, LargeBinary, String, UniqueConstraint, Uuid, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -139,14 +139,33 @@ class Specimen(ClinicalRecord, Base):
     status: Mapped[str] = mapped_column(String(24), server_default="registered")
 
 
+class SpecimenBlock(ClinicalRecord, Base):
+    __tablename__ = "specimen_blocks"
+    __table_args__ = (
+        UniqueConstraint("organization", "specimen_id", "id"),
+        UniqueConstraint("organization", "specimen_id", "block_number"),
+        ForeignKeyConstraint(("organization", "specimen_id"), ("specimens.organization", "specimens.id")),
+    )
+
+    specimen_id: Mapped[UUID] = mapped_column(Uuid)
+    block_number: Mapped[str] = mapped_column(String(80))
+
+
 class Slide(ClinicalRecord, Base):
     __tablename__ = "slides"
     __table_args__ = (
         UniqueConstraint("organization", "id"),
         UniqueConstraint("organization", "specimen_id", "slide_number"),
+        UniqueConstraint("organization", "barcode", name="uq_slide_barcode_org"),
+        ForeignKeyConstraint(("organization", "specimen_id", "block_id"),
+            ("specimen_blocks.organization", "specimen_blocks.specimen_id", "specimen_blocks.id"), name="fk_slide_specimen_block"),
+        CheckConstraint("block_id IS NULL OR specimen_id IS NOT NULL", name="slide_block_requires_specimen"),
         ForeignKeyConstraint(("organization", "specimen_id"), ("specimens.organization", "specimens.id")),
     )
 
+    block_id: Mapped[UUID | None] = mapped_column(Uuid)
+    barcode: Mapped[str | None] = mapped_column(String(120))
+    label_text: Mapped[str | None] = mapped_column(String(500))
     slide_number: Mapped[str] = mapped_column(String(80), nullable=False)
     specimen_id: Mapped[UUID | None] = mapped_column(Uuid)
     stain: Mapped[str | None] = mapped_column(String(80))
@@ -158,14 +177,36 @@ class SlideScan(ClinicalRecord, Base):
     __table_args__ = (
         ForeignKeyConstraint(("organization", "slide_id"), ("slides.organization", "slides.id")),
         Index("ix_slide_scans_slide", "organization", "slide_id"),
+        UniqueConstraint("organization", "id", name="uq_scan_id_org"),
+        UniqueConstraint("replaces_id", name="uq_scan_replacement"),
+        ForeignKeyConstraint(("organization", "replaces_id"), ("slide_scans.organization", "slide_scans.id"),
+                             name="fk_scan_replaces"),
+        CheckConstraint("qc_status IN ('unassessed','passed','hold','rescan_required','replaced')", name="scan_qc_status"),
     )
 
     slide_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    scanner: Mapped[str | None] = mapped_column(String(120))
+    qc_status: Mapped[str] = mapped_column(String(24), server_default="unassessed")
+    replaces_id: Mapped[UUID | None] = mapped_column(Uuid)
     storage_key: Mapped[str] = mapped_column(String(512), nullable=False, unique=True)
     format: Mapped[str] = mapped_column(String(12), nullable=False)
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     modified_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
     status: Mapped[str] = mapped_column(String(24), server_default="registered")
+
+
+class ScanLabel(Base):
+    __tablename__ = "scan_labels"
+    __table_args__ = (
+        ForeignKeyConstraint(("organization", "scan_id"), ("slide_scans.organization", "slide_scans.id")),
+        UniqueConstraint("organization", "scan_id", "version"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    organization: Mapped[str] = mapped_column(String(64))
+    scan_id: Mapped[UUID] = mapped_column(Uuid)
+    version: Mapped[int] = mapped_column(Integer)
+    jpeg: Mapped[bytes] = mapped_column(LargeBinary)
 
 
 class ExternalIdentifier(Base):

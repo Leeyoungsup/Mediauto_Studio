@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from starlette.staticfiles import StaticFiles
 
 from app.auth import load_auth_key, router as auth_router
+from app.case_editor import router as case_editor_router
 from app.case_requests import router as case_requests_router
 from app.clinical import router as clinical_router
 from app.database import database_url
@@ -61,6 +62,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Mediauto Studio", lifespan=lifespan)
 app.include_router(auth_router)
+app.include_router(case_editor_router)
 app.include_router(case_requests_router)
 app.include_router(clinical_router)
 app.include_router(workflow_router)

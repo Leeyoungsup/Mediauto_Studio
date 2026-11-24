@@ -5,8 +5,8 @@ import { ImageViewport } from './image-viewport';
 import { MultiView } from './multi-view';
 import { SlidePreview, StatusLabel } from './worklist';
 
-export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsHref, initialSnapshot }: {
-  item: DemoCase; activeSlide?: string; onSlide: (id: string) => void; onBack: () => void; onReview?: () => void; requestsHref?: string; initialSnapshot?: string;
+export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsHref, initialSnapshot, editorHref }: {
+  item: DemoCase; activeSlide?: string; onSlide: (id: string) => void; onBack: () => void; onReview?: () => void; requestsHref?: string; initialSnapshot?: string; editorHref?: string;
 }) {
   const [comparing, setComparing] = useState(false);
   const [trayVisible, setTrayVisible] = useState(true);
@@ -27,6 +27,7 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
         {trayVisible ? 'Hide Slide Tray' : 'Show Slide Tray'}
       </button>}
       {!comparing && <button className="button secondary" disabled={available.length < 2} onClick={() => setComparing(true)}><GalleryHorizontalEnd size={16} /> Multi View</button>}
+      {editorHref && <a className="button secondary" href={editorHref}>Case Editor</a>}
       {requestsHref && <a className="button secondary" href={requestsHref}>Analysis and Consultation Requests</a>}
       {!comparing && onReview && <button className="button secondary" disabled={!slide?.wsi} onClick={onReview}>{item.status === 'In Review' ? 'Review Complete' : 'Start Review'}</button>}</div></div>
     {comparing ? <MultiView slides={available} primary={slide?.id} onClose={() => setComparing(false)}
@@ -37,7 +38,7 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
         </button>)}</div>
       </aside>
       {slide?.wsi ? <ImageViewport key={slide.wsi.id + ':' + (initialSnapshot ?? '')} scan={slide.wsi} initialSnapshot={initialSnapshot} label={slide.label ?? slide.id} stain={slide.stain} />
-        : <div className="panel empty"><ScanLine size={30} /><strong>{activeSlide && !slide ? 'The requested scan could not be found.' : 'No scans are registered.'}</strong><button className="button secondary" onClick={onBack}>Go to Case Details</button></div>}
+        : <div className="panel empty"><ScanLine size={30} /><strong>{activeSlide && !slide ? 'The requested scan could not be found.' : slide?.state === 'QC Hold' || slide?.state === 'Rescan Required' ? 'This scan is blocked by QC.' : 'No scans are available for review.'}</strong><button className="button secondary" onClick={onBack}>Go to Case Details</button></div>}
     </div>}
   </section>;
 }

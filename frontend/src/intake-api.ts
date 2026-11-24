@@ -6,6 +6,8 @@ export type SlideFields = {
   slide_id: string;
   specimen: string;
   stain: string;
+  block_number: string;
+  barcode: string;
   patient_number: string;
   patient_name: string;
 };
@@ -15,13 +17,13 @@ export type FilenameRule = Omit<SlideFields, 'patient_name'> & { name: string; p
 export type RuleSet = { rules: FilenameRule[]; version: number };
 export type Match = Pick<SourceFile, 'id' | 'filename' | 'format'> & { match: { rule: string; fields: SlideFields } | null };
 
-export const emptyFields: SlideFields = { case_id: '', slide_id: '', specimen: '', stain: '', patient_number: '', patient_name: '' };
+export const emptyFields: SlideFields = { case_id: '', slide_id: '', specimen: '', stain: '', block_number: '', barcode: '', patient_number: '', patient_name: '' };
 export const fieldLabels: Record<keyof SlideFields, string> = {
-  case_id: 'Case ID', slide_id: 'Slide ID', specimen: 'Specimen', stain: 'Stain Code', patient_number: 'Medical Record Number (MRN)', patient_name: 'Patient Name',
+  case_id: 'Case ID', slide_id: 'Slide ID', specimen: 'Specimen', stain: 'Stain Code', block_number: 'Block Number', barcode: 'Barcode', patient_number: 'Medical Record Number (MRN)', patient_name: 'Patient Name',
 };
 export const codipaiRule: FilenameRule = {
   name: 'CODIPAI Example', pattern: 'CODIPAI-{organ}-{series}-{case_no}-{prep}-{stain}-{slide_no}',
-  case_id: '{organ}-{series}-{case_no}', slide_id: '{prep}-{stain}-{slide_no}', specimen: '', stain: '{stain}', patient_number: '',
+  case_id: '{organ}-{series}-{case_no}', slide_id: '{prep}-{stain}-{slide_no}', specimen: '', stain: '{stain}', block_number: '', barcode: '', patient_number: '',
 };
 
 export async function requestIntake<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {

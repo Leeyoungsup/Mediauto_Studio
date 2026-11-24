@@ -14,7 +14,8 @@ from app.clinical import (
     ClinicalInput, Organization, Reason, Session, add_event, find, public_fields, relationship_state,
     require_version, scan_metadata, write,
 )
-from app.models import AuthUser, Case, Patient, Slide, SlideScan, Specimen
+from app.models import AuthUser, Case, Patient, Slide, SlideScan, Specimen, SpecimenBlock
+from app.scan_quality import BLOCKED_QC
 from app.workgroup_policy import GroupKey, Priority, group_member, lock_group, member_filter
 
 router = APIRouter(prefix="/api/clinical/{organization}", tags=["Case workflow"])
@@ -117,7 +118,7 @@ async def review_case(organization: Organization, case_id: UUID, data: Review, s
         scan = await session.scalar(select(SlideScan.id).join(Slide, SlideScan.slide_id == Slide.id)
                                     .join(Specimen, Slide.specimen_id == Specimen.id)
                                     .where(Specimen.case_id == case.id, SlideScan.organization == organization,
-                                           SlideScan.status == "registered").limit(1))
+                                           SlideScan.status == "registered", SlideScan.qc_status.not_in(BLOCKED_QC)).limit(1))
         if scan is None:
             raise HTTPException(409, "Link a scan before changing the review status.")
         before = relationship_state(case)
@@ -132,6 +133,9 @@ class FileEntry(ClinicalInput):
 
 
 class FileCase(ClinicalInput):
+    patient_id: UUID | None = None
+    confirm_patient: bool = False
+    patient_version: Annotated[int, Field(ge=1)] | None = None
     files: list[FileEntry] = Field(min_length=1)
 
 
@@ -169,7 +173,13 @@ async def confirm_file_case(organization: Organization, case_number: intake.Iden
         if len(identities) > 1:
             raise HTTPException(409, "Patient details differ between files. Check Slide Registration.")
         patient_id = None
-        if identities:
+        if data.patient_id:
+            if not data.confirm_patient or data.patient_version is None:
+                raise HTTPException(422, "Confirm that the intake and local record identify the same patient.")
+            patient = await find(session, Patient, organization, data.patient_id, lock=True)
+            require_version(patient, data.patient_version)
+            patient_id = patient.id
+        elif identities:
             name, number = next(iter(identities))
             if number and await session.scalar(select(Patient.id).where(
                 Patient.organization == organization, Patient.local_reference == number,
@@ -185,11 +195,23 @@ async def confirm_file_case(organization: Organization, case_number: intake.Iden
             groups.setdefault(specimen_key, {}).setdefault(fields["slide_id"], []).append((file, fields))
         for index, (description, slides) in enumerate(groups.items(), 1):
             specimen = await create(Specimen, case_id=case.id, specimen_number=f"F{index}", description=description or None)
+            blocks = {}
             for number, alternatives in slides.items():
                 stains = {fields["stain"] for _, fields in alternatives if fields.get("stain")}
+                block_numbers = {fields["block_number"] for _, fields in alternatives if fields.get("block_number")}
+                barcodes = {fields["barcode"].strip().upper() for _, fields in alternatives if fields.get("barcode")}
                 if len(stains) > 1:
                     raise HTTPException(409, "Files with the same Slide ID have different stains. Check Slide Registration.")
+                if len(block_numbers) > 1 or len(barcodes) > 1:
+                    raise HTTPException(409, "Files with the same Slide ID have different blocks or barcodes. Check Slide Registration.")
+                block_number = next(iter(block_numbers), None)
+                if block_number and block_number not in blocks:
+                    blocks[block_number] = await create(SpecimenBlock, specimen_id=specimen.id, block_number=block_number)
+                barcode = next(iter(barcodes), None)
+                if barcode and len(barcode) > 120:
+                    raise HTTPException(422, "The barcode is too long.")
                 slide = await create(Slide, specimen_id=specimen.id, slide_number=number, stain=next(iter(stains), None),
+                                     block_id=blocks[block_number].id if block_number else None, barcode=barcode,
                                      status="registered")
                 for file, _ in alternatives:
                     meta = await asyncio.to_thread(scan_metadata, file.filename, intake.DATA_ROOT)

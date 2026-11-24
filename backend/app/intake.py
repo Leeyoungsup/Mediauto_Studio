@@ -28,7 +28,7 @@ router = APIRouter(prefix="/api/intake", tags=["Slide intake"], dependencies=[De
 DATA_ROOT = Path(__file__).resolve().parents[2] / "data"
 RULES_KEY = "slide_filename_rules"
 INTAKE_PREFIX = "slide_intake:"
-FORM_FIELDS = ("case_id", "slide_id", "specimen", "stain", "patient_number")
+FORM_FIELDS = ("case_id", "slide_id", "specimen", "stain", "patient_number", "block_number", "barcode")
 TOKEN = re.compile(r"[a-z][a-z0-9_]*", re.IGNORECASE | re.ASCII)
 formatter = Formatter()
 
@@ -42,6 +42,8 @@ class SlideFields(BaseModel):
     specimen: ShortText = ""
     stain: ShortText = ""
     patient_number: ShortText = ""
+    block_number: Annotated[ShortText, Field(max_length=80)] = ""
+    barcode: ShortText = ""
     patient_name: ShortText = ""
 
 
@@ -58,6 +60,8 @@ class FilenameRule(BaseModel):
     specimen: ShortText = ""
     stain: ShortText = ""
     patient_number: ShortText = ""
+    block_number: Annotated[ShortText, Field(max_length=80)] = ""
+    barcode: ShortText = ""
 
 
 class RuleDraft(BaseModel):

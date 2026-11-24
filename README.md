@@ -30,6 +30,10 @@ Worklist에서는 **Hide Case Preview**로 목록을 넓힐 수 있습니다. WS
 
 규칙과 파일 등록 정보는 개발 PostgreSQL에 저장되며, 이미 등록한 파일은 규칙을 다시 적용해도 유지됩니다. 등록 정보는 Worklist에서 Case ID로 묶어 확인합니다. 같은 Slide ID의 NDPI와 SVS는 서로 다른 원본 파일로 표시됩니다. 등록된 스캔은 케이스 상세의 WSI 뷰어에서 열 수 있습니다.
 
+### 21. Case Editor와 스캔 QC
+
+**Slide Registration**에서 블록·바코드를 입력하고, 파일 케이스를 확정할 때 로컬 환자를 대조할 수 있습니다. **Case Editor**에서 검체·슬라이드·라벨을 수정하고 OCR 후보를 확인한 뒤 저장합니다. **Scan Quality**에서 수기 판정과 스캐너·AI 관측을 기록하고, 보류된 스캔을 교체할 수 있습니다. [21번 검증 기록](work/case-editor-21.md)
+
 ### 20. Workgroup 업무함
 
 **Global Views**에서 Breast, Cytology, Frozen Section을 열거나 구독합니다. 관리자는 **Manage Workgroups**에서 그룹과 구성원을 관리하고, 케이스 상세의 **Workgroup and Priority**에서 분류할 수 있습니다. **Assignment Workload**는 현재 Worklist 결과의 배정별 실제 건수를 표시합니다. [20번 검증 기록](work/workgroups-20.md)

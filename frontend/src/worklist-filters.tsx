@@ -9,7 +9,7 @@ export const dateFields = {
   collection_date: 'Collection Date', last_opened: 'Last Opened',
 } as const;
 export const sexLabels = { female: 'Female', male: 'Male', intersex: 'Intersex', other: 'Other', unknown: 'Unknown' };
-export const slideStates = { viewable: 'Viewable', missing_scan: 'Missing Scan', no_slides: 'No Slides' };
+export const slideStates = { viewable: 'Viewable', missing_scan: 'Missing Scan', no_slides: 'No Slides', qc_blocked: 'QC Blocked' };
 export const openedOptions = { unopened: 'Unopened', today: 'Today', last_2_days: 'Last 2 Days', last_7_days: 'Last 7 Days' };
 const ageOptions = { available: 'Recorded', missing: 'Not Recorded' };
 const lisOptions = { available: 'Available', missing: 'Not Available', conflict: 'Conflicting Sources' };

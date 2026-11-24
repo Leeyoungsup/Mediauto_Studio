@@ -4,7 +4,7 @@ export type Patient = { id?: string; number: string; name: string; birth: string
 export type WsiScan = { id: string; source: 'files' | 'clinical'; format: 'NDPI' | 'SVS' };
 export type Slide = {
   id: string; label?: string; stain: string; specimen: string; wsi?: WsiScan; intakeVersion?: number;
-  state: 'Viewable' | 'No scan registered';
+  state: 'Viewable' | 'No scan registered' | 'QC Hold' | 'Rescan Required';
 };
 export type AuditEvent = {
   id: string; action: string; version: number; occurred_at: string; actor: string; actor_name?: string;
@@ -21,7 +21,7 @@ export type WorklistData = {
   mrns?: { value: string; source: string }[]; lis_status?: string | null;
   lis_data?: 'available' | 'missing' | 'conflict';
   lis_sources?: { value: string; source: string; received_at: string }[];
-  slide_state?: ('viewable' | 'missing_scan' | 'no_slides')[];
+  slide_state?: ('viewable' | 'missing_scan' | 'no_slides' | 'qc_blocked')[];
   request_count?: number | null; review_note?: string | null; has_storage?: boolean;
   specimens?: { id: string; number: string; collection_date: string | null; version: number }[];
 };

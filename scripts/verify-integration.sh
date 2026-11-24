@@ -112,4 +112,15 @@ PYFIXTURE
     )
     node scripts/case-requests-browser.mjs
     node scripts/workgroups-browser.mjs
+    export MEDIAUTO_QA_LABEL="$sandbox/qa-label.png"
+    "$python" -s - "$MEDIAUTO_QA_LABEL" <<'PYLABEL'
+import sys
+from PIL import Image, ImageDraw, ImageFont
+
+image = Image.new("RGB", (900, 170), "white")
+font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 68)
+ImageDraw.Draw(image).text((30, 30), "QA-EDITOR-21", font=font, fill="black")
+image.save(sys.argv[1])
+PYLABEL
+    node scripts/case-editor-browser.mjs
 fi

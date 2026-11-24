@@ -16,6 +16,7 @@ from app.clinical import (ClinicalInput, Organization, RegistrationKey, Session,
                           add_event, find, require_version, write)
 from app.models import AuthUser, Case, CaseRequest, ClinicalEvent, RequestNotification, Slide, SlideScan, Specimen
 from app.pdl1 import results_for_display, snapshot_folder
+from app.scan_quality import BLOCKED_QC
 from app.wsi import PRIVATE, STAGE_DOWNSAMPLES, scan_response, verified_scan_path
 
 router = APIRouter(prefix="/api/clinical/{organization}", tags=["Case requests"])
@@ -83,7 +84,7 @@ async def case_scan(session, case, scan_id):
     scan = (await session.execute(select(SlideScan, Slide.slide_number, Slide.stain)
         .join(Slide, SlideScan.slide_id == Slide.id).join(Specimen, Slide.specimen_id == Specimen.id)
         .where(SlideScan.id == scan_id, SlideScan.organization == case.organization,
-               SlideScan.status == "registered", Specimen.case_id == case.id))).one_or_none()
+               SlideScan.status == "registered", SlideScan.qc_status.not_in(BLOCKED_QC), Specimen.case_id == case.id))).one_or_none()
     if scan is None:
         raise HTTPException(404, "No matching scan is linked to this case.")
     return scan

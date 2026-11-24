@@ -428,3 +428,19 @@ dialog::backdrop { background: #21193575; }
 @media (max-width: 720px) {
   .workgroup-settings { grid-template-columns: minmax(0, 1fr); }
 }
+
+.case-editor, .patient-match { display: grid; gap: 8px; min-width: 0; }
+.patient-match > .button, .editor-form > .button { justify-self: start; }
+.editor-entry, .editor-block, .editor-slide, .editor-scan { min-width: 0; border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px; margin-top: 6px; }
+.editor-entry > summary, .editor-block > summary, .editor-slide > summary, .editor-scan > summary { cursor: pointer; font-weight: 650; overflow-wrap: anywhere; }
+.editor-form { min-width: 0; display: grid; gap: 6px; padding: 8px 0; }
+.editor-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 7px; }
+.editor-fields > .patient-match { grid-column: 1 / -1; }
+.editor-scan-content { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 12px; }
+.editor-scan-content h4 { margin: 5px 0; }
+.editor-label img { display: block; max-width: 100%; max-height: 260px; object-fit: contain; }
+.editor-ocr { overflow-wrap: anywhere; }
+@media (max-width: 940px) {
+  .editor-scan-content { grid-template-columns: minmax(0, 1fr); }
+}

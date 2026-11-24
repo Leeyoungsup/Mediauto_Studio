@@ -16,6 +16,7 @@ from sqlalchemy import select
 from app.auth import CurrentUser, Session
 from app.clinical import case_visibility, scan_metadata
 from app.intake import DATA_ROOT, INTAKE_PREFIX, require_intake, scan_files, source_id
+from app.scan_quality import BLOCKED_QC
 from app.models import ApplicationSetting, Case, Slide, SlideScan, Specimen
 
 TILE_SIZE = 1024
@@ -39,7 +40,7 @@ async def registered_file(source, scan_id, user, session) -> tuple[Path, UUID]:
         expected = None
     else:
         record = (await session.execute(
-            select(SlideScan.storage_key, SlideScan.size_bytes, SlideScan.modified_ns)
+            select(SlideScan.storage_key, SlideScan.size_bytes, SlideScan.modified_ns, SlideScan.qc_status)
             .join(Slide, SlideScan.slide_id == Slide.id)
             .join(Specimen, Slide.specimen_id == Specimen.id)
             .join(Case, Specimen.case_id == Case.id)
@@ -48,7 +49,9 @@ async def registered_file(source, scan_id, user, session) -> tuple[Path, UUID]:
         )).one_or_none()
         if record is None:
             raise HTTPException(404, "Registered WSI not found.")
-        key, size, modified = record
+        key, size, modified, qc = record
+        if qc in BLOCKED_QC:
+            raise HTTPException(409, "This scan is unavailable for review because of its QC status.")
         expected = (size, modified)
         await session.rollback()
     path, meta = await verified_scan_path(key, expected)

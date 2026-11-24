@@ -58,7 +58,7 @@ class AdvancedFilters(ClinicalInput):
     sex: Literal["female", "male", "intersex", "other", "unknown", "missing"] | None = None
     specimen: FilterText = ""
     slide_id: FilterText = ""
-    slide_state: Literal["viewable", "missing_scan", "no_slides"] | None = None
+    slide_state: Literal["viewable", "missing_scan", "no_slides", "qc_blocked"] | None = None
     lis_status: FilterText = ""
     lis_data: Literal["available", "missing", "conflict"] | None = None
     age_min: Annotated[int, Field(ge=0, le=150)] | None = None

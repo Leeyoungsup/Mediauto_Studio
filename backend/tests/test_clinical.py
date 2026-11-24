@@ -878,3 +878,80 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         self.assertNotIn("breast", {queue["key"] for queue in catalog})
         await expect(self.client.get(endpoint, params={"group_key": "breast"}), 404)
         await expect(self.client.put(subscription, json={"subscribed": True}), 404)
+
+    async def test_case_editor_blocks_patient_match_label_and_quality(self):
+        import io
+        from PIL import Image
+
+        patient = await self.create("patients", {"display_name": "Synthetic Intake", "local_reference": "QC-PATIENT"})
+        case = await self.create("cases", {"case_number": "EDITOR-QA"})
+        specimen = await self.create("specimens", {"case_id": case["id"], "specimen_number": "QA"})
+        other_specimen = await self.create("specimens", {"case_id": case["id"], "specimen_number": "OTHER"})
+        slide = await self.create("slides", {"specimen_id": specimen["id"], "slide_number": "S1"})
+        other_slide = await self.create("slides", {"specimen_id": specimen["id"], "slide_number": "S2"})
+        source = self.root / "broken.ndpi"
+        source.write_bytes(b"synthetic damaged scan")
+        scan = await self.create("scans", {"slide_id": slide["id"], "storage_key": source.name})
+        editor = self.url + "/editor"
+        scan_url = editor + "/scans/" + scan["id"]
+        slide_url = editor + "/slides/" + slide["id"]
+        reason = "Synthetic QC verification"
+
+        async def expect(response, status):
+            result = await response
+            self.assertEqual(result.status_code, status, result.text)
+            return result
+
+        response = await expect(self.client.post(editor + "/patients/match", json={"local_reference": "QC-PATIENT"}), 200)
+        self.assertEqual(response.json()["id"], patient["id"])
+        match = {"patient_id": patient["id"], "patient_version": 2, "version": 1, "reason": reason}
+        await expect(self.client.patch(f"{editor}/cases/{case['id']}/patient-match", json=match), 409)
+        await expect(self.client.patch(f"{editor}/cases/{case['id']}/patient-match",
+                                       json={**match, "patient_version": 1}), 200)
+
+        async def block_for(record):
+            return (await expect(self.client.post(editor + f"/specimens/{record['id']}/blocks",
+                json={"block_number": "B1", "version": 1, "reason": reason}), 201)).json()["id"]
+
+        block = await block_for(specimen)
+        wrong_block = await block_for(other_specimen)
+        draft = {"slide_number": "S1", "stain": "HE", "block_id": block, "barcode": " abc-123 ", "version": 1, "reason": reason}
+        await expect(self.client.patch(slide_url, json={**draft, "block_id": wrong_block}), 422)
+        result = await expect(self.client.patch(slide_url, json=draft), 200)
+        self.assertEqual(result.json()["barcode"], "ABC-123")
+        await expect(self.client.patch(editor + "/slides/" + other_slide["id"], json={**draft, "slide_number": "S2"}), 409)
+
+        await expect(self.client.get(scan_url + "/label.jpeg"), 422)
+        await expect(self.client.put(scan_url + "/label?version=1", content=b"not an image"), 422)
+        image = io.BytesIO()
+        Image.new("RGB", (320, 90), "white").save(image, format="PNG")
+        await expect(self.client.put(scan_url + "/label?version=1", content=image.getvalue()), 200)
+        reply = await expect(self.client.get(scan_url + "/label.jpeg"), 200)
+        self.assertEqual((reply.headers["content-type"], reply.headers["x-label-source"]), ("image/jpeg", "uploaded"))
+        with patch("app.case_editor.recognize_label", return_value="ABC-123"):
+            result = await expect(self.client.post(scan_url + "/ocr", json={"version": 2, "reason": reason}), 200)
+        self.assertEqual(result.json()["candidate"], "ABC-123")
+        self.assertIsNone((await self.client.get(f"{self.url}/slides/{slide['id']}")).json()["label_text"])
+        confirmed = await expect(self.client.patch(slide_url, json={**draft, "version": 2, "label_text": "ABC-123",
+            "confirmed_ocr_scan": scan["id"], "confirmed_ocr_version": 3}), 200)
+        self.assertEqual(confirmed.json()["label_text"], "ABC-123")
+        await expect(self.client.post(scan_url + "/qc", json={"version": 3, "source": "ai", "outcome": "hold", "reason": reason}), 422)
+        result = await expect(self.client.post(scan_url + "/qc", json={"version": 3, "source": "ai", "outcome": "hold",
+            "provider": "Synthetic model v1", "reference": "QA-001", "reason": reason}), 200)
+        self.assertEqual(result.json()["qc_status"], "unassessed")
+        await expect(self.client.post(scan_url + "/qc", json={"version": 4, "source": "manual", "outcome": "passed", "reason": reason}), 422)
+        result = await expect(self.client.post(scan_url + "/check", json={"version": 4, "reason": reason}), 200)
+        self.assertIn("error", result.json())
+        await expect(self.client.post(scan_url + "/qc", json={"version": 5, "source": "manual", "outcome": "rescan_required", "reason": reason}), 200)
+        await expect(self.client.get("/api/wsi/clinical/" + scan["id"]), 409)
+        result = await expect(self.client.get("/api/worklist", params={"slide_state": "qc_blocked"}), 200)
+        self.assertEqual(result.json()["rows"][0]["slide_state"], ["missing_scan", "qc_blocked"])
+
+        labeler = await create_account(self.org, "label-qa", "labeler")
+        await login(self.client, self.org, labeler.username)
+        await expect(self.client.post(scan_url + "/qc", json={"version": 6, "source": "scanner", "outcome": "passed",
+            "provider": "Synthetic scanner", "reference": "QA-002", "reason": reason}), 403)
+        doctor = await create_account(self.org, "editor-other", "doctor")
+        await login(self.client, self.org, doctor.username)
+        await expect(self.client.get(scan_url + "/label.jpeg"), 404)
+        await expect(self.client.get(editor + "/cases/" + case["id"]), 404)

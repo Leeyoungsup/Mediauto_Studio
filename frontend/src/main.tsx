@@ -2,6 +2,9 @@ import { StrictMode, useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { Activity, ChevronRight, CircleHelp, ClipboardList, FlaskConical, LayoutList, Microscope, PanelLeftClose, PanelLeftOpen, ScanLine, Settings2, UserRound, UserRoundCheck, X } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
+import { CaseEditor } from './case-editor';
+import { PatientMatch } from './patient-match';
+import type { PatientSelection } from './patient-match';
 import { CaseDetail } from './case-detail';
 import { CaseDates } from './case-dates';
 import { CaseRequests, ReportDraftReferences, RequestInbox, RequestPage } from './case-requests';
@@ -25,7 +28,7 @@ import './style.css';
 
 const emrLabels = { unconfigured: 'Not Configured', disabled: 'Disabled', connected: 'Connected', unavailable: 'Connection Unavailable', unknown: 'Unavailable' };
 type Health = { status: 'ok' | 'degraded'; database: 'connected' | 'unavailable'; emr: keyof typeof emrLabels };
-type Page = { view: 'worklist'; scope: Scope } | { view: 'case'; id: string; files: boolean; tab?: 'requests' | 'report' } | { view: 'request'; id: string }
+type Page = { view: 'worklist'; scope: Scope } | { view: 'case'; id: string; files: boolean; tab?: 'requests' | 'report' | 'editor' } | { view: 'request'; id: string }
   | { view: 'viewer'; id: string; slide?: string; snapshot?: string; files: boolean } | { view: 'scans' } | { view: 'settings'; section?: 'groups' };
 type WorkflowAction = 'assignment' | 'review' | 'confirm';
 type Modal = 'register' | 'system' | null;
@@ -39,7 +42,7 @@ function readPage(): Page {
   if (view === 'scans') return { view };
   if (view === 'settings') return { view, section: id === 'groups' ? 'groups' : undefined };
   if (view === 'request' && id) return { view, id: decodeRoute(id) };
-  if ((view === 'case' || view === 'file-case') && id) return { view: 'case', id: decodeRoute(id), files: view === 'file-case', tab: slide === 'requests' || slide === 'report' ? slide : undefined };
+  if ((view === 'case' || view === 'file-case') && id) return { view: 'case', id: decodeRoute(id), files: view === 'file-case', tab: slide === 'requests' || slide === 'report' || slide === 'editor' ? slide : undefined };
   if ((view === 'viewer' || view === 'file-viewer') && id) return { view: 'viewer', id: decodeRoute(id), slide: slide ? decodeRoute(slide) : undefined, snapshot: /^[a-f0-9]{64}$/.test(snapshot ?? '') ? snapshot : undefined, files: view === 'file-viewer' };
   return { view: 'worklist', scope: id === 'mine' || id === 'unassigned' ? id : 'all' };
 }
@@ -79,6 +82,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
   const [formError, setFormError] = useState('');
   const [workflow, setWorkflow] = useState<{ item: DemoCase; action: WorkflowAction }>();
   const [workflowError, setWorkflowError] = useState('');
+  const [intakePatient, setIntakePatient] = useState<PatientSelection>();
   const [health, setHealth] = useState<Health | null>(null);
   const [integration, setIntegration] = useState<IntegrationStatus>();
   const [queues, setQueues] = useState<Queue[]>([]);
@@ -234,6 +238,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
 
   function openWorkflow(item: DemoCase, action: WorkflowAction) {
     setWorkflowError('');
+    setIntakePatient(undefined);
     setWorkflow({ item, action });
   }
 
@@ -254,8 +259,9 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
     try {
       if (action === 'confirm') {
         const { id } = await api<{ id: string }>(`${prefix}/files/${encodeURIComponent(item.id)}/case`,
-          jsonBody('POST', { files: item.slides.map((slide) => ({ id: slide.id, version: slide.intakeVersion })) }));
-        location.hash = `case/${id}`;
+          jsonBody('POST', { files: item.slides.map((slide) => ({ id: slide.id, version: slide.intakeVersion })),
+            patient_id: intakePatient?.id ?? null, patient_version: intakePatient?.version ?? null, confirm_patient: Boolean(intakePatient) }));
+        location.hash = `case/${id}/editor`;
       } else {
         const reason = String(fields.get('reason') ?? '').trim();
         if (!reason) { setWorkflowError('Enter a reason for the change.'); return; }
@@ -342,7 +348,11 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
           ? (intakeAllowed && filesLoading ? 'Loading case…' : 'Unable to load the case.')
           : detail?.key === detailKey ? detail?.error : 'Loading case…'}</strong><button className="button secondary" onClick={goBack}>Back to Worklist</button></div>
           : casePage.view === 'case' ? <CaseDetail key={current.id + '/' + (casePage.tab ?? '')} item={current}
-            initialTab={requestAllowed && current.recordId ? casePage.tab === 'requests' ? 'Requests' : casePage.tab === 'report' ? 'Report Draft' : undefined : undefined}
+            initialTab={current.recordId ? casePage.tab === 'editor' ? 'Case Editor' : requestAllowed
+              ? casePage.tab === 'requests' ? 'Requests' : casePage.tab === 'report' ? 'Report Draft' : undefined : undefined : undefined}
+            editor={current.recordId ? <CaseEditor item={current} organization={user.organization} editable={writable && current.status !== 'Review Complete'}
+              canImport={user.role === 'admin'} onChanged={patientChanged}
+              patient={<PatientIntegration item={current} org={user.organization} editable={writable} status={integration} onChanged={patientChanged} />} /> : undefined}
             requests={requestAllowed && current.recordId ? <CaseRequests organization={user.organization} item={current} /> : undefined}
             report={requestAllowed && current.recordId ? <ReportDraftReferences organization={user.organization} caseId={current.recordId} /> : undefined} emr={emr} onBack={goBack} onViewer={(slide) => navigateViewer(current, slide)}
             patientIntegration={current.recordId ? <PatientIntegration item={current} org={user.organization}
@@ -353,7 +363,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
             onAssign={mayAssign ? () => openWorkflow(current, 'assignment') : undefined}
             onReview={mayReview ? () => openWorkflow(current, 'review') : undefined}
             onConfirm={intakeAllowed && current.source === 'files' ? () => openWorkflow(current, 'confirm') : undefined} />
-          : <Viewer key={current.id} item={current} activeSlide={casePage.slide} initialSnapshot={casePage.snapshot} requestsHref={requestAllowed && current.recordId ? `#case/${current.recordId}/requests` : undefined} onSlide={(id) => navigateViewer(current, id)} onBack={() => navigateCase(current)}
+          : <Viewer key={current.id} item={current} activeSlide={casePage.slide} initialSnapshot={casePage.snapshot} editorHref={current.recordId ? `#case/${current.recordId}/editor` : undefined} requestsHref={requestAllowed && current.recordId ? `#case/${current.recordId}/requests` : undefined} onSlide={(id) => navigateViewer(current, id)} onBack={() => navigateCase(current)}
             onReview={mayReview ? () => openWorkflow(current, 'review') : undefined} />)}
       </main>
     </div>
@@ -367,7 +377,10 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
       : workflow.item.status === 'In Review' ? 'Review Complete' : 'Start Review'}
       onClose={() => { if (!saving) setWorkflow(undefined); }}>
       <form onSubmit={(event) => void saveWorkflow(event)}>
-        {workflow.action === 'confirm' ? <p>{workflow.item.id} has {workflow.item.slides.length} registered scans to link to this case.</p> : <>
+        {workflow.action === 'confirm' ? <>
+          <p>{workflow.item.id} has {workflow.item.slides.length} registered scans to link to this case.</p>
+          <PatientMatch item={workflow.item} organization={user.organization} selected={intakePatient} onSelect={setIntakePatient} />
+        </> : <>
           {workflow.action === 'assignment' && <label className="form-field">Assigned Pathologist
             <select name="assignee" required defaultValue="">
               <option value="">Select the assigned pathologist</option>

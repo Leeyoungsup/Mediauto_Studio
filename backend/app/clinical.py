@@ -169,9 +169,11 @@ def add_event(session: AsyncSession, record, action: str, before: dict, after: d
 
 def relationship_state(record) -> dict:
     state = {}
-    for field in ("status", "assigned_to", "patient_id", "case_id", "specimen_id", "slide_id", "accessioned_at", "collection_date", "group_key", "priority", "priority_source"):
+    for field in ("status", "assigned_to", "patient_id", "case_id", "specimen_id", "slide_id", "block_id", "block_number", "barcode", "accessioned_at", "collection_date", "group_key", "priority", "priority_source"):
         if hasattr(record, field):
             value = getattr(record, field)
+            if field in ("block_id", "block_number", "barcode") and value is None:
+                continue
             state[field] = str(value) if isinstance(value, UUID) else value.isoformat() if isinstance(value, date) else value
     return state
 
@@ -318,6 +320,7 @@ async def change_link(session: AsyncSession, organization: str, model, parent, f
         before = relationship_state(record)
         setattr(record, field, data.target_id)
         if model is Slide:
+            record.block_id = None
             record.status = "registered" if data.target_id else "unlinked"
         record.version += 1
         add_event(session, record, f"{field}_changed", before, relationship_state(record), data.reason)
