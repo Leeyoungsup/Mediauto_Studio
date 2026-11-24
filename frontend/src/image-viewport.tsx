@@ -4,6 +4,7 @@ import { AlertTriangle, LocateFixed, Map, Minus, Pause, Play, Plus, ScanLine } f
 import type { WsiScan } from './demo';
 import { api, auditAttemptId, jsonBody, request } from './session';
 import { IhcOverlay, IhcPanel, useIhcResults } from './ihc-results';
+import { usePapGallery } from './pap-gallery-state';
 import { useSkinReview } from './skin-review-state';
 import { ProstateOverlay, ProstatePanel, useProstateResults } from './prostate-results';
 import { Pdl1Badge, Pdl1Overlay, Pdl1Panel, usePdl1 } from './pdl1';
@@ -26,6 +27,7 @@ function ScaleBar({ mpp, zoom }: { mpp: number | null; zoom?: number }) {
   return <div className="scale-bar" aria-label={`Scale bar ${label}`}><span>{label}</span><i style={{ width: length * zoom / mpp }} /></div>;
 }
 
+const PapGallery = lazy(() => import('./pap-gallery'));
 const SkinOverlay = lazy(() => import('./skin-review').then((module) => ({ default: module.SkinOverlay })));
 const SkinPanel = lazy(() => import('./skin-review').then((module) => ({ default: module.SkinPanel })));
 
@@ -91,6 +93,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   const [labelError, setLabelError] = useState('');
   const [labelAttempt, setLabelAttempt] = useState(0);
   const [autopan, setAutopan] = useState(false);
+  const [showPap, setShowPap] = useState(false);
   const [showSkin, setShowSkin] = useState(false);
   const [showProstate, setShowProstate] = useState(false);
   const [autopanNotice, setAutopanNotice] = useState('');
@@ -126,6 +129,8 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     if (info && sharedCamera) renderer.current?.restoreCamera(sharedCamera);
   }, [info, sharedCamera?.x, sharedCamera?.y, sharedCamera?.zoom]);
   const canOpenSlideReview = Boolean(info) && !readOnlyEndpoint && !compareMode && scan.source === 'clinical';
+  const pap = usePapGallery(endpoint, canOpenSlideReview && showPap);
+  const appliedPapFocus = useRef<typeof pap.focus>(undefined);
   const skin = useSkinReview(endpoint, canOpenSlideReview && showSkin);
   const prostate = useProstateResults(endpoint, canOpenSlideReview && showProstate);
   const ihc = useIhcResults(endpoint, Boolean(info) && !readOnlyEndpoint && !compareMode, view);
@@ -146,6 +151,14 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       view.width * view.zoom * 0.65 / Math.max(1, x2 - x1), view.height * view.zoom * 0.65 / Math.max(1, y2 - y1)));
     return { x: (x1 + x2) / 2, y: (y1 + y2) / 2, zoom };
   }
+
+  useEffect(() => {
+    if (!showPap) { appliedPapFocus.current = undefined; return; }
+    if (!view || !pap.focus || following || appliedPapFocus.current === pap.focus) return;
+    const [left, top, right, bottom] = pap.focus.candidate.bounds;
+    appliedPapFocus.current = pap.focus;
+    restoreCamera(cameraFor([[left, top], [right, bottom]], view));
+  }, [view, pap.focus, following, restoreCamera, showPap]);
 
   useEffect(() => {
     if (!initialRoi || !view || !viewerRecords.records || focusedRoi.current === initialRoi) return;
@@ -332,6 +345,8 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     data-view-zoom={view?.zoom}>
     <div className="image-toolbar"><span><ScanLine size={17} /> {label} <span className="image-stain">{stain} · {scan.format}</span>{options && <ScanReference scan={scan} />}</span>
       <div className="image-actions">
+        {canOpenSlideReview && <button type="button" className="button secondary" aria-expanded={showPap}
+          disabled={pap.busy} onClick={() => setShowPap((open) => !open)}>Pap Gallery</button>}
         {canOpenSlideReview && <button type="button" className="button secondary" aria-expanded={showSkin}
           disabled={skin.busy} onClick={() => { skin.setMode(undefined); setShowSkin((open) => !open); }}>Skin Review</button>}
         {canOpenSlideReview && <button type="button" className="button secondary" aria-expanded={showProstate}
@@ -349,6 +364,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       </div>
     </div>
     {info && !compareMode && !readOnlyEndpoint && !following && <ViewerToolsBar state={viewerRecords} view={view} info={info} />}
+    <div className={showPap ? "pap-workspace" : undefined}>
     <div className="image-surface">
       <canvas className={viewerRecords.tool === 'pan' && !ihc.picking && !skin.mode ? 'wsi-canvas' : 'wsi-canvas drawing-tool'} ref={canvas} tabIndex={0} aria-label="WSI Canvas"
         onPointerDown={(event) => {
@@ -463,6 +479,12 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       <IhcOverlay state={ihc} view={view} />
       {canOpenSlideReview && showSkin && <Suspense fallback={null}><SkinOverlay state={skin} view={view} /></Suspense>}
       {canOpenSlideReview && showProstate && <ProstateOverlay state={prostate} view={view} />}
+      {showPap && view && pap.selected && <svg className="annotation-overlay pap-candidate-overlay" aria-label="Selected Pap Candidate"
+        viewBox={`0 0 ${view.width * view.zoom} ${view.height * view.zoom}`}>
+        <rect x={(pap.selected.bounds[0] - view.x) * view.zoom} y={(pap.selected.bounds[1] - view.y) * view.zoom}
+          width={(pap.selected.bounds[2] - pap.selected.bounds[0]) * view.zoom}
+          height={(pap.selected.bounds[3] - pap.selected.bounds[1]) * view.zoom} />
+      </svg>}
       <AnnotationOverlay view={view} annotations={viewerRecords.records?.annotations ?? []} draft={viewerRecords.draft} drawing={preview ?? (viewerRecords.vertices.length ? {
         kind: viewerRecords.tool === 'polygon' ? 'polygon' : viewerRecords.tool === 'count' ? 'count' : 'distance',
         points: viewerRecords.vertices,
@@ -491,6 +513,10 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         </div>}
       </aside>}
       {info && <ScaleBar mpp={info.mpp_x} zoom={view?.zoom} />}
+    </div>
+    {canOpenSlideReview && showPap && <Suspense fallback={<p role="status">Loading Pap Gallery…</p>}>
+      <PapGallery state={pap} following={following} />
+    </Suspense>}
     </div>
     <footer className="image-footer">
       <span>{info ? `${info.dimensions[0].toLocaleString()} × ${info.dimensions[1].toLocaleString()} px` : scan.format}</span>

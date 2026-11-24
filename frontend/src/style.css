@@ -665,3 +665,23 @@ dialog::backdrop { background: #21193575; }
 .skin-input { max-width: 440px; }
 .skin-candidates { display: grid; gap: 4px; }
 .skin-review p, .skin-review dd { overflow-wrap: anywhere; }
+
+.pap-workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(250px, 34%); align-items: start; }
+.pap-workspace .image-surface { min-width: 0; }
+.pap-gallery { display: grid; gap: 10px; padding: 12px; max-height: var(--viewport-surface, 70vh); overflow: auto; border-left: 1px solid var(--line); background: #fff; }
+.pap-gallery h2 { font-size: 16px; }
+.pap-gallery p { margin: 0; }
+.pap-gallery dd { overflow-wrap: anywhere; }
+.pap-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.pap-grid article { min-width: 0; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.pap-grid article > button:not(.pap-thumb) { width: 100%; display: grid; text-align: start; gap: 2px; background: #fff; border: 0; padding: 7px; color: #332e49; overflow-wrap: anywhere; }
+.pap-grid article > button[aria-pressed="true"] { color: #422da0; background: #efeafd; box-shadow: inset 0 0 0 2px #7c61cb; }
+.pap-thumb { display: block; width: 100%; height: 88px; object-fit: contain; background: #f6f2fb; }
+.pap-thumb-unavailable { border: 0; color: #483279; }
+.pap-selection { display: grid; gap: 4px; padding: 7px; background: #f6f2fb; overflow-wrap: anywhere; }
+.pap-selection .button { justify-self: start; }
+.pap-candidate-overlay rect { fill: none; stroke: #f1bc1c; stroke-width: 3; vector-effect: non-scaling-stroke; }
+@media (max-width: 740px) {
+  .pap-workspace { grid-template-columns: minmax(0, 1fr); }
+  .pap-gallery { border-left: 0; border-top: 1px solid var(--line); max-height: 58vh; }
+}

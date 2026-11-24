@@ -967,3 +967,21 @@ class SkinReviewRevision(ClinicalRecord, Base):
     reason: Mapped[str] = mapped_column(String(240))
     request_key: Mapped[UUID] = mapped_column(Uuid)
     request_hash: Mapped[str] = mapped_column(String(64))
+
+
+class PapGalleryCursor(Base):
+    __tablename__ = "pap_gallery_cursors"
+    __table_args__ = (
+        ForeignKeyConstraint(("organization", "case_id"), ("cases.organization", "cases.id")),
+        ForeignKeyConstraint(("organization", "scan_id"), ("slide_scans.organization", "slide_scans.id")),
+        ForeignKeyConstraint(("organization", "user_id"), ("auth_users.organization", "auth_users.id"), ondelete="CASCADE"),
+    )
+
+    organization: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    case_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    scan_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    archive_id: Mapped[str] = mapped_column(String(64))
+    candidate_id: Mapped[str] = mapped_column(String(80))
+    version: Mapped[int] = mapped_column(Integer)
+    saved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
