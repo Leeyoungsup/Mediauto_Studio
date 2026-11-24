@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, CheckConstraint, Date, DateTime, ForeignKeyConstraint, Index, Integer, String, UniqueConstraint, Uuid, func
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, String, UniqueConstraint, Uuid, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -25,6 +25,33 @@ class ClinicalRecord:
     created_by: Mapped[str] = mapped_column(String(80), nullable=False)
 
 
+class AuthUser(Base):
+    __tablename__ = "auth_users"
+    __table_args__ = (
+        UniqueConstraint("organization", "username"),
+        UniqueConstraint("organization", "id"),
+        CheckConstraint("role IN ('admin', 'doctor', 'labeler', 'viewer')", name="auth_user_role"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    organization: Mapped[str] = mapped_column(String(64))
+    username: Mapped[str] = mapped_column(String(80))
+    display_name: Mapped[str] = mapped_column(String(120))
+    role: Mapped[str] = mapped_column(String(16))
+    password_hash: Mapped[str] = mapped_column(String(120))
+    active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    failed_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("auth_users.id", ondelete="CASCADE"))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class Patient(ClinicalRecord, Base):
     __tablename__ = "patients"
     __table_args__ = (
@@ -45,11 +72,14 @@ class Case(ClinicalRecord, Base):
         UniqueConstraint("organization", "id"),
         UniqueConstraint("organization", "case_number"),
         ForeignKeyConstraint(("organization", "patient_id"), ("patients.organization", "patients.id")),
+        ForeignKeyConstraint(("organization", "assigned_to"), ("auth_users.organization", "auth_users.id"), name="fk_cases_assignee"),
         Index("ix_cases_patient", "organization", "patient_id"),
+        Index("ix_cases_assignee", "organization", "assigned_to"),
     )
 
     case_number: Mapped[str] = mapped_column(String(80), nullable=False)
     patient_id: Mapped[UUID | None] = mapped_column(Uuid)
+    assigned_to: Mapped[UUID | None] = mapped_column(Uuid)
     status: Mapped[str] = mapped_column(String(24), server_default="registered")
 
 
