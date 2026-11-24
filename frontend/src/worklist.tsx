@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowDown, ArrowRight, ArrowUp, CheckCircle2, CircleDashed, Columns3, Files, FolderOpen, Layers3, Plus, ScanLine, Search, UserRoundCheck, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUp, CheckCircle2, CircleDashed, Columns3, Files, FolderOpen, Layers3, PanelRightClose, PanelRightOpen, Plus, ScanLine, Search, UserRoundCheck, X } from 'lucide-react';
 import { readyCount, statuses } from './demo';
 import type { CaseStatus, DemoCase, Slide } from './demo';
 import type { Assignee, Counts, WorklistQuery } from './worklist-api';
@@ -69,6 +69,7 @@ export function Worklist({ cases, loading, total, counts, assignees, onQuery, sc
   const [offset, setOffset] = useState(0);
   const [columnSettings, setColumnSettings] = useState(defaultColumns);
   const [columnSearch, setColumnSearch] = useState('');
+  const [previewVisible, setPreviewVisible] = useState(true);
   const edited = useRef(false);
   const shownColumns = columnSettings.filter(({ visible }) => visible).map(({ id }) => columns.find((column) => column.id === id)!);
   const apply = useCallback((configuration: ViewConfig | undefined, base: ColumnSetting[] | null, restoreScope = true, startup = false) => {
@@ -110,18 +111,28 @@ export function Worklist({ cases, loading, total, counts, assignees, onQuery, sc
   }
 
   return <>
-    <div className="page-heading"><div><h1>Worklist</h1><p>Check case assignments and slide review status.</p></div>
-      {onRegister && <button className="button primary" onClick={onRegister}><Plus size={17} /> Register Case</button>}
+    <div className="page-heading worklist-heading"><h1>Worklist</h1>
+      <div className="actions">
+        <button type="button" className="button secondary" aria-controls="worklist-preview" aria-expanded={previewVisible}
+          onClick={() => setPreviewVisible(!previewVisible)}>
+          {previewVisible ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+          {previewVisible ? 'Hide Case Preview' : 'Show Case Preview'}
+        </button>
+        {onRegister && <button className="button primary" onClick={onRegister}><Plus size={17} /> Register Case</button>}
+      </div>
     </div>
     <SavedViewControls controller={saved} configuration={configuration} mayShare={mayShare} />
-    <section className="metrics" aria-label="Case Summary">
-      {metrics.map(({ label, count, icon: Icon, tone, value }) => <button key={label} className="metric" aria-pressed={status === value} onClick={() => { edited.current = true; setStatus(status === value ? '' : value); setOffset(0); }}>
-        <span className={`metric-icon ${tone}`}><Icon size={20} /></span><span className="metric-value"><span>{label}</span><strong>{count}</strong></span>
-      </button>)}
-    </section>
-    <div className="worklist-layout">
+    <div className="worklist-layout" data-preview={previewVisible}>
       <section className="panel worklist-panel" aria-label="Case List">
-        <div className="panel-title"><div className="title-inline"><h2>{scope === 'mine' ? 'Assigned to Me' : scope === 'unassigned' ? 'Unassigned Cases' : 'Case List'}</h2><span className="count">{total}</span></div></div>
+        <div className="panel-title worklist-panel-title">
+          <div className="title-inline"><h2>{scope === 'mine' ? 'Assigned to Me' : scope === 'unassigned' ? 'Unassigned Cases' : 'Case List'}</h2><span className="count">{total}</span></div>
+          <div className="metrics" role="group" aria-label="Case Summary">
+            {metrics.map(({ label, count, icon: Icon, tone, value }) => <button key={label} className="metric"
+              aria-pressed={status === value} onClick={() => { edited.current = true; setStatus(status === value ? '' : value); setOffset(0); }}>
+              <span className={`metric-icon ${tone}`}><Icon size={14} /></span><span className="metric-value">{label}<strong>{count}</strong></span>
+            </button>)}
+          </div>
+        </div>
         <div className="filters" onChangeCapture={() => { edited.current = true; }} onClickCapture={() => { edited.current = true; }}>
           <label className="search-field"><Search size={17} /><input value={search} onChange={(event) => { setSearch(event.target.value); setOffset(0); }} maxLength={80} placeholder="Search Case ID" aria-label="Search Cases" />{search && <button className="icon-button" aria-label="Clear Search" onClick={() => { setSearch(''); setOffset(0); }}><X size={15} /></button>}</label>
           <select aria-label="Filter by Review Status" value={status} onChange={(event) => { setStatus(event.target.value as CaseStatus | ''); setOffset(0); }}><option value="">All Statuses</option>{statuses.map((value) => <option key={value}>{value}</option>)}</select>
@@ -154,14 +165,14 @@ export function Worklist({ cases, loading, total, counts, assignees, onQuery, sc
           {(offset > 0 || total > 50) && <div className="actions"><button className="button secondary" disabled={loading || offset === 0} onClick={() => setOffset(offset - 50)}>Previous</button><button className="button secondary" disabled={loading || offset + 50 >= total} onClick={() => setOffset(offset + 50)}>Next</button></div>}
         </footer>
       </section>
-      <aside className="panel case-preview" aria-label="Selected Case Preview">
+      <aside className="panel case-preview" id="worklist-preview" aria-label="Selected Case Preview" hidden={!previewVisible}>
         <div className="panel-title"><h2>Case Preview</h2><ScanLine size={18} className="muted" /></div>
         {selected ? <div className="preview-content">
           <div className="preview-heading"><strong>{selected.id}</strong><StatusLabel status={selected.status} /></div>
           <dl className="key-values"><div><dt>Specimen</dt><dd>{selected.specimen}</dd></div><div><dt>Assignee</dt><dd>{selected.assignee || 'Unassigned'}</dd></div><div><dt>Patient Information</dt><dd>{selected.patient?.number || (selected.patient ? 'Registered' : 'Not Entered')}</dd></div></dl>
           <div className="preview-label"><h3>Slides</h3><span>{selected.source === 'files' ? `${selected.slides.length} files registered` : `${readyCount(selected)}/${selected.slides.length} Viewable`}</span></div>
           {selected.slides.length ? <div className="preview-slides">{selected.slides.map((slide) => <button key={slide.id} className="slide-preview" disabled={!slide.wsi} onClick={() => onViewer(selected.id, slide.id)}>
-            <span className="slide-image"><SlidePreview slide={slide} /></span><strong>{slide.label ?? slide.id}</strong><span>{slide.stain}</span>
+            <span className="slide-image"><SlidePreview slide={slide} /></span><strong>{slide.label ?? slide.id}</strong><span>{slide.stain}{slide.wsi && ` · ${slide.wsi.format}`}</span>
           </button>)}</div> : <p className="empty-inline">No slides are linked to this case.</p>}
           <button className="button primary full" onClick={() => onOpen(selected.id)}>Open Case Details <ArrowRight size={16} /></button>
           {readyCount(selected) > 0 && <button className="button secondary full" onClick={() => onViewer(selected.id)}><ScanLine size={16} /> Open Viewer</button>}

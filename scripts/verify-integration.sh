@@ -79,6 +79,7 @@ if [[ "$mode" == --manual ]]; then
     read -r _
 else
     node scripts/integration-browser.mjs
+    node scripts/workspace-layout-browser.mjs
     node scripts/viewer-records-browser.mjs
     node scripts/multi-view-browser.mjs
     node scripts/worklist-views-browser.mjs

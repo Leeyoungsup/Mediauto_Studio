@@ -1,6 +1,6 @@
 import { StrictMode, useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import { Activity, ChevronRight, CircleHelp, ClipboardList, FlaskConical, LayoutList, Microscope, ScanLine, Settings2, UserRound, UserRoundCheck, X } from 'lucide-react';
+import { Activity, ChevronRight, CircleHelp, ClipboardList, FlaskConical, LayoutList, Microscope, PanelLeftClose, PanelLeftOpen, ScanLine, Settings2, UserRound, UserRoundCheck, X } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
 import { CaseDetail } from './case-detail';
 import { CaseRequests, ReportDraftReferences, RequestInbox, RequestPage } from './case-requests';
@@ -67,6 +67,8 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
   const settingsAllowed = user.role === 'admin';
   const requestAllowed = settingsAllowed || user.role === 'doctor';
   const [page, setPage] = useState(readPage);
+  const [navigationCollapsed, setNavigationCollapsed] = useState<boolean>();
+  const collapseNavigation = navigationCollapsed ?? page.view === 'viewer';
   const [selected, setSelected] = useState('');
   const [modal, setModal] = useState<Modal>(null);
   const [formError, setFormError] = useState('');
@@ -260,28 +262,33 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
     } finally { setSaving(false); }
   }
 
-  return <div className="app-shell">
-    <aside className="sidebar">
-      <a className="brand" href="#worklist/all"><span className="brand-icon"><Microscope size={23} /></span><span>MeDIAuto<strong>Studio</strong></span></a>
+  return <div className="app-shell" data-navigation-collapsed={collapseNavigation}>
+    <aside className="sidebar" id="main-navigation">
+      <a className="brand" href="#worklist/all" aria-label="MeDIAuto Studio Home" title="MeDIAuto Studio Home"><span className="brand-icon"><Microscope size={23} /></span><span className="brand-name">MeDIAuto<strong>Studio</strong></span></a>
       <nav aria-label="Workspace Navigation" className="side-nav">
         <p>Workspace</p>
-        <a href="#worklist/all" aria-current={page.view !== 'settings' ? 'location' : undefined}><LayoutList size={19} /> <span>Worklist</span><small>{result.counts.all}</small></a>
-        {settingsAllowed && <a href="#settings" aria-current={page.view === 'settings' ? 'page' : undefined}><Settings2 size={19} /> <span>Settings</span></a>}
+        <a href="#worklist/all" aria-label="Worklist" title="Worklist" aria-current={page.view !== 'settings' ? 'location' : undefined}><LayoutList size={19} /> <span>Worklist</span><small>{result.counts.all}</small></a>
+        {settingsAllowed && <a href="#settings" aria-label="Settings" title="Settings" aria-current={page.view === 'settings' ? 'page' : undefined}><Settings2 size={19} /> <span>Settings</span></a>}
       </nav>
-      <div className="side-footer"><button onClick={() => showModal('system')}><Activity size={18} /><span>Service Status</span><i className={health?.status === 'ok' ? 'online' : ''} /></button></div>
+      <div className="side-footer"><button aria-label="Service Status" title="Service Status" onClick={() => showModal('system')}><Activity size={18} /><span>Service Status</span><i className={health?.status === 'ok' ? 'online' : ''} /></button></div>
     </aside>
     <div className="workspace">
-      <header className="topbar"><div className="breadcrumbs"><span>Pathology Workspace</span><ChevronRight size={15} /><strong>{{ viewer: 'WSI Viewer', case: 'Case Details', request: 'Analysis and Consultation Requests', scans: 'Slide Registration', settings: 'Settings', worklist: 'Worklist' }[page.view]}</strong></div>
+      <header className="topbar"><div className="breadcrumbs">
+        <button className="icon-button navigation-toggle" type="button" aria-controls="main-navigation"
+          aria-expanded={!collapseNavigation} aria-label={collapseNavigation ? 'Expand Navigation' : 'Collapse Navigation'}
+          title={collapseNavigation ? 'Expand Navigation' : 'Collapse Navigation'} onClick={() => setNavigationCollapsed(!collapseNavigation)}>
+          {collapseNavigation ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+        </button><span>Pathology Workspace</span><ChevronRight size={15} /><strong>{{ viewer: 'WSI Viewer', case: 'Case Details', request: 'Analysis and Consultation Requests', scans: 'Slide Registration', settings: 'Settings', worklist: 'Worklist' }[page.view]}</strong></div>
         <div className="header-actions">{requestAllowed && <RequestInbox organization={user.organization} />}<span className="demo-label"><FlaskConical size={15} /> Demo Environment</span><button className="emr-chip" onClick={() => showModal('system')}><span /> EMR {emr} · LIS {lis}</button><span className="identity"><UserRound size={17} />{user.display_name}</span><button className="button secondary" onClick={logout}>Sign Out</button></div>
       </header>
-      <main className="workspace-main">
+      <main className="workspace-main" data-view={page.view}>
         {(page.view === 'worklist' || page.view === 'scans') && <nav aria-label="Worklist Navigation" className="worklist-nav">
           {worklistTabs.map(({ id, href, label, count, icon: Icon }) => <a key={id} href={href}
             aria-current={(page.view === 'scans' ? id === 'scans' : id === page.scope) ? 'page' : undefined}>
             <Icon size={16} />{label}<small>{count}</small>
           </a>)}
         </nav>}
-        <div hidden={page.view !== 'worklist'}>
+        <div className="worklist-page" hidden={page.view !== 'worklist'}>
           {listError && <div className="notice" role="alert">{listError}<button className="button secondary" onClick={() => setRevision((value) => value + 1)}>Retry</button></div>}
           <Worklist onScope={setWorklistScope} mayShare={user.role === 'admin'} cases={worklistCases} loading={listLoading} scope={scope} current={selectedCase} onSelect={setSelected}
             total={result.total} counts={result.counts} assignees={result.assignees} onQuery={setQuery}
