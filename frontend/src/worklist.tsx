@@ -91,11 +91,12 @@ type Props = {
   current: DemoCase | undefined;
   onSelect: (id: string) => void;
   onOpen: (id: string) => void;
+  canReportFrozen?: boolean;
   onViewer: (id: string, slide?: string) => void;
   onRegister?: () => void;
 };
 
-export function Worklist({ cases, loading, total, counts, filteredCounts, queues, workload, onQueueChanged, assignees, onQuery, scope, onScope, mayShare, current, onSelect, onOpen, onViewer, onRegister }: Props) {
+export function Worklist({ cases, loading, total, counts, filteredCounts, queues, workload, onQueueChanged, assignees, onQuery, scope, onScope, mayShare, current, onSelect, onOpen, onViewer, onRegister, canReportFrozen }: Props) {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<CaseStatus | ''>('');
   const [assignee, setAssignee] = useState('');
@@ -228,6 +229,8 @@ export function Worklist({ cases, loading, total, counts, filteredCounts, queues
           {selected.slides.length ? <div className="preview-slides">{selected.slides.map((slide) => <button key={slide.id} className="slide-preview" data-scan-id={slide.wsi?.id} title={slide.state} disabled={!slide.wsi} onClick={() => onViewer(selected.id, slide.id)}>
             <span className="slide-image"><SlidePreview slide={slide} /></span><strong>{slide.label ?? slide.id}</strong><span>{slide.stain} · {slide.wsi?.format ?? slide.state}<ScanReference scan={slide.wsi} /></span>
           </button>)}</div> : <p className="empty-inline">No slides are linked to this case.</p>}
+          {canReportFrozen && selected.recordId && selected.worklist?.priority === 'frozen' &&
+            <a className="button secondary full" href={`#case/${selected.recordId}/frozen`}>Frozen Report</a>}
           <button className="button primary full" onClick={() => onOpen(selected.id)}>Open Case Details <ArrowRight size={16} /></button>
           {readyCount(selected) > 0 && <button className="button secondary full" onClick={() => onViewer(selected.id)}><ScanLine size={16} /> Open Viewer</button>}
         </div> : <p className="empty-inline">Select a case from the list.</p>}

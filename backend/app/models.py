@@ -677,6 +677,79 @@ class ReportTransmission(ClinicalRecord, Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class FrozenPublication(ClinicalRecord, Base):
+    __tablename__ = "frozen_publications"
+    __table_args__ = (
+        UniqueConstraint("organization", "case_id", "id"),
+        UniqueConstraint("organization", "case_id", "sequence"),
+        UniqueConstraint("organization", "case_id", "created_by", "request_key"),
+        ForeignKeyConstraint(("organization", "case_id"), ("cases.organization", "cases.id")),
+        ForeignKeyConstraint(("organization", "case_id", "corrects_id"),
+                             ("frozen_publications.organization", "frozen_publications.case_id", "frozen_publications.id")),
+    )
+
+    case_id: Mapped[UUID] = mapped_column(Uuid)
+    sequence: Mapped[int] = mapped_column(Integer)
+    findings: Mapped[str] = mapped_column(Text)
+    margins: Mapped[str | None] = mapped_column(Text)
+    corrects_id: Mapped[UUID | None] = mapped_column(Uuid)
+    correction_reason: Mapped[str | None] = mapped_column(String(240))
+    request_key: Mapped[str] = mapped_column(String(128))
+
+
+class FrozenRecipient(ClinicalRecord, Base):
+    __tablename__ = "frozen_recipients"
+    __table_args__ = (
+        UniqueConstraint("organization", "case_id", "user_id"),
+        ForeignKeyConstraint(("organization", "case_id"), ("cases.organization", "cases.id")),
+        ForeignKeyConstraint(("organization", "user_id"), ("auth_users.organization", "auth_users.id")),
+        Index("ix_frozen_recipient_user", "organization", "user_id", "active"),
+    )
+
+    case_id: Mapped[UUID] = mapped_column(Uuid)
+    user_id: Mapped[UUID] = mapped_column(Uuid)
+    active: Mapped[bool] = mapped_column(Boolean)
+
+
+class FrozenReceipt(ClinicalRecord, Base):
+    __tablename__ = "frozen_receipts"
+    __table_args__ = (
+        UniqueConstraint("organization", "publication_id", "recipient_id"),
+        ForeignKeyConstraint(("organization", "case_id", "publication_id"),
+                             ("frozen_publications.organization", "frozen_publications.case_id", "frozen_publications.id")),
+        ForeignKeyConstraint(("organization", "case_id", "recipient_id"),
+                             ("frozen_recipients.organization", "frozen_recipients.case_id", "frozen_recipients.user_id")),
+        CheckConstraint("status IN ('pending', 'acknowledged', 'failed')", name="frozen_receipt_status"),
+    )
+
+    case_id: Mapped[UUID] = mapped_column(Uuid)
+    publication_id: Mapped[UUID] = mapped_column(Uuid)
+    recipient_id: Mapped[UUID] = mapped_column(Uuid)
+    status: Mapped[str] = mapped_column(String(16))
+    reason: Mapped[str | None] = mapped_column(String(240))
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class FrozenCallback(ClinicalRecord, Base):
+    __tablename__ = "frozen_callbacks"
+    __table_args__ = (
+        UniqueConstraint("organization", "case_id", "created_by", "request_key"),
+        ForeignKeyConstraint(("organization", "case_id", "publication_id"),
+                             ("frozen_publications.organization", "frozen_publications.case_id", "frozen_publications.id")),
+        ForeignKeyConstraint(("organization", "case_id", "recipient_id"),
+                             ("frozen_recipients.organization", "frozen_recipients.case_id", "frozen_recipients.user_id")),
+        CheckConstraint("outcome IN ('reached_read_back','no_answer','failed')", name="frozen_callback_outcome"),
+        Index("ix_frozen_callback_publication", "organization", "publication_id", "created_at"),
+    )
+
+    case_id: Mapped[UUID] = mapped_column(Uuid)
+    publication_id: Mapped[UUID] = mapped_column(Uuid)
+    recipient_id: Mapped[UUID] = mapped_column(Uuid)
+    outcome: Mapped[str] = mapped_column(String(24))
+    note: Mapped[str | None] = mapped_column(String(240))
+    request_key: Mapped[str] = mapped_column(String(128))
+
+
 class WorklistOpen(Base):
     __tablename__ = "worklist_opens"
     __table_args__ = (

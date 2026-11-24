@@ -10,9 +10,9 @@ import { readyCount } from './demo';
 import type { DemoCase } from './demo';
 import { ScanReference, SlidePreview, StatusLabel } from './worklist';
 
-export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, onConfirm, patientIntegration, requests, report, initialTab, dates, routing, editor, selectedScan, historyEndpoint, attachmentsEndpoint, logsEndpoint, notesEndpoint }: {
+export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, onConfirm, patientIntegration, requests, report, initialTab, dates, routing, editor, selectedScan, historyEndpoint, attachmentsEndpoint, logsEndpoint, notesEndpoint, frozen }: {
   item: DemoCase; emr: string; onBack: () => void; onViewer: (slide?: string) => void;
-  onAssign?: () => void; onReview?: () => void; onConfirm?: () => void; patientIntegration?: ReactNode; requests?: ReactNode; report?: ReactNode; initialTab?: string; selectedScan?: string; historyEndpoint?: string; attachmentsEndpoint?: string; logsEndpoint?: string; notesEndpoint?: string; dates?: ReactNode; routing?: ReactNode; editor?: ReactNode;
+  onAssign?: () => void; onReview?: () => void; onConfirm?: () => void; patientIntegration?: ReactNode; requests?: ReactNode; report?: ReactNode; initialTab?: string; selectedScan?: string; historyEndpoint?: string; attachmentsEndpoint?: string; logsEndpoint?: string; notesEndpoint?: string; frozen?: ReactNode; dates?: ReactNode; routing?: ReactNode; editor?: ReactNode;
 }) {
   const [showLogs, setShowLogs] = useState(false);
   const [tab, setTab] = useState(initialTab ?? 'Slides');
@@ -35,6 +35,7 @@ export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, on
             ...(attachmentsEndpoint ? [{ name: 'Media', icon: FileText }, { name: 'Gross Images', icon: Camera }] : []),
             ...(editor ? [{ name: 'Case Editor', icon: PencilLine }] : []),
             ...(notesEndpoint ? [{ name: 'Notes', icon: MessageSquare }] : []),
+            ...(frozen ? [{ name: 'Frozen Section', icon: ClipboardList }] : []),
             ...(requests ? [{ name: 'Requests', icon: MessageSquare }, { name: 'Report Draft', icon: ClipboardList }] : [])].map(({ name, icon: Icon }) =>
             <button key={name} aria-pressed={tab === name} onClick={() => setTab(name)}><Icon size={16} />{name}</button>)}
         </nav>
@@ -55,6 +56,7 @@ export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, on
         {tab === 'Case Editor' && <div className="detail-content">{editor}</div>}
         {tab === 'Notes' && notesEndpoint && <div className="detail-content"><CaseNotes endpoint={notesEndpoint} /></div>}
         {tab === 'Requests' && <div className="detail-content">{requests}</div>}
+        {tab === 'Frozen Section' && <div className="detail-content">{frozen}</div>}
         {tab === 'Report Draft' && <div className="detail-content">{report}</div>}
         {tab === 'History' && <div className="detail-content">
           {historyEndpoint && <PatientHistory key={historyEndpoint} endpoint={historyEndpoint} heading />}

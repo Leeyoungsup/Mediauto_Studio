@@ -30,6 +30,10 @@ Worklist에서는 **Hide Case Preview**로 목록을 넓힐 수 있습니다. WS
 
 규칙과 파일 등록 정보는 개발 PostgreSQL에 저장되며, 이미 등록한 파일은 규칙을 다시 적용해도 유지됩니다. 등록 정보는 Worklist에서 Case ID로 묶어 확인합니다. 같은 Slide ID의 NDPI와 SVS는 서로 다른 원본 파일로 표시됩니다. 등록된 스캔은 케이스 상세의 WSI 뷰어에서 열 수 있습니다.
 
+### 28. 동결절편 예비결과와 OR 확인
+
+**Worklist → Global Views → Frozen Section**에서 케이스를 선택해 **Frozen Report**를 엽니다. 관리자가 지정한 수술실 수신자는 **OR Results**에서 최신 예비결과를 열고 해당 버전을 확인합니다. 배정 병리의는 전화 콜백과 정정을 기록하며 **Published Version History**와 **Case Logs**에서 이력을 확인할 수 있습니다. [28번 권한·시연·검증 기록](work/frozen-workflow-28.md)
+
 ### 27. 보고 초안과 LIS 전송
 
 **Case Details → Report Draft**에서 템플릿과 근거 결과를 선택해 초안을 작성합니다. **Dictation Draft**에서 확인한 전사 텍스트를 섹션에 반영하고, 버전별 내용은 **Version History**에서 조회합니다. 배정 병리의 승인 후 연결한 Mock LIS에 명시적으로 전송할 수 있습니다. [27번 역할·설정 및 검증 기록](work/case-reporting-27.md)

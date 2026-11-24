@@ -59,6 +59,7 @@ async def main():
         for account, role in (
             ("integration-admin", "admin"), ("integration-doctor", "doctor"), ("integration-other", "doctor"),
             ("integration-viewer-admin", "admin"), ("integration-editor-admin", "admin"),
+            ("integration-or", "viewer"),
         ):
             await create_account("local", account, role)
 
@@ -147,4 +148,5 @@ PYMEDIA
     node scripts/case-logs-browser.mjs
     node scripts/notifications-browser.mjs
     node scripts/case-report-browser.mjs
+    node scripts/frozen-workflow-browser.mjs
 fi

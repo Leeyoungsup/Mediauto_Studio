@@ -520,6 +520,138 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.post(other_url + "/patient-confirm",
                           json={**confirm, "source_revision": 3, "confirm_differences": True})).status_code, 409)
 
+    async def test_frozen_publication_or_access_callbacks_and_correction(self):
+        doctor = await create_account(self.org, "frozen-doctor", "doctor")
+        viewer = await create_account(self.org, "frozen-viewer", "viewer")
+        new_viewer = await create_account(self.org, "frozen-second", "viewer")
+        foreign = await create_account(self.org + "-outside", "frozen-foreign", "viewer")
+        case = await self.create("cases", {"case_number": "FROZEN-QA"})
+        path = self.url + "/cases/" + case["id"]
+        frozen = path + "/frozen"
+        or_case = self.url + "/or/cases/" + case["id"]
+        change = {"active": True, "reason": "Synthetic OR authorization"}
+
+        async def check(request, expected=200):
+            response = await request
+            self.assertEqual(response.status_code, expected, response.text)
+            return response.json()
+
+        async def authorize(recipient, change_data=change, expected=200):
+            return await check(self.client.put(frozen + "/recipients/" + str(recipient.id), json=change_data), expected)
+
+        async def publish(payload, key, expected=201):
+            return await check(self.client.post(frozen + "/publications", json=payload,
+                              headers={"Idempotency-Key": key}), expected)
+
+        async def confirm(publication, payload, expected=200):
+            return await check(self.client.post(or_case + "/results/" + publication + "/confirmation", json=payload), expected)
+
+        findings = {"findings": "Synthetic preliminary result.", "margins": "Synthetic margin assessment."}
+        await authorize(viewer, expected=409)
+        assigned = await check(self.client.patch(path + "/assignment", json={
+            "assignee_id": str(doctor.id), "version": case["version"], "reason": "Synthetic pathologist assignment",
+        }))
+        await check(self.client.patch(path + "/classification", json={
+            "priority": "frozen", "group_key": None, "version": assigned["version"], "reason": "Synthetic frozen task",
+        }))
+        await authorize(doctor, expected=404)
+        await authorize(foreign, expected=404)
+        await publish(findings, "admin-forbidden", 403)
+        await login(self.client, self.org, doctor.username)
+        await publish(findings, "no-grant", 409)
+        await authorize(viewer, expected=403)
+        await check(self.client.get(or_case), 403)
+
+        await login(self.client, self.org, self.user.username)
+        await authorize(viewer)
+        await authorize(viewer)
+        await login(self.client, self.org, viewer.username)
+        listing = await check(self.client.get(self.url + "/or"))
+        self.assertEqual([item["id"] for item in listing["cases"]], [case["id"]])
+        self.assertIsNone((await check(self.client.get(or_case)))["publication"])
+        await check(self.client.get(path), 404)
+        await check(self.client.get(frozen), 403)
+        await login(self.client, self.org, new_viewer.username)
+        self.assertFalse((await check(self.client.get(self.url + "/or")))["cases"])
+        await check(self.client.get(or_case), 404)
+
+        await login(self.client, self.org, doctor.username)
+        first, duplicate = await asyncio.gather(publish(findings, "frozen-preliminary"), publish(findings, "frozen-preliminary"))
+        self.assertEqual(first, duplicate)
+        self.assertEqual((first["sequence"], first["status"]), (1, "preliminary"))
+        await publish({**findings, "findings": "Different"}, "frozen-preliminary", 409)
+
+        call = {"publication_id": first["id"], "recipient_id": str(viewer.id), "outcome": "reached_read_back"}
+        await check(self.client.post(frozen + "/callbacks", json=call, headers={"Idempotency-Key": "missing-readback"}), 422)
+        unsuccessful = {**call, "outcome": "no_answer", "note": "Synthetic call went unanswered."}
+        await check(self.client.post(frozen + "/callbacks", json=unsuccessful, headers={"Idempotency-Key": "no-answer"}), 201)
+        recorded = await check(self.client.post(frozen + "/callbacks", json={**call, "read_back": True},
+                                               headers={"Idempotency-Key": "phone-confirmed"}), 201)
+        replay = await check(self.client.post(frozen + "/callbacks", json={**call, "read_back": True},
+                                             headers={"Idempotency-Key": "phone-confirmed"}), 201)
+        self.assertEqual(recorded["id"], replay["id"])
+
+        await login(self.client, self.org, viewer.username)
+        attempt = {"X-Audit-Attempt": str(uuid4())}
+        opened = await check(self.client.get(or_case, headers=attempt))
+        await check(self.client.get(or_case, headers=attempt))
+        self.assertEqual(opened["receipt"]["status"], "pending")
+        self.assertEqual(opened["callback"]["outcome"], "reached_read_back")
+        self.assertIsNone(opened["final_report"])
+        self.assertEqual(set(opened), {"case_number", "publication", "receipt", "callback", "final_report"})
+        await confirm(first["id"], {"outcome": "acknowledged"}, 422)
+        issue = await confirm(first["id"], {"outcome": "failed", "reason": "Synthetic confirmation failure."})
+        self.assertIsNotNone(issue["responded_at"])
+        positive = {"outcome": "acknowledged", "read_back": True}
+        acknowledged = await confirm(first["id"], positive)
+        self.assertEqual(await confirm(first["id"], positive), acknowledged)
+        self.assertEqual(acknowledged["status"], "acknowledged")
+
+        await login(self.client, self.org, self.user.username)
+        await authorize(new_viewer)
+        await login(self.client, self.org, new_viewer.username)
+        self.assertEqual((await check(self.client.get(or_case)))["receipt"]["status"], "pending")
+
+        await login(self.client, self.org, doctor.username)
+        await publish({**findings, "corrects_id": first["id"], "correction_reason": "No text change"}, "same-text", 422)
+        report = path + "/report"
+        draft = await check(self.client.put(report, json={"version": 0, "sections": {"diagnosis": "Synthetic final content."}}))
+        review = await check(self.client.post(report + "/actions", json={"version": draft["version"], "action": "submit"}))
+        approved = await check(self.client.post(report + "/actions", json={
+            "version": review["version"], "action": "approve", "reviewed": True,
+        }))
+        second = await publish({**findings, "findings": "Synthetic updated finding.",
+                                "corrects_id": first["id"], "correction_reason": "Synthetic correction"}, "frozen-correction")
+        self.assertEqual(second["sequence"], 2)
+        await check(self.client.post(frozen + "/callbacks", json={**call, "read_back": True},
+                                     headers={"Idempotency-Key": "stale-phone"}), 409)
+        lab = await check(self.client.get(frozen))
+        self.assertEqual(len(lab["publications"]), 2)
+        self.assertEqual(lab["publications"][1]["findings"], findings["findings"])
+        self.assertEqual(len(lab["publications"][1]["callbacks"]), 2)
+        self.assertEqual(lab["publications"][0]["callbacks"], [])
+        self.assertTrue(all(item["status"] == "pending" for item in lab["publications"][0]["receipts"]))
+        await login(self.client, self.org, viewer.username)
+        await confirm(first["id"], positive, 409)
+        corrected = await check(self.client.get(or_case))
+        self.assertEqual((corrected["publication"]["id"], corrected["publication"]["status"]), (second["id"], "preliminary"))
+        self.assertEqual(corrected["final_report"], {"status": "approved", "version": approved["version"]})
+        self.assertNotIn("Synthetic final content.", str(corrected))
+        self.assertEqual((await confirm(second["id"], positive))["status"], "acknowledged")
+
+        await login(self.client, self.org, self.user.username)
+        await authorize(viewer, {"active": False, "reason": "Synthetic access revoked"})
+        logs = await check(self.client.get(path + "/logs", params={"action": "or_result_opened", "target_id": first["id"], "actor": str(viewer.id)}))
+        self.assertEqual(len(logs["rows"]), 1)
+        failures = await check(self.client.get(path + "/logs", params={"entity": "or_confirmation", "result": "failed"}))
+        self.assertIn("or_confirmation_failed", {row["action"] for row in failures["rows"]})
+        self.assertIn(409, {row["status_code"] for row in failures["rows"]})
+        await login(self.client, self.org, viewer.username)
+        await check(self.client.get(or_case), 404)
+        await confirm(second["id"], positive, 404)
+        await login(self.client, foreign.organization, foreign.username)
+        await check(self.client.get(or_case), 403)
+
     async def test_report_templates_evidence_approval_delivery_and_correction(self):
         doctor = await create_account(self.org, "report-doctor", "doctor")
         other = await create_account(self.org, "report-other", "doctor")

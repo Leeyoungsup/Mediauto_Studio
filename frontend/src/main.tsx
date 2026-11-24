@@ -1,3 +1,4 @@
+import { FrozenWorkflow, ORResults } from './frozen-workflow';
 import { CaseReport } from './case-report';
 import { NotificationCenter, NotificationSettings } from './notifications';
 import { StrictMode, useCallback, useEffect, useRef, useState } from 'react';
@@ -30,7 +31,7 @@ import './style.css';
 
 const emrLabels = { unconfigured: 'Not Configured', disabled: 'Disabled', connected: 'Connected', unavailable: 'Connection Unavailable', unknown: 'Unavailable' };
 type Health = { status: 'ok' | 'degraded'; database: 'connected' | 'unavailable'; emr: keyof typeof emrLabels };
-type Page = { view: 'worklist'; scope: Scope } | { view: 'case'; id: string; files: boolean; tab?: 'requests' | 'report' | 'editor' | 'notes'; selectedScan?: string } | { view: 'request'; id: string }
+type Page = { view: 'worklist'; scope: Scope } | { view: 'case'; id: string; files: boolean; tab?: 'requests' | 'report' | 'editor' | 'notes' | 'frozen'; selectedScan?: string } | { view: 'request'; id: string } | { view: 'or'; id?: string }
   | { view: 'viewer'; id: string; slide?: string; snapshot?: string; files: boolean } | { view: 'scans' } | { view: 'settings'; section?: 'groups' | 'notifications' };
 type WorkflowAction = 'assignment' | 'review' | 'confirm';
 type Modal = 'register' | 'system' | null;
@@ -41,10 +42,11 @@ function decodeRoute(value: string) {
 
 function readPage(): Page {
   const [view, id, slide, snapshot] = location.hash.slice(1).split('/');
+  if (view === 'or') return { view, id: id ? decodeRoute(id) : undefined };
   if (view === 'scans') return { view };
   if (view === 'settings') return { view, section: id === 'groups' || id === 'notifications' ? id : undefined };
   if (view === 'request' && id) return { view, id: decodeRoute(id) };
-  if ((view === 'case' || view === 'file-case') && id) return { view: 'case', id: decodeRoute(id), files: view === 'file-case', tab: slide === 'requests' || slide === 'report' || slide === 'editor' || slide === 'notes' ? slide : undefined,
+  if ((view === 'case' || view === 'file-case') && id) return { view: 'case', id: decodeRoute(id), files: view === 'file-case', tab: slide === 'requests' || slide === 'report' || slide === 'editor' || slide === 'notes' || slide === 'frozen' ? slide : undefined,
     selectedScan: slide === 'slides' && snapshot ? decodeRoute(snapshot) : undefined };
   if ((view === 'viewer' || view === 'file-viewer') && id) return { view: 'viewer', id: decodeRoute(id), slide: slide ? decodeRoute(slide) : undefined, snapshot: /^[a-f0-9]{64}$/.test(snapshot ?? '') ? snapshot : undefined, files: view === 'file-viewer' };
   return { view: 'worklist', scope: id === 'mine' || id === 'unassigned' ? id : 'all' };
@@ -75,6 +77,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
   const registration = useRef<{ id: string; key: string } | null>(null);
   const writable = canWrite(user);
   const intakeAllowed = writable && user.organization === 'local';
+  const orAllowed = user.role === 'admin' || user.role === 'viewer';
   const settingsAllowed = user.role === 'admin';
   const requestAllowed = settingsAllowed || user.role === 'doctor';
   const [page, setPage] = useState(readPage);
@@ -232,6 +235,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
 
   const clinicalCaseEndpoint = current?.recordId ? `/api/clinical/${encodeURIComponent(user.organization)}/cases/${current.recordId}` : undefined;
   const historyEndpoint = requestAllowed && clinicalCaseEndpoint ? clinicalCaseEndpoint + '/patient-history' : undefined;
+  const frozenEndpoint = requestAllowed && clinicalCaseEndpoint && current?.worklist?.priority === 'frozen' ? clinicalCaseEndpoint + '/frozen' : undefined;
   const logsEndpoint = requestAllowed && clinicalCaseEndpoint ? clinicalCaseEndpoint + '/logs' : undefined;
   const notesEndpoint = clinicalCaseEndpoint ? clinicalCaseEndpoint + '/notes' : undefined;
   const attachmentsEndpoint = clinicalCaseEndpoint ? clinicalCaseEndpoint + '/attachments' : undefined;
@@ -315,7 +319,8 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
       <a className="brand" href="#worklist/all" aria-label="MeDIAuto Studio Home" title="MeDIAuto Studio Home"><span className="brand-icon"><Microscope size={23} /></span><span className="brand-name">MeDIAuto<strong>Studio</strong></span></a>
       <nav aria-label="Workspace Navigation" className="side-nav">
         <p>Workspace</p>
-        <a href="#worklist/all" aria-label="Worklist" title="Worklist" aria-current={page.view !== 'settings' ? 'location' : undefined}><LayoutList size={19} /> <span>Worklist</span><small>{result.counts.all}</small></a>
+        <a href="#worklist/all" aria-label="Worklist" title="Worklist" aria-current={page.view !== 'settings' && page.view !== 'or' ? 'location' : undefined}><LayoutList size={19} /> <span>Worklist</span><small>{result.counts.all}</small></a>
+        {orAllowed && <a href="#or" aria-label="OR Results" title="OR Results" aria-current={page.view === 'or' ? 'page' : undefined}><ClipboardList size={19} /> <span>OR Results</span></a>}
         {settingsAllowed && <a href="#settings" aria-label="Settings" title="Settings" aria-current={page.view === 'settings' ? 'page' : undefined}><Settings2 size={19} /> <span>Settings</span></a>}
       </nav>
       <div className="side-footer"><button aria-label="Service Status" title="Service Status" onClick={() => showModal('system')}><Activity size={18} /><span>Service Status</span><i className={health?.status === 'ok' ? 'online' : ''} /></button></div>
@@ -326,7 +331,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
           aria-expanded={!collapseNavigation} aria-label={collapseNavigation ? 'Expand Navigation' : 'Collapse Navigation'}
           title={collapseNavigation ? 'Expand Navigation' : 'Collapse Navigation'} onClick={() => setNavigationCollapsed(!collapseNavigation)}>
           {collapseNavigation ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
-        </button><span>Pathology Workspace</span><ChevronRight size={15} /><strong>{{ viewer: 'WSI Viewer', case: 'Case Details', request: 'Analysis and Consultation Requests', scans: 'Slide Registration', settings: 'Settings', worklist: 'Worklist' }[page.view]}</strong></div>
+        </button><span>Pathology Workspace</span><ChevronRight size={15} /><strong>{{ viewer: 'WSI Viewer', case: 'Case Details', request: 'Analysis and Consultation Requests', or: 'OR Results', scans: 'Slide Registration', settings: 'Settings', worklist: 'Worklist' }[page.view]}</strong></div>
         <div className="header-actions"><NotificationCenter key={user.id} organization={user.organization} /><span className="demo-label"><FlaskConical size={15} /> Demo Environment</span><button className="emr-chip" onClick={() => showModal('system')}><span /> EMR {emr} · LIS {lis}</button><span className="identity"><UserRound size={17} />{user.display_name}</span><button className="button secondary" onClick={logout}>Sign Out</button></div>
       </header>
       <main className="workspace-main" data-view={page.view}>
@@ -338,7 +343,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
         </nav>}
         <div className="worklist-page" hidden={page.view !== 'worklist'}>
           {listError && <div className="notice" role="alert">{listError}<button className="button secondary" onClick={() => setRevision((value) => value + 1)}>Retry</button></div>}
-          <Worklist onScope={setWorklistScope} mayShare={user.role === 'admin'} cases={worklistCases} loading={listLoading} scope={scope} current={selectedCase} onSelect={setSelected}
+          <Worklist onScope={setWorklistScope} canReportFrozen={requestAllowed} mayShare={user.role === 'admin'} cases={worklistCases} loading={listLoading} scope={scope} current={selectedCase} onSelect={setSelected}
             total={result.total} counts={result.counts} filteredCounts={result.filtered_counts} queues={queues} workload={result.workload} onQueueChanged={refreshQueues} assignees={result.assignees} onQuery={setQuery}
             onOpen={(id) => { const item = worklistCases.find((row) => row.id === id); if (item) navigateCase(item); }}
             onViewer={(id, slide) => { const item = worklistCases.find((row) => row.id === id); if (item) navigateViewer(item, slide); }}
@@ -353,16 +358,19 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
         </>)}
         {page.view === 'scans' && intakeAllowed && <IntakePage files={files} loading={filesLoading} problem={fileProblem} refresh={refreshFiles} />}
         {((page.view === 'settings' && page.section !== 'notifications' && !settingsAllowed) || (page.view === 'scans' && !intakeAllowed)) && <div className="panel empty"><strong>You do not have permission to open this page.</strong><button className="button secondary" onClick={goBack}>Back to Worklist</button></div>}
+        {page.view === 'or' && (orAllowed ? <ORResults organization={user.organization} caseId={page.id} />
+          : <div className="panel empty"><strong>You do not have permission to open the OR view.</strong></div>)}
         {page.view === 'request' && <RequestPage key={page.id} id={page.id} organization={user.organization} />}
         {casePage && (!current ? <div className="panel empty"><CircleHelp size={28} /><strong>{casePage.files
           ? (intakeAllowed && filesLoading ? 'Loading case…' : 'Unable to load the case.')
           : detail?.key === detailKey ? detail?.error : 'Loading case…'}</strong><button className="button secondary" onClick={goBack}>Back to Worklist</button></div>
           : casePage.view === 'case' ? <CaseDetail key={current.id + '/' + (casePage.tab ?? '')} item={current} selectedScan={casePage.selectedScan} historyEndpoint={historyEndpoint} attachmentsEndpoint={attachmentsEndpoint} logsEndpoint={logsEndpoint} notesEndpoint={notesEndpoint}
-            initialTab={current.recordId ? casePage.tab === 'editor' ? 'Case Editor' : casePage.tab === 'notes' ? 'Notes' : requestAllowed
+            initialTab={current.recordId ? casePage.tab === 'editor' ? 'Case Editor' : casePage.tab === 'notes' ? 'Notes' : casePage.tab === 'frozen' && frozenEndpoint ? 'Frozen Section' : requestAllowed
               ? casePage.tab === 'requests' ? 'Requests' : casePage.tab === 'report' ? 'Report Draft' : undefined : undefined : undefined}
             editor={current.recordId ? <CaseEditor item={current} organization={user.organization} editable={writable && current.status !== 'Review Complete'}
               canImport={user.role === 'admin'} onChanged={patientChanged}
               patient={<PatientIntegration item={current} org={user.organization} editable={writable} status={integration} onChanged={patientChanged} />} /> : undefined}
+            frozen={frozenEndpoint && current.recordId ? <FrozenWorkflow caseId={current.recordId} endpoint={frozenEndpoint} /> : undefined}
             requests={requestAllowed && current.recordId ? <CaseRequests organization={user.organization} item={current} /> : undefined}
             report={requestAllowed && current.recordId && clinicalCaseEndpoint ? <>
               <CaseReport endpoint={clinicalCaseEndpoint + '/report'} caseId={current.recordId} caseVersion={current.version} caseChanged={patientChanged} />

@@ -31,6 +31,11 @@ async def record_activity(session, user, case_id, action, entity, target_id, att
 
 # Exact operation names prevent per-tile, background polling and unrelated errors from filling the audit.
 CASE_OPERATIONS = {
+    "change_frozen_recipient": ("or_recipient_changed", "or_recipient"),
+    "publish_frozen": ("frozen_result_published", "frozen_result"),
+    "or_result": ("or_result_opened", "frozen_result"),
+    "confirm_frozen": ("or_confirmation_attempted", "or_confirmation"),
+    "record_frozen_callback": ("frozen_callback_recorded", "frozen_callback"),
     "clinical_open": ("case_opened", "case"),
     "worklist_case": ("case_opened", "case"),
     "assign_case": ("assignment_change", "case"),
@@ -88,7 +93,7 @@ def error_scope(request):
     name = getattr(request.scope.get("endpoint"), "__name__", "")
     if name in CASE_OPERATIONS and (case := path_uuid(params, "case_id") or path_uuid(params, "record_id")):
         action, entity = CASE_OPERATIONS[name]
-        target = path_uuid(params, "attachment_id") or case
+        target = path_uuid(params, "attachment_id") or path_uuid(params, "publication_id") or path_uuid(params, "recipient_id") or case
         return case, action, entity, target
     if name in SCAN_OPERATIONS and params.get("source", "clinical") == "clinical" and (scan := path_uuid(params, "scan_id")):
         action, entity = SCAN_OPERATIONS[name]

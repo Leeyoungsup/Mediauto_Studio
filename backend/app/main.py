@@ -23,6 +23,7 @@ from app.case_reports import router as case_reports_router
 from app.case_requests import router as case_requests_router
 from app.clinical import router as clinical_router
 from app.database import database_url
+from app.frozen_workflow import router as frozen_router
 from app.intake import router as intake_router
 from app.integration import router as integration_router
 from app.integration_service import poll_inbox
@@ -88,6 +89,7 @@ app.include_router(case_reports_router)
 app.include_router(notifications_router)
 app.include_router(case_editor_router)
 app.include_router(case_requests_router)
+app.include_router(frozen_router)
 app.include_router(clinical_router)
 app.include_router(workflow_router)
 app.include_router(intake_router)
