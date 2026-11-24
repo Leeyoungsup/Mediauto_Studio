@@ -1,3 +1,4 @@
+import { AnalysisSettings } from './analysis-execution';
 import { RoiSearchPage } from './roi-search';
 import type { RoiLocation } from './roi-search';
 import { FrozenWorkflow, ORResults } from './frozen-workflow';
@@ -34,7 +35,7 @@ import './style.css';
 const emrLabels = { unconfigured: 'Not Configured', disabled: 'Disabled', connected: 'Connected', unavailable: 'Connection Unavailable', unknown: 'Unavailable' };
 type Health = { status: 'ok' | 'degraded'; database: 'connected' | 'unavailable'; emr: keyof typeof emrLabels };
 type Page = { view: 'worklist'; scope: Scope } | { view: 'case'; id: string; files: boolean; tab?: 'requests' | 'report' | 'editor' | 'notes' | 'frozen'; selectedScan?: string } | { view: 'request'; id: string } | { view: 'or'; id?: string }
-  | { view: 'viewer'; id: string; slide?: string; snapshot?: string; roi?: string; roiOrigin?: RoiLocation; files: boolean } | { view: 'roi-search'; location: RoiLocation } | { view: 'scans' } | { view: 'settings'; section?: 'groups' | 'notifications' };
+  | { view: 'viewer'; id: string; slide?: string; snapshot?: string; roi?: string; roiOrigin?: RoiLocation; files: boolean } | { view: 'roi-search'; location: RoiLocation } | { view: 'scans' } | { view: 'settings'; section?: 'groups' | 'notifications' | 'analysis' };
 type WorkflowAction = 'assignment' | 'review' | 'confirm';
 type Modal = 'register' | 'system' | null;
 
@@ -57,7 +58,7 @@ function readPage(): Page {
   }
   if (view === 'or') return { view, id: id ? decodeRoute(id) : undefined };
   if (view === 'scans') return { view };
-  if (view === 'settings') return { view, section: id === 'groups' || id === 'notifications' ? id : undefined };
+  if (view === 'settings') return { view, section: id === 'groups' || id === 'notifications' || id === 'analysis' ? id : undefined };
   if (view === 'request' && id) return { view, id: decodeRoute(id) };
   if ((view === 'case' || view === 'file-case') && id) return { view: 'case', id: decodeRoute(id), files: view === 'file-case', tab: slide === 'requests' || slide === 'report' || slide === 'editor' || slide === 'notes' || slide === 'frozen' ? slide : undefined,
     selectedScan: slide === 'slides' && snapshot ? decodeRoute(snapshot) : undefined };
@@ -364,8 +365,8 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
         </div>
         {page.view === 'settings' && page.section === 'notifications' && <NotificationSettings organization={user.organization} />}
         {page.view === 'settings' && page.section !== 'notifications' && settingsAllowed && (page.section === 'groups'
-          ? <WorkgroupSettings onChanged={refreshQueues} /> : <>
-          <div className="settings-actions"><a className="button secondary" href="#settings/groups">Manage Workgroups</a></div>
+          ? <WorkgroupSettings onChanged={refreshQueues} /> : page.section === 'analysis' ? <AnalysisSettings organization={user.organization} /> : <>
+          <div className="settings-actions"><a className="button secondary" href="#settings/groups">Manage Workgroups</a><a className="button secondary" href="#settings/analysis">Analysis Pre-run Rules</a></div>
           {intakeAllowed && <IntakeSettings refresh={refreshFiles} emrConnected={integration?.emr.state === 'connected'} />}
           <IntegrationSettings org={user.organization} status={integration} onRefresh={refreshIntegration} />
         </>)}

@@ -7,12 +7,14 @@ from fastapi import APIRouter, HTTPException
 from pydantic import Field, StringConstraints, model_validator
 from sqlalchemy import String, cast, select
 
+from app.analysis_execution import review_view
+from app.analysis_jobs import run_view
 from app.auth import require_roles
 from app.clinical import (ClinicalInput, Organization, Reason, Session, add_event, find,
                           require_version, write)
 from app.integration_service import KIND, SYSTEM, digest, now
 from app.lymph_counts import count_view
-from app.models import (AuthUser, Case, CaseReport, CaseRequest, ExternalIdentifier, IntegrationConnection,
+from app.models import (AnalysisRun, IhcReview, AuthUser, Case, CaseReport, CaseRequest, ExternalIdentifier, IntegrationConnection,
                         LymphNodeCount, ReportRevision, ReportTemplate, ReportTransmission, Specimen)
 from app.report_delivery import approved_adapter, status_view, step
 
@@ -151,6 +153,19 @@ async def evidence_choices(session, case):
                         "completed_at": row.created_at.isoformat(), "superseded": row.specimen_id in seen,
                         "result_note": None, "snapshot": None})
         seen.add(row.specimen_id)
+    runs = await session.scalars(select(AnalysisRun).where(AnalysisRun.organization == case.organization,
+        AnalysisRun.case_id == case.id, AnalysisRun.status == "completed").order_by(AnalysisRun.created_at.desc()))
+    choices.extend({**run_view(run), "kind": "analysis_run", "version": run.attempt,
+                    "completed_at": run.finished_at.isoformat(), "snapshot": run.result.get("snapshot"), "result_note": None}
+                   for run in runs)
+    reviews = await session.scalars(select(IhcReview).where(IhcReview.organization == case.organization,
+        IhcReview.case_id == case.id).order_by(IhcReview.created_at.desc(), IhcReview.id))
+    seen_reviews = set()
+    for review in reviews:
+        identity = (review.specimen_id, review.marker)
+        choices.append({**review_view(review), "kind": "ihc_review", "completed_at": review.created_at.isoformat(),
+                        "superseded": identity in seen_reviews, "snapshot": None, "result_note": review.rationale})
+        seen_reviews.add(identity)
     return choices
 
 
@@ -259,6 +274,9 @@ async def save_draft(organization: Organization, case_id: UUID, data: DraftInput
         specimens = [entry["specimen_id"] for entry in selected if entry["kind"] == "lymph_node_count"]
         if len(specimens) != len(set(specimens)):
             raise HTTPException(422, "Select one lymph node count version per specimen.")
+        reviews = [(entry["specimen_id"], entry["marker"]) for entry in selected if entry["kind"] == "ihc_review"]
+        if len(reviews) != len(set(reviews)):
+            raise HTTPException(422, "Select one IHC review version per specimen and marker.")
         content = {"template": template, "sections": {key: data.sections.get(key, "") for key in sorted(keys)},
                    "evidence": selected, "dictated_sections": sorted(set(data.dictated_sections))}
         if previous and content == previous.content:

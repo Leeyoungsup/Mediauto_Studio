@@ -51,6 +51,7 @@ CASE_OPERATIONS = {
     "send_report": ("report_delivery_queued", "report"),
     "retry_report": ("report_delivery_requeued", "report"),
     "post_note": ("note_created", "note"),
+    "save_ihc_review": ("ihc_review_recorded", "ihc_review"),
     "create_request": ("request_created", "request"),
     "create_manual": ("patient_history_recorded", "clinical_record"),
     "list_history": ("patient_history_opened", "clinical_record"),
@@ -121,9 +122,10 @@ def error_scope(request):
     if name == "request_wsi" and (resolved := getattr(request.state, "case_activity_wsi", None)):
         case, scan = resolved
         return case, "scan_viewed", "scan", scan
-    if name in ("change_request", "request_wsi") and (target := path_uuid(params, "request_id")):
+    if name in ("change_request", "request_wsi", "change_execution") and (target := path_uuid(params, "request_id")):
         cases = select(CaseRequest.case_id).where(CaseRequest.id == target)
-        return cases, "scan_viewed" if name == "request_wsi" else "request_change", "request", target
+        return (cases, "analysis_changed", "analysis_run", target) if name == "change_execution" else (
+            cases, "scan_viewed" if name == "request_wsi" else "request_change", "request", target)
     return None
 
 

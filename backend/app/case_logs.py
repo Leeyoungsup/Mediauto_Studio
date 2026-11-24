@@ -21,6 +21,7 @@ ENTITY_NAMES = {
     "frozen_publications": "frozen_result", "frozen_recipients": "or_recipient",
     "frozen_receipts": "or_confirmation", "frozen_callbacks": "frozen_callback",
     "cases": "case", "case_reports": "report", "report_transmissions": "report_delivery", "specimens": "specimen", "specimen_blocks": "block", "slides": "slide",
+    "analysis_runs": "analysis_run", "ihc_reviews": "ihc_review",
     "lymph_node_counts": "lymph_node_count", "slide_scans": "scan", "viewer_annotations": "annotation", "case_attachments": "attachment",
     "case_requests": "request", "case_notes": "note", "patient_history_records": "clinical_record",
 }
@@ -68,7 +69,7 @@ async def audit_rows(session, organization, case_id):
     )
     mutation = ClinicalEvent
     failed = or_(
-        mutation.action == "or_confirmation_failed",
+        mutation.action.in_(("or_confirmation_failed", "analysis_failed")),
         and_(mutation.action == "frozen_callback_recorded", mutation.after["outcome"].astext.in_(("failed", "no_answer"))),
         and_(mutation.record_type == "case_requests", mutation.after["status"].astext == "failed"),
         and_(mutation.record_type == "report_transmissions", mutation.after["status"].astext == "failed"),

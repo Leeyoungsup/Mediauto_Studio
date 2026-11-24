@@ -11,11 +11,12 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import Field, StringConstraints, model_validator
 from sqlalchemy import func, or_, select, true
 
+from app.analysis_jobs import jobs_for, queue_run
 from app.auth import CurrentUser, require_roles
 from app.case_activity import record_activity
 from app.clinical import (ClinicalInput, Organization, RegistrationKey, Session,
                           add_event, find, require_version, write)
-from app.models import AuthUser, Case, CaseRequest, ClinicalEvent, RequestNotification, Slide, SlideScan, Specimen
+from app.models import AnalysisRun, AuthUser, Case, CaseRequest, ClinicalEvent, RequestNotification, Slide, SlideScan, Specimen
 from app.notification_delivery import enqueue
 from app.pdl1 import results_for_display, snapshot_folder
 from app.scan_quality import BLOCKED_QC
@@ -36,9 +37,12 @@ class CreateRequest(ClinicalInput):
     question: Question
     scan_id: UUID | None = None
     assignee_id: UUID | None = None
+    execution_model: Literal["pdl1_cps_archive", "pdl1_tps_archive", "ihc_preflight"] | None = None
 
     @model_validator(mode="after")
     def scan_for_ai(self):
+        if self.execution_model and self.kind != "ai":
+            raise ValueError("Select an AI request for model execution")
         if self.kind == "ai" and self.scan_id is None:
             raise ValueError("AI requests require a registered scan")
         return self
@@ -148,10 +152,15 @@ async def show_requests(session, rows, user):
     account_ids = {ident for row in rows for ident in (row.requested_by, row.assigned_to) if ident}
     names = dict((await session.execute(select(AuthUser.id, AuthUser.display_name).where(
         AuthUser.organization == user.organization, AuthUser.id.in_(account_ids)))).all())
+    executions = {run.request_id: run for run in await session.scalars(select(AnalysisRun)
+        .where(AnalysisRun.request_id.in_({row.id for row in rows})).distinct(AnalysisRun.request_id)
+        .order_by(AnalysisRun.request_id, AnalysisRun.attempt.desc()))}
     return [{"id": row.id, "kind": row.kind, "status": row.status, "question": row.question, "version": row.version,
              "requested_by": names.get(row.requested_by), "assigned_to": row.assigned_to,
              "assignee_name": names.get(row.assigned_to), "scan_id": row.scan_id,
-             "result_note": row.result_note, "snapshot": row.snapshot, "updated_at": row.updated_at} for row in rows]
+             "result_note": row.result_note, "snapshot": row.snapshot, "updated_at": row.updated_at,
+             "model_run": {"model": executions[row.id].model_key, "status": executions[row.id].status}
+             if row.id in executions else None} for row in rows]
 
 
 @router.get("/cases/{case_id}/requests")
@@ -169,6 +178,8 @@ async def list_requests(organization: Organization, case_id: UUID, user: Current
 async def create_request(organization: Organization, case_id: UUID, data: CreateRequest,
                          key: RegistrationKey, user: CurrentUser, session: Session):
     payload = {**data.model_dump(mode="json"), "case_id": str(case_id)}
+    if data.execution_model is None:
+        payload.pop("execution_model")
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
     async with write(session, ROLES):
         case = await find(session, Case, organization, case_id, lock=True)
@@ -178,15 +189,17 @@ async def create_request(organization: Organization, case_id: UUID, data: Create
             if existing.request_hash != digest:
                 raise HTTPException(409, "This request key was already used with different details.")
             return (await show_requests(session, [existing], user))[0]
-        await case_scan(session, case, data.scan_id)
+        scan = await case_scan(session, case, data.scan_id)
         if data.assignee_id:
             await eligible(session, user, data.kind, data.assignee_id)
         row = CaseRequest(organization=organization, case_id=case_id, scan_id=data.scan_id, kind=data.kind,
                           question=data.question, requested_by=user.id, assigned_to=data.assignee_id,
                           created_by=str(user.id), request_key=key, request_hash=digest,
-                          status="assigned" if data.assignee_id else "open")
+                          status="in_progress" if data.execution_model else "assigned" if data.assignee_id else "open")
         session.add(row)
         await session.flush()
+        if data.execution_model:
+            await queue_run(session, row, scan[0], scan[2], data.execution_model, key)
         await record_change(session, row, user, "request_assigned" if data.assignee_id else "request_created", {}, case=case)
         return (await show_requests(session, [row], user))[0]
 
@@ -204,7 +217,8 @@ async def snapshot_choices(session, row, case, user):
 @router.get("/requests/{request_id}")
 async def request_detail(organization: Organization, request_id: UUID, user: CurrentUser, session: Session):
     row, case = await request_context(session, user, request_id)
-    actions = allowed_actions(row, case, user)
+    execution = await session.scalar(jobs_for(row.id).limit(1))
+    actions = [] if execution else allowed_actions(row, case, user)
     has_case = user.role == "admin" or case.assigned_to == user.id
     scan = None
     if row.scan_id and (has_case or (row.assigned_to == user.id and row.status in WSI_STATUSES)):
@@ -218,7 +232,7 @@ async def request_detail(organization: Organization, request_id: UUID, user: Cur
         ClinicalEvent.record_id == row.id).order_by(ClinicalEvent.version.desc()))).all()
     return {**(await show_requests(session, [row], user))[0],
             "case_id": case.id if has_case else None, "case_number": case.case_number,
-            "actions": actions, "candidates": await eligible(session, user, row.kind) if "assign" in actions else [],
+            "execution": bool(execution), "actions": actions, "candidates": await eligible(session, user, row.kind) if "assign" in actions else [],
             "history": [{"version": event.version, "action": event.action, "at": event.occurred_at,
                          "before": event.before.get("status"), "after": event.after.get("status")} for event in events],
             "scan": {"id": scan[0].id, "label": scan[1], "stain": scan[2], "format": scan[0].format} if scan else None}
@@ -236,6 +250,8 @@ async def request_results(organization: Organization, request_id: UUID, user: Cu
 async def change_request(organization: Organization, request_id: UUID, data: ChangeRequest, user: CurrentUser, session: Session):
     async with write(session, ROLES):
         row, case = await request_context(session, user, request_id, lock=True)
+        if await session.scalar(jobs_for(row.id).limit(1)):
+            raise HTTPException(409, "Use the model execution controls for this request.")
         manages = data.action in ("assign", "retry", "cancel")
         if not (can_manage(row, case, user) if manages else row.assigned_to == user.id):
             raise HTTPException(403, "You do not have permission to modify this request.")

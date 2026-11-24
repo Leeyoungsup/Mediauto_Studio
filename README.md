@@ -30,6 +30,10 @@ Worklist에서는 **Hide Case Preview**로 목록을 넓힐 수 있습니다. WS
 
 규칙과 파일 등록 정보는 개발 PostgreSQL에 저장되며, 이미 등록한 파일은 규칙을 다시 적용해도 유지됩니다. 등록 정보는 Worklist에서 Case ID로 묶어 확인합니다. 같은 Slide ID의 NDPI와 SVS는 서로 다른 원본 파일로 표시됩니다. 등록된 스캔은 케이스 상세의 WSI 뷰어에서 열 수 있습니다.
 
+### 31. 분석 실행과 IHC 검토
+
+**Case Details → Requests**에서 모델을 지정해 작업을 실행하거나 자문을 배정합니다. **Model Runs**에서 시도별 상태와 취소·재실행을 확인합니다. **Settings → Analysis Pre-run Rules**에서 염색별 사전 실행을 설정합니다. 배정 병리의는 **IHC Review and Best Block**에서 검토를 저장하고 **Report Draft → Result Evidence**에 버전을 연결합니다. [31번 실행 범위와 검증 기록](work/analysis-execution-31.md)
+
 ### 30. ROI 유사검색
 
 저장된 영역 주석에서 **Find Similar ROIs**를 엽니다. 장기계통을 고르면 같은 케이스에 등록한 참조 ROI를 개발용 어댑터로 검색합니다. **Open Match in WSI**와 **Back to Source ROI**로 결과와 원래 판독 위치를 오갑니다. [30번 설정·검증 기록](work/roi-search-30.md)

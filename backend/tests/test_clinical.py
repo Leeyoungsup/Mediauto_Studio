@@ -1245,6 +1245,122 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.get(root + "/messages")).status_code, 403)
         self.assertEqual((await self.client.put(config, json={"version": 2, "mode": "disabled"})).status_code, 403)
 
+    async def test_model_execution_cancellation_rerun_rules_and_ihc_evidence(self):
+        from app.analysis_adapters import AnalysisFailure
+
+        async def check(request, expected=200):
+            response = await request
+            self.assertEqual(response.status_code, expected, response.text)
+            return response.json()
+
+        async def creates(path, data, key, status=201):
+            return await check(self.client.post(path, json=data, headers={"Idempotency-Key": key}), status)
+
+        async def wait_run(path, attempt, status):
+            for _ in range(90):
+                rows = (await check(self.client.get(path)))["runs"]
+                if rows and rows[0]["attempt"] == attempt and rows[0]["status"] == status:
+                    return rows[0]
+                await asyncio.sleep(.08)
+            self.fail(f"Run {attempt} did not reach {status}: {rows}")
+
+        doctor = await create_account(self.org, "analysis-doctor", "doctor")
+        case = await self.create("cases", {"case_number": "SYNTH-ANALYSIS"})
+        case_path = self.url + "/cases/" + case["id"]
+        await check(self.client.patch(case_path + "/assignment", json={
+            "assignee_id": str(doctor.id), "version": case["version"], "reason": "Synthetic review assignment",
+        }))
+        specimen = await self.create("specimens", {"case_id": case["id"], "specimen_number": "A1"})
+        other = await self.create("specimens", {"case_id": case["id"], "specimen_number": "B1"})
+        editor = self.url + "/editor/specimens/"
+        block = await creates(editor + specimen["id"] + "/blocks", {"block_number": "A1-1", "version": 1,
+                               "reason": "Synthetic block"}, "block-a")
+        other_block = await creates(editor + other["id"] + "/blocks", {"block_number": "B1-1", "version": 1,
+                                     "reason": "Synthetic block"}, "block-b")
+
+        async def scan_for(stain):
+            slide = await self.create("slides", {"specimen_id": specimen["id"], "slide_number": stain, "stain": stain})
+            filename = stain + "-job.ndpi"
+            (self.root / filename).write_bytes(b"synthetic analysis")
+            return await self.create("scans", {"slide_id": slide["id"], "storage_key": filename})
+
+        pr = await scan_for("PR")
+        ki = await scan_for("Ki-67")
+        count = 0
+        observed_cancel = asyncio.Event()
+
+        async def runner(org, model, version, source, pinned, cancelled):
+            nonlocal count
+            self.assertEqual((org, model, version), (self.org, "ihc_preflight", "preflight-v1"))
+            count += 1
+            if count == 1:
+                for _ in range(60):
+                    if cancelled.is_set():
+                        observed_cancel.set()
+                        break
+                    await asyncio.sleep(.03)
+            if count == 2:
+                raise AnalysisFailure("scan_unavailable")
+            return {"kind": "image_preflight", "format": "NDPI", "dimensions": [600, 500], "calibrated": True}
+
+        with patch("app.analysis_jobs.execute", side_effect=runner):
+            payload = {"kind": "ai", "execution_model": "ihc_preflight", "scan_id": pr["id"], "question": "Synthetic run"}
+            requests = case_path + "/requests"
+            await creates(requests, {**payload, "execution_model": "pdl1_cps_archive"}, "bad-model", 422)
+            request = await creates(requests, payload, "manual-model")
+            self.assertEqual((await creates(requests, payload, "manual-model"))["id"], request["id"])
+            path = self.url + "/requests/" + request["id"]
+            execution = path + "/execution"
+            first = await wait_run(execution, 1, "running")
+            await creates(execution, {"run_id": first["id"], "action": "cancel"}, "cancel-first", 200)
+            await asyncio.wait_for(observed_cancel.wait(), timeout=4)
+            await wait_run(execution, 1, "cancelled")
+            second = await creates(execution, {"run_id": first["id"], "action": "rerun"}, "second", 200)
+            self.assertEqual((await creates(execution, {"run_id": first["id"], "action": "rerun"}, "second", 200))["id"], second["id"])
+            failure = await wait_run(execution, 2, "failed")
+            self.assertEqual(failure["error"], "scan_unavailable")
+            await creates(execution, {"run_id": second["id"], "action": "rerun"}, "third", 200)
+            final = await wait_run(execution, 3, "completed")
+            self.assertEqual(final["result"]["dimensions"], [600, 500])
+            self.assertEqual((await check(self.client.get(path)))["actions"], [])
+
+            rules = self.url + "/analysis-rules"
+            rule = await check(self.client.put(rules, json={"model": "ihc_preflight", "marker": "ki67", "active": True}))
+            await asyncio.sleep(1.05)
+            self.assertEqual(len((await check(self.client.get(requests)))["requests"]), 1)
+            async with app.state.engine.begin() as connection:
+                await connection.execute(text("UPDATE slide_scans SET qc_status='passed' WHERE id=CAST(:id AS uuid)"), {"id": ki["id"]})
+            for _ in range(60):
+                rows = (await check(self.client.get(requests)))["requests"]
+                matched = next((row for row in rows if row["scan_id"] == ki["id"]), None)
+                if matched:
+                    break
+                await asyncio.sleep(.09)
+            self.assertIsNotNone(matched)
+            auto = await wait_run(self.url + "/requests/" + matched["id"] + "/execution", 1, "completed")
+            self.assertEqual(auto["origin"], "rule")
+            await check(self.client.put(rules, json={"model": "ihc_preflight", "marker": "ki67", "active": False, "version": rule["version"]}))
+            self.assertEqual(len((await check(self.client.get(requests)))["requests"]), 2)
+            review_path = case_path + "/ihc-reviews"
+            review = {"version": 0, "scan_id": pr["id"], "block_id": block["id"], "run_id": final["id"],
+                      "interpretation": "positive", "rationale": "Synthetic pathologist review"}
+            await creates(review_path, review, "admin-review", 403)
+            await login(self.client, self.org, doctor.username)
+            await check(self.client.get(rules), 403)
+            await creates(review_path, {**review, "block_id": other_block["id"]}, "foreign-block", 422)
+            await creates(review_path, {**review, "run_id": auto["id"]}, "foreign-run", 422)
+            original = await creates(review_path, review, "first-review")
+            self.assertEqual((await creates(review_path, review, "first-review"))["id"], original["id"])
+            report_path = case_path + "/report"
+            draft = await check(self.client.put(report_path, json={"version": 0, "sections": {"diagnosis": "Synthetic report"},
+                                                                  "evidence_ids": [original["id"], final["id"]]}))
+            await creates(review_path, {**review, "version": 1, "interpretation": "indeterminate"}, "updated-review")
+            pinned = await check(self.client.get(f"{report_path}/versions/{draft['version']}"))
+            self.assertEqual(pinned["evidence"][0]["interpretation"], "positive")
+            self.assertEqual(pinned["evidence"][1]["model_version"], "preflight-v1")
+            logs = await check(self.client.get(case_path + "/logs", params={"entity": "analysis_run", "result": "failed"}))
+            self.assertEqual(logs["rows"][0]["action"], "analysis_failed")
+
     async def test_roi_similarity_search_contract_scope_and_audit(self):
         from io import BytesIO
         from fastapi import Response

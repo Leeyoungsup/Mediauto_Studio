@@ -13,6 +13,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from starlette.staticfiles import StaticFiles
 
+from app.analysis_execution import router as analysis_execution_router
+from app.analysis_jobs import poll_analysis
 from app.auth import load_auth_key, router as auth_router
 from app.case_activity import case_http_exception, case_validation_exception
 from app.case_attachments import router as case_attachments_router
@@ -69,12 +71,13 @@ async def lifespan(app: FastAPI):
     inbox = asyncio.create_task(poll_inbox(engine))
     deliveries = asyncio.create_task(poll_deliveries(engine))
     reports = asyncio.create_task(poll_reports(engine))
+    analysis = asyncio.create_task(poll_analysis(engine))
     try:
         yield
     finally:
-        for task in (inbox, deliveries, reports):
+        for task in (inbox, deliveries, reports, analysis):
             task.cancel()
-        for task in (inbox, deliveries, reports):
+        for task in (inbox, deliveries, reports, analysis):
             with suppress(asyncio.CancelledError):
                 await task
         await engine.dispose()
@@ -91,6 +94,7 @@ app.include_router(case_reports_router)
 app.include_router(notifications_router)
 app.include_router(case_editor_router)
 app.include_router(case_requests_router)
+app.include_router(analysis_execution_router)
 app.include_router(frozen_router)
 app.include_router(clinical_router)
 app.include_router(workflow_router)

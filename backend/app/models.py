@@ -533,6 +533,69 @@ class CaseRequest(ClinicalRecord, Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class AnalysisRule(ClinicalRecord, Base):
+    __tablename__ = "analysis_rules"
+    __table_args__ = (UniqueConstraint("organization", "model_key", "marker"),)
+    model_key: Mapped[str] = mapped_column(String(40))
+    marker: Mapped[str] = mapped_column(String(16))
+    active: Mapped[bool] = mapped_column(Boolean, server_default="false")
+
+
+class AnalysisRun(ClinicalRecord, Base):
+    __tablename__ = "analysis_runs"
+    __table_args__ = (
+        UniqueConstraint("organization", "id"),
+        UniqueConstraint("request_id", "attempt"),
+        UniqueConstraint("request_id", "request_key"),
+        UniqueConstraint("organization", "trigger_key"),
+        ForeignKeyConstraint(("organization", "case_id"), ("cases.organization", "cases.id")),
+        ForeignKeyConstraint(("organization", "request_id"), ("case_requests.organization", "case_requests.id")),
+        ForeignKeyConstraint(("organization", "scan_id"), ("slide_scans.organization", "slide_scans.id")),
+        CheckConstraint("status IN ('queued','running','completed','failed','cancelled')", name="analysis_run_status"),
+        Index("ix_analysis_runs_worker", "status", "created_at"),
+        Index("ix_analysis_runs_scan_model", "scan_id", "model_key"),
+    )
+    case_id: Mapped[UUID] = mapped_column(Uuid)
+    request_id: Mapped[UUID] = mapped_column(Uuid)
+    scan_id: Mapped[UUID] = mapped_column(Uuid)
+    model_key: Mapped[str] = mapped_column(String(40))
+    model_version: Mapped[str] = mapped_column(String(32))
+    marker: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(16))
+    attempt: Mapped[int] = mapped_column(Integer)
+    request_key: Mapped[str] = mapped_column(String(128))
+    trigger_key: Mapped[str | None] = mapped_column(String(128))
+    source: Mapped[dict] = mapped_column(JSONB)
+    result: Mapped[dict | None] = mapped_column(JSONB)
+    error: Mapped[str | None] = mapped_column(String(40))
+    pinned_snapshot: Mapped[str | None] = mapped_column(String(64))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class IhcReview(ClinicalRecord, Base):
+    __tablename__ = "ihc_reviews"
+    __table_args__ = (
+        ForeignKeyConstraint(("organization", "case_id", "specimen_id"), ("specimens.organization", "specimens.case_id", "specimens.id")),
+        ForeignKeyConstraint(("organization", "scan_id"), ("slide_scans.organization", "slide_scans.id")),
+        ForeignKeyConstraint(("organization", "specimen_id", "block_id"), ("specimen_blocks.organization", "specimen_blocks.specimen_id", "specimen_blocks.id")),
+        ForeignKeyConstraint(("organization", "run_id"), ("analysis_runs.organization", "analysis_runs.id")),
+        UniqueConstraint("organization", "specimen_id", "marker", "version"),
+        UniqueConstraint("organization", "case_id", "created_by", "request_key"),
+        CheckConstraint("interpretation IN ('positive','negative','indeterminate','uninterpretable')", name="ihc_review_interpretation"),
+    )
+    case_id: Mapped[UUID] = mapped_column(Uuid)
+    specimen_id: Mapped[UUID] = mapped_column(Uuid)
+    scan_id: Mapped[UUID] = mapped_column(Uuid)
+    marker: Mapped[str] = mapped_column(String(16))
+    interpretation: Mapped[str] = mapped_column(String(20))
+    block_id: Mapped[UUID] = mapped_column(Uuid)
+    block_number: Mapped[str] = mapped_column(String(80))
+    run_id: Mapped[UUID | None] = mapped_column(Uuid)
+    rationale: Mapped[str] = mapped_column(String(240))
+    request_key: Mapped[str] = mapped_column(String(128))
+
+
 class RequestNotification(Base):
     __tablename__ = "request_notifications"
     __table_args__ = (

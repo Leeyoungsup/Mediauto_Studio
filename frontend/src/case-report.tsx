@@ -1,3 +1,4 @@
+import { interpretations, markerNames, modelNames } from './analysis-execution';
 import { useCallback, useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { api, jsonBody } from './session';
@@ -6,7 +7,8 @@ import { ReportDictation } from './report-dictation';
 type Section = { key: string; label: string; required: boolean };
 type Template = { id: string | null; template_key: string | null; name: string; version: number; sections: Section[] };
 type Evidence = {
-  id: string; kind: 'ai' | 'consult' | 'lymph_node_count'; version: number; completed_at: string; scan_id: string | null; result_note: string | null;
+  id: string; kind: 'ai' | 'consult' | 'lymph_node_count' | 'analysis_run' | 'ihc_review'; version: number; completed_at: string; scan_id: string | null; result_note: string | null;
+  request_id?: string; model?: string; model_version?: string; marker?: string; interpretation?: keyof typeof interpretations; block_number?: string;
   specimen?: string; positive?: number; total?: number; superseded?: boolean; reason?: string | null;
   snapshot: { id: string; model?: string; model_version?: string; analysis_version?: string; score_type?: string; kind?: string } | null;
 };
@@ -40,12 +42,16 @@ function draftOf(report: Report): Draft {
 }
 
 function evidenceLabel(item: Evidence) {
+  if (item.kind === 'analysis_run') return `${modelNames[item.model ?? ''] ?? 'Model Run'} · ${item.model_version}`;
+  if (item.kind === 'ihc_review') return `IHC Review · ${markerNames[item.marker ?? '']} · ${item.interpretation ? interpretations[item.interpretation] : ''} · Best Block ${item.block_number}`;
   if (item.kind === 'lymph_node_count') return `Lymph Node Count · Specimen ${item.specimen} · Positive / Total ${item.positive} / ${item.total}`;
   return item.kind === 'ai' ? 'Archived AI Result' : 'Completed Consultation';
 }
 
 function evidenceRoute(item: Evidence, caseId: string) {
-  return item.kind === 'lymph_node_count' ? `#viewer/${caseId}/${item.scan_id}` : '#request/' + item.id;
+  if (item.kind === 'analysis_run') return item.snapshot?.id && item.scan_id
+    ? `#viewer/${caseId}/${item.scan_id}/${item.snapshot.id}` : '#request/' + item.request_id;
+  return item.kind === 'lymph_node_count' || item.kind === 'ihc_review' ? `#viewer/${caseId}/${item.scan_id}` : '#request/' + item.id;
 }
 
 export function CaseReport({ endpoint, caseId, caseVersion, caseChanged }: {

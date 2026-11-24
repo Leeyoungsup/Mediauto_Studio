@@ -100,21 +100,25 @@ import sys
 
 from app.import_pdl1 import DATA_ROOT, import_snapshot, slide_signature
 
-fixture, sample = Path(sys.argv[1]), sys.argv[2]
-fixture.write_text(json.dumps({
-    "source": slide_signature(DATA_ROOT / sample),
-    "tissue_type": "Stomach",
-    "pd_score": {"score_type": "CPS", "score": 25, "class_counts": {"0": 3, "2": 1, "3": 0}},
-    "model_runtime": {"filename": "PDL1_ST_CPS_detection.pt", "version": "synthetic"},
-    "class_names": {"0": "Synthetic cell"},
-    "cells": [[20, 30, 0, 0.9]],
-    "analysis_version": "request-browser-fixture",
-}))
-options = argparse.Namespace(organization="local", slide=sample, result=fixture, original=None,
-                             editor=None, saved_at=None, audit=None, importer="synthetic-fixture")
-options.original = import_snapshot(options)["id"]
-options.editor = "synthetic-reviewer"
-import_snapshot(options)
+fixture = Path(sys.argv[1])
+for sample, analysis_version in (
+    (sys.argv[2], "request-browser-fixture"),
+    ("CODIPAI-BRCA-SS-00194-I-HR-01.svs", "analysis-browser-fixture"),
+):
+    fixture.write_text(json.dumps({
+        "source": slide_signature(DATA_ROOT / sample),
+        "tissue_type": "Stomach",
+        "pd_score": {"score_type": "CPS", "score": 25, "class_counts": {"0": 3, "2": 1, "3": 0}},
+        "model_runtime": {"filename": "PDL1_ST_CPS_detection.pt", "version": "synthetic"},
+        "class_names": {"0": "Synthetic cell"},
+        "cells": [[20, 30, 0, 0.9]],
+        "analysis_version": analysis_version,
+    }))
+    options = argparse.Namespace(organization="local", slide=sample, result=fixture, original=None,
+                                 editor=None, saved_at=None, audit=None, importer="synthetic-fixture")
+    options.original = import_snapshot(options)["id"]
+    options.editor = "synthetic-reviewer"
+    import_snapshot(options)
 PYFIXTURE
     )
     node scripts/case-requests-browser.mjs
@@ -151,4 +155,5 @@ PYMEDIA
     node scripts/frozen-workflow-browser.mjs
     node scripts/viewer-workflow-browser.mjs
     node scripts/roi-search-browser.mjs
+    node scripts/analysis-execution-browser.mjs
 fi

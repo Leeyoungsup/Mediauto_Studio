@@ -607,3 +607,7 @@ dialog::backdrop { background: #21193575; }
 .roi-reference-controls { margin-block: 16px 8px; }
 .roi-reference-controls summary { cursor: pointer; font-weight: 600; }
 @media (max-width: 820px) { .roi-search-layout { grid-template-columns: minmax(0, 1fr); } }
+
+.model-runs, .ihc-reviews { margin-top: 14px; }
+.model-runs .timeline > li { padding-bottom: 12px; }
+.ihc-reviews form { max-width: 650px; }

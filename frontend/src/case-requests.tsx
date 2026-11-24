@@ -1,3 +1,5 @@
+import { IhcReviews, ModelRuns, modelNames, runStatuses } from './analysis-execution';
+import type { Catalog } from './analysis-execution';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { ClipboardList, ScanLine } from 'lucide-react';
@@ -23,14 +25,17 @@ type Snapshot = { id: string; kind: 'original' | 'edited'; score_type: string; s
 type CaseRequest = {
   id: string; kind: Kind; status: Status; question: string; version: number; requested_by: string;
   assigned_to: string | null; assignee_name: string | null; scan_id: string | null;
+  model_run: { model: string; status: keyof typeof runStatuses } | null;
   result_note: string | null; snapshot: Snapshot | null; updated_at: string;
 };
 type RequestDetail = CaseRequest & {
-  case_id: string | null; case_number: string; actions: Action[]; candidates: Candidate[];
+  execution: boolean; case_id: string | null; case_number: string; actions: Action[]; candidates: Candidate[];
   history: { version: number; action: string; at: string; before: Status | null; after: Status }[];
   scan: { id: string; label: string; stain: string | null; format: 'NDPI' | 'SVS' } | null;
 };
 const pathFor = (org: string) => '/api/clinical/' + encodeURIComponent(org);
+const requestName = (row: CaseRequest) => row.model_run ? modelNames[row.model_run.model] ?? 'Model Execution' : kinds[row.kind];
+const requestStatus = (row: CaseRequest) => row.model_run ? runStatuses[row.model_run.status] : statuses[row.status];
 const time = (value: string) => new Date(value).toLocaleString('en-US');
 const notificationEvent = 'mediauto-request-changed';
 const changed = () => window.dispatchEvent(new Event(notificationEvent));
@@ -72,6 +77,7 @@ export function CaseRequests({ organization, item }: { organization: string; ite
   const resource = useResource<{ requests: CaseRequest[]; candidates: Record<Kind, Candidate[]> }>(path);
   const [showForm, setShowForm] = useState(false);
   const [kind, setKind] = useState<Kind>('consult');
+  const catalog = useResource<Catalog>(showForm && kind === 'ai' ? pathFor(organization) + '/analysis-models' : null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const submission = useRef<{ key: string; payload: string } | null>(null);
@@ -81,7 +87,7 @@ export function CaseRequests({ organization, item }: { organization: string; ite
     event.preventDefault();
     const fields = new FormData(event.currentTarget);
     const payload = { kind, question: fields.get('question'), scan_id: fields.get('scan') || null,
-      assignee_id: fields.get('assignee') || null };
+      assignee_id: fields.get('assignee') || null, execution_model: fields.get('execution_model') || null };
     const serialized = JSON.stringify(payload);
     if (submission.current?.payload !== serialized) submission.current = { payload: serialized, key: Array.from(crypto.getRandomValues(new Uint8Array(16)), (value) => value.toString(16).padStart(2, '0')).join('') };
     setBusy(true); setError('');
@@ -99,9 +105,13 @@ export function CaseRequests({ organization, item }: { organization: string; ite
       <button className="button secondary" onClick={() => setShowForm((value) => !value)} aria-expanded={showForm}>New Request</button></div>
     {showForm && <form className="request-form" onSubmit={(event) => void submit(event)}>
       <label className="form-field">Request Type<select value={kind} onChange={(event) => setKind(event.target.value as Kind)}>
-        <option value="consult">Consultation</option><option value="ai">PD-L1 Analysis</option>
+        <option value="consult">Consultation</option><option value="ai">AI Analysis</option>
       </select></label>
-      {kind === 'ai' && <p className="muted">Use this request to link an archived PD-L1 result.</p>}
+      {kind === 'ai' && <label className="form-field">Execution Model<select name="execution_model" defaultValue="">
+        <option value="">Link an Archived Result Manually</option>
+        {catalog.data?.models.map((model) => <option key={model.key} value={model.key}>{model.name} · {model.version}</option>)}
+      </select></label>}
+      {kind === 'ai' && catalog.error && <ResourceStatus error={catalog.error} retry={catalog.refresh} />}
       <label className="form-field">Target Scan<select name="scan" required={kind === 'ai'}>
         <option value="">{kind === 'ai' ? 'Select a scan' : 'None'}</option>
         {scans.map(({ id, label, stain, wsi }) => <option key={id} value={wsi?.id}>{label ?? id} · {stain} · {wsi?.format}</option>)}
@@ -113,9 +123,10 @@ export function CaseRequests({ organization, item }: { organization: string; ite
       <button className="button primary" disabled={busy || (kind === 'ai' && !scans.length)}>Create Request</button>
     </form>}
     {resource.data.requests.length ? <ul className="request-list">{resource.data.requests.map((row) => <li key={row.id}>
-      <a href={'#request/' + row.id}><strong>{kinds[row.kind]} · {statuses[row.status]}</strong><span>{row.question}</span></a>
+      <a href={'#request/' + row.id}><strong>{requestName(row)} · {requestStatus(row)}</strong><span>{row.question}</span></a>
       <small>{row.assignee_name ?? 'Unassigned'} · {time(row.updated_at)}</small>
     </li>)}</ul> : <p className="empty-inline">This case has no requests.</p>}
+    {item.recordId && <IhcReviews endpoint={pathFor(organization) + '/cases/' + item.recordId + '/ihc-reviews'} caseId={item.recordId} />}
   </section>;
 }
 
@@ -133,7 +144,7 @@ export function ReportDraftReferences({ organization, caseId }: { organization: 
   if (!resource.data) return <ResourceStatus error={resource.error} retry={resource.refresh} />;
   return <section><h2>Report Draft References</h2>
     {resource.data.length ? <ul className="request-list">{resource.data.map((row) => <li key={row.id}>
-      <a href={'#request/' + row.id}><strong>{kinds[row.kind]} · Open Completed Request</strong><span>{row.question}</span></a>
+      <a href={'#request/' + row.id}><strong>{requestName(row)} · Open Completed Request</strong><span>{row.question}</span></a>
       <small>{row.assignee_name ?? 'Unknown assignee'} · {time(row.updated_at)}</small>
       {row.result_note && <p className="request-text">{row.result_note}</p>}
       {row.snapshot && <SnapshotReference snapshot={row.snapshot} />}
@@ -175,11 +186,11 @@ export function RequestPage({ organization, id }: { organization: string; id: st
   if (!row) return <ResourceStatus error={resource.error} retry={resource.refresh} />;
   return <>
     <a className="back-link" href={row.case_id ? `#case/${row.case_id}/requests` : '#worklist/all'}>{row.case_id ? 'Case Requests' : 'Worklist'}</a>
-    <div className="page-heading"><div><h1>{kinds[row.kind]} Requests</h1><p>{row.case_number}</p></div>
+    <div className="page-heading"><div><h1>{requestName(row)} Requests</h1><p>{row.case_number}</p></div>
       <button className="button secondary" onClick={() => { setAction(undefined); setError(''); resource.refresh(); }}>Refresh Request</button></div>
     <div className="detail-layout">
       <section className="panel detail-content">
-        <h2>{statuses[row.status]}</h2><p className="request-text">{row.question}</p>
+        <h2>{requestStatus(row)}</h2><p className="request-text">{row.question}</p>
         <dl className="key-values"><div><dt>Requested By</dt><dd>{row.requested_by}</dd></div>
           <div><dt>Request Assignee</dt><dd>{row.assignee_name ?? 'Unassigned'}</dd></div></dl>
         {row.result_note && <p className="request-text">{row.result_note}</p>}
@@ -211,6 +222,7 @@ export function RequestPage({ organization, id }: { organization: string; id: st
           <p>{event.before && statuses[event.before] + ' → '}{statuses[event.after]} · {time(event.at)}</p></li>)}</ul>
       </aside>
     </div>
+    {row.execution && <ModelRuns endpoint={path + '/execution'} caseId={row.case_id} onChanged={refreshRequest} />}
     {row.scan && <div className="request-scan">
       <button className="button secondary" onClick={() => setShowScan((value) => !value)}>
         <ScanLine size={16} /> {showScan ? 'Close Request Scan' : 'Open Request Scan'}</button>
