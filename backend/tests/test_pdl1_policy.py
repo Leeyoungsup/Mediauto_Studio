@@ -75,3 +75,27 @@ class Pdl1PolicyTest(TestCase):
         incomplete = deepcopy(self.evidence)
         del incomplete["tps_reference"]
         self.assertIsNone(display_policy([self.cps, self.tps], incomplete)["comparison"]["pair"])
+
+    def test_pair_version_one_requires_both_exact_reference_outputs(self):
+        self.cps["source_digest"] = "e" * 64
+        self.tps["source_digest"] = "f" * 64
+        records = [
+            {**item, "snapshot_id": item["id"], "context": self.context, "schema": item["score_schema"],
+             "reference": self.evidence[key + "_reference"], "reviewed_by": "QA",
+             "reference_result": {"value": item["score"], "counts": item["counts"]}}
+            for key, item in (("cps", self.cps), ("tps", self.tps))
+        ]
+        pair = {**self.evidence, "evidence_version": 1}
+        result = display_policy([self.cps, self.tps], pair, records)
+        self.assertTrue(result["comparison"]["pair"]["reference_results_verified"])
+        self.assertEqual([item["evidence"]["reference_result"]["value"] for item in result["results"]], [75, 25])
+        for missing in (records[:1], records + records[:1], [
+            {**records[0], "reference_result": {"value": 74, "counts": self.cps["counts"]}}, records[1],
+        ]):
+            result = display_policy([self.cps, self.tps], pair, missing)
+            self.assertIsNone(result["comparison"]["pair"])
+            self.assertEqual([item["score"] for item in result["results"]], [None, None])
+            self.assertEqual([item["evidence"] for item in result["results"]], [None, None])
+        native = {**self.cps, "input_context": {**self.context, "histology": "gastric_adenocarcinoma"}}
+        native_evidence = [{**records[0], "context": native["input_context"]}]
+        self.assertEqual(display_policy([native], None, native_evidence)["results"][0]["score_status"], "validated_original")

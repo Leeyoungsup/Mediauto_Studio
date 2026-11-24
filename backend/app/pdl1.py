@@ -15,6 +15,7 @@ import openslide
 from fastapi import APIRouter, HTTPException, Path as RoutePath, Query, Response
 
 from app.auth import CurrentUser, Session
+from app.biomarker_evidence import validation_records
 from app.pdl1_policy import display_policy
 from app.wsi import PRIVATE, Source, registered_path
 
@@ -102,7 +103,7 @@ def results_for_display(folder, role):
             validation = json.loads((folder / "comparison-validation.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
             pass
-    return display_policy(summaries(folder, role), validation)
+    return display_policy(summaries(folder, role), validation, validation_records(folder))
 
 
 @router.get("/{source}/{scan_id}/pdl1")

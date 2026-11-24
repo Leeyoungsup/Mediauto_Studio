@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { BiomarkerEvidence, type AssayInput, type ValidationEvidence } from './biomarker-evidence';
 import { CellOverlay } from './cell-overlay';
 import { api } from './session';
 import type { Viewport } from './tile-viewer';
@@ -6,10 +7,11 @@ import type { Viewport } from './tile-viewer';
 type Point = [x: number, y: number, category: number];
 type Cells = { points: Point[]; truncated: boolean };
 type Audit = { action: string; actor: string; occurred_at: string; source: 'ims' | 'exported'; reference?: string };
-type ScoreStatus = 'archived' | 'native' | 'validated_pair' | 'input_unverified' | 'invalid_saved_score' | 'edited_score_unverified';
+type ScoreStatus = 'archived' | 'native' | 'validated_original' | 'validated_pair' | 'input_unverified' | 'invalid_saved_score' | 'edited_score_unverified';
 type Comparison = {
   status: 'available' | 'validation_required' | 'insufficient_scores';
-  pair: { cps_snapshot_id: string; tps_snapshot_id: string; reference: string } | null;
+  pair: { cps_snapshot_id: string; tps_snapshot_id: string; reference: string; reviewed_by: string;
+    cps_reference: string; tps_reference: string; reference_results_verified: boolean } | null;
 };
 type Result = {
   id: string; kind: 'original' | 'edited'; original_id: string | null; variant: 'Stomach' | 'Lung';
@@ -17,6 +19,8 @@ type Result = {
   classes: Record<string, { label: string; color: string }>; point_count: number; dimensions: [number, number];
   model: string | null; model_version: string | null; architecture: string | null; model_bytes: number | null;
   model_mtime_ns: string | null; analysis_version: string | null; source_digest: string; editor: string | null;
+  input_context?: AssayInput | null; evidence?: ValidationEvidence | null;
+  contract: { schema: string | null; model: string | null; native_histology: string[] };
   saved_at: string | null; audit: Audit[]; checkpoint_sha256?: string | null;
 };
 
@@ -86,6 +90,7 @@ export function Pdl1Overlay({ view, result, cells }: { view?: Viewport; result?:
 const scoreStatusLabel: Record<ScoreStatus, string> = {
   archived: 'Archived Score · Input Details Unverified',
   native: 'Original Saved Score',
+  validated_original: 'Original Linked to Reference Result',
   validated_pair: 'Saved Score Linked to Validation Evidence',
   input_unverified: 'Input or Combination Requires Validation',
   invalid_saved_score: 'Saved Score Unavailable',
@@ -126,7 +131,14 @@ export function Pdl1Panel({ state }: { state: Pdl1State }) {
         </select></label>
         {comparison?.status === 'validation_required' && <p role="status">Displaying CPS and TPS together requires verified input conditions and validation evidence for this scan.</p>}
         {comparison?.status === 'insufficient_scores' && <p>No pair of results meets the requirements for combined display.</p>}
-        {comparison?.pair && <p>Combined Display Validation Evidence {comparison.pair.reference} · Cell markers follow the selected result</p>}
+        {comparison?.pair && <details className="pdl1-audit"><summary>Combined Display Validation Evidence</summary>
+          <p>{comparison.pair.reference} · Reviewed by {comparison.pair.reviewed_by}</p>
+          <p>CPS Reference {comparison.pair.cps_reference} · TPS Reference {comparison.pair.tps_reference}</p>
+          <p>{comparison.pair.reference_results_verified ? 'Both reference results verified' : 'Comparison record linked'} · Cell markers follow the selected result</p>
+        </details>}
+        <BiomarkerEvidence input={result.input_context} evidence={result.evidence}
+          schema={result.contract.schema ?? 'Unsupported Schema'} model={result.contract.model ?? undefined}
+          scope={result.contract.native_histology.map((value) => value === 'nsclc' ? 'Non-Small Cell Lung Cancer' : 'Gastric Adenocarcinoma').join(', ') || 'Unavailable'} />
         <div className="pdl1-metadata">
           <dl className="key-values"><div><dt>Model</dt><dd>{result.model ?? 'No record'}</dd></div>
             <div><dt>Model Version</dt><dd>{result.model_version ?? 'No record'}</dd></div>
@@ -135,7 +147,9 @@ export function Pdl1Panel({ state }: { state: Pdl1State }) {
             {result.checkpoint_sha256 && <div><dt>Checkpoint SHA-256</dt><dd title={result.checkpoint_sha256}>{result.checkpoint_sha256.slice(0, 12)}</dd></div>}
             <div><dt>Saved Analysis Version</dt><dd>{result.analysis_version ?? 'No record'}</dd></div>
             <div><dt>Result Fingerprint</dt><dd title={result.source_digest}>{result.source_digest.slice(0, 12)}</dd></div>
-            {result.original_id && <div><dt>Linked Original</dt><dd>{result.original_id.slice(0, 12)}</dd></div>}
+            {result.original_id && <div><dt>Linked Original</dt><dd>{result.original_id.slice(0, 12)}{' '}
+              {results.some((item) => item.id === result.original_id) && <button type="button" className="button secondary"
+                onClick={() => setSelected(result.original_id!)}>View Original</button>}</dd></div>}
             {result.editor && <div><dt>Edited By · Saved At</dt><dd>{result.editor} · {result.saved_at ? date.format(new Date(result.saved_at)) : 'No record'}</dd></div>}
           </dl>
         </div>

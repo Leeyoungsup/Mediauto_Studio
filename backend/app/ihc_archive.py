@@ -10,7 +10,7 @@ from pathlib import Path
 
 from app.pdl1 import BUCKET, signature_key
 
-MARKERS = {"ki67": "KI_67", "er": "ER_PR", "pr": "ER_PR"}
+MARKERS = {"ki67": "KI_67", "er": "ER_PR", "pr": "ER_PR", "her2": "HER2"}
 RULES = {"ki67": "quanti-ki67-index-v1", "er": "quanti-allred-v1", "pr": "quanti-allred-v1"}
 GRADES = range(5)
 
@@ -66,7 +66,7 @@ def aggregate(rule, counts, minimum_tumor_cells):
 
 def approved_rule(organization, stain, original, threshold, overrides):
     path = os.environ.get("MEDIAUTO_IHC_VALIDATION_FILE")
-    if not path or stain != original["marker"] or not original.get("checkpoint_sha256"):
+    if not path or stain not in RULES or stain != original["marker"] or not original.get("checkpoint_sha256"):
         return None
     try:
         entries = json.loads(Path(path).read_text(encoding="utf-8"))

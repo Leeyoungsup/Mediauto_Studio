@@ -1,26 +1,34 @@
 import { useEffect, useRef, useState } from 'react';
+import { BiomarkerEvidence, type AssayInput, type ValidationEvidence } from './biomarker-evidence';
 import { CellOverlay } from './cell-overlay';
 import { api, jsonBody } from './session';
 import type { Viewport } from './tile-viewer';
 
-type Marker = 'ki67' | 'er' | 'pr';
+type Marker = 'ki67' | 'er' | 'pr' | 'her2';
 type Source = {
   id: string; marker: Marker; model: string; model_version: string; analysis_version: string;
+  score_schema?: 'her2-intensity-v1' | 'her2-membrane-patterns-v1'; input_context?: AssayInput | null;
   checkpoint_sha256: string | null; default_threshold: number; dimensions: [number, number];
 };
 type Revision = { version: number; action: 'edit' | 'restore'; reason: string; created_at: string; actor: string | null; threshold: number };
-type Aggregate = { kind: 'ki67' | 'allred'; percent: number; positive: number; total: number; score?: number; proportion?: number; intensity?: number };
+type Aggregate = { kind: 'ki67' | 'allred'; percent: number; positive: number; total: number; score?: number; proportion?: number; intensity?: number } | { kind: 'her2-intensity-v1' | 'her2-membrane-patterns-v1'; value: number; unit: string | null };
 type Details = {
   version: number; latest_version: number; threshold: number; counts: number[]; override_count: number;
-  history: Revision[]; status: 'approval_required' | 'insufficient_cells' | 'source_replay_unverified' | 'available';
+  history: Revision[]; status: 'approval_required' | 'insufficient_cells' | 'source_replay_unverified' | 'edited_score_unverified' | 'available';
+  evidence?: ValidationEvidence | null;
   count_basis: 'original' | 'review';
   approval: string | null; rule: string | null; aggregate: Aggregate | null;
 };
 type Point = [x: number, y: number, grade: number, id: number, confidence: number, original: number, reviewed: boolean];
 type Cells = { points: Point[]; truncated: boolean };
 
-const markers = { ki67: 'Ki-67', er: 'ER', pr: 'PR' };
-const grades = ['Negative', 'Weak (1+)', 'Moderate (2+)', 'Strong (3+)', 'Other / Excluded'];
+const markers = { ki67: 'Ki-67', er: 'ER', pr: 'PR', her2: 'HER2' };
+const stainingLabels = ['Negative', 'Weak (1+)', 'Moderate (2+)', 'Strong (3+)', 'Other / Excluded'];
+const her2Labels = {
+  'her2-intensity-v1': ['Intensity 0+', 'Intensity 1+', 'Intensity 2+', 'Intensity 3+'],
+  'her2-membrane-patterns-v1': ['Absent', 'Partial Weak', 'Partial Strong', 'Complete Weak', 'Complete Strong'],
+};
+const classLabels = (source?: Source) => source?.score_schema ? her2Labels[source.score_schema] : stainingLabels;
 const colors = ['#44c5e4', '#efdb57', '#f3904a', '#ff4078', '#ded9ec'];
 const number = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
 const date = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' });
@@ -133,10 +141,15 @@ function Score({ details }: { details: Details }) {
       approval_required: 'Aggregation Approval Required',
       insufficient_cells: 'Insufficient Tumor Cells for Approved Aggregation',
       source_replay_unverified: 'Score unavailable. Stored detection confidence does not reproduce the original cell counts.',
+      edited_score_unverified: 'Edited HER2 Score Unverified',
       available: 'Score Unavailable',
     };
     return <p role="status">{status[details.status]}</p>;
   }
+  if ('value' in score) return <div className="ihc-score">
+    <strong>{score.kind === 'her2-intensity-v1' ? 'HER2 Weighted Intensity' : 'HER2 Composite'} · {score.value}{score.unit === 'percent' ? '%' : ''}</strong>
+    <small>Archived Model Output · {details.evidence?.reference}</small>
+  </div>;
   return <div className="ihc-score">
     <strong>{score.kind === 'ki67' ? `Ki-67 Index · ${number.format(score.percent)}%` : `Allred Score · ${score.score}/8`}</strong>
     <span>{number.format(score.positive)} / {number.format(score.total)} included tumor cells
@@ -152,6 +165,7 @@ function ReviewForm({ state, details, onPickStart }: { state: IhcState; details:
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const request = useRef<{ body: string; key: string }>(undefined);
+  const grades = classLabels(state.source);
   const picked = state.picked;
   const grade = decision && decision.id === picked?.[3] ? decision.grade : '';
   const changed = threshold !== '' && Number(threshold) !== details.threshold;
@@ -219,6 +233,7 @@ function ReviewForm({ state, details, onPickStart }: { state: IhcState; details:
 
 export function IhcPanel({ state, readOnly, onPickStart }: { state: IhcState; readOnly: boolean; onPickStart: () => void }) {
   const { source, details } = state;
+  const grades = classLabels(source);
   if (!source && !state.failed) return null;
   return <section className="pdl1-panel ihc-panel" aria-label="IHC Results">
     <div className="pdl1-heading"><h2>{source ? markers[source.marker] + ' Results' : 'IHC Results'}</h2>
@@ -241,8 +256,12 @@ export function IhcPanel({ state, readOnly, onPickStart }: { state: IhcState; re
     {source && !details && !state.failed && <p role="status">Loading IHC result…</p>}
     {source && details && <>
       <Score details={details} />
+      {source.score_schema && <BiomarkerEvidence input={source.input_context} evidence={details.evidence}
+        schema={source.score_schema} scope="Invasive Breast Carcinoma with a Verified HER2 Assay and Analysis Region" />}
       <p>{details.count_basis === 'original' ? 'Archived Counts' : 'Recount from Stored Detections'} · Confidence threshold {details.threshold}
         {' · '}{details.override_count} user decisions</p>
+      {source.score_schema === 'her2-intensity-v1' && <p>Archived Intensity Classes</p>}
+      {source.score_schema === 'her2-membrane-patterns-v1' && <p>Membrane Staining Patterns</p>}
       <ul className="pdl1-legend" aria-label="Included IHC Cell Counts">{grades.map((grade, index) =>
         <li key={grade}><i style={{ background: colors[index] }} />{grade} · {number.format(details.counts[index])}</li>)}</ul>
       {details.status === 'source_replay_unverified' && <p>Markers near the stored confidence cutoff may differ from the original count.</p>}

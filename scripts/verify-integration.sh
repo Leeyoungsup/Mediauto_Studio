@@ -161,4 +161,7 @@ PYMEDIA
     node scripts/analysis-execution-browser.mjs
     node scripts/case-collections-browser.mjs
     node scripts/collaborative-review-browser.mjs
+    export MEDIAUTO_BIOMARKER_TEST_DIR="$sandbox"
+    (cd -- "$root/backend" && PYTHONPATH="$PWD" "$python" -s "$root/scripts/seed-biomarker-fixtures.py")
+    node scripts/biomarker-evidence-browser.mjs
 fi

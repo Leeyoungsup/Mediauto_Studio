@@ -13,6 +13,7 @@ from sqlalchemy import String, select
 
 from app.auth import CurrentUser, Session
 from app.clinical import ClinicalInput, add_event
+from app.her2 import SCHEMAS, clinical_display
 from app.ihc_archive import approved_rule, aggregate, archive_cells, archive_folder, counts_at, digest
 from app.models import AuthUser, Case, IhcResultRevision, Slide, SlideScan
 from app.pdl1 import BUCKET, MAX_POINTS, Coordinate, SnapshotId, scan_signature
@@ -98,6 +99,10 @@ def display_state(folder, organization, stain, original, revision):
     original_state = threshold == original["default_threshold"] and not overrides
     if original_state:
         counts = original["original_counts"]
+    if original["marker"] == "her2":
+        return {"threshold": threshold, "counts": counts, "override_count": len(overrides),
+                "count_basis": "original" if original_state else "review",
+                **clinical_display(folder / original["id"], stain, original, revision, aligned)}
     approval = approved_rule(organization, stain, original, threshold, overrides) if aligned else None
     output = None if approval is None else aggregate(approval["rule"], counts, approval["minimum_tumor_cells"])
     status = ("source_replay_unverified" if not aligned else "approval_required" if approval is None
@@ -115,7 +120,8 @@ async def results(source: Source, scan_id: UUID, user: CurrentUser, session: Ses
     path = await registered_path(source, scan_id, user, session)
     folder = await asyncio.to_thread(find_archive, path, user.organization)
     entries = await asyncio.to_thread(manifests, folder)
-    return {"results": entries, "can_review": source == "clinical" and user.role in ANNOTATORS}
+    public = [{key: value for key, value in item.items() if key != "source_value"} for item in entries]
+    return {"results": public, "can_review": source == "clinical" and user.role in ANNOTATORS}
 
 
 @router.get("/{source}/{scan_id}/ihc/{source_id}")
@@ -231,6 +237,9 @@ async def revise(source: Source, scan_id: UUID, source_id: SnapshotId, payload: 
         for key, grade in payload.changes.items():
             if int(key) >= original["point_count"]:
                 raise HTTPException(422, "Cell is absent from this IHC source result.")
+            if (grade is not None and original.get("score_schema") in SCHEMAS
+                    and grade >= len(SCHEMAS[original["score_schema"]])):
+                raise HTTPException(422, "That cell decision is outside the source classification schema.")
             if grade is None:
                 overrides.pop(key, None)
             else:
