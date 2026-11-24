@@ -3,6 +3,7 @@ import type { FormEvent, ReactNode } from 'react';
 import { Activity, ChevronRight, CircleHelp, ClipboardList, FlaskConical, LayoutList, Microscope, PanelLeftClose, PanelLeftOpen, ScanLine, Settings2, UserRound, UserRoundCheck, X } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
 import { CaseDetail } from './case-detail';
+import { CaseDates } from './case-dates';
 import { CaseRequests, ReportDraftReferences, RequestInbox, RequestPage } from './case-requests';
 import type { DemoCase } from './demo';
 import { IntakePage, IntakeSettings } from './intake';
@@ -57,6 +58,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
   const [result, setResult] = useState<Result>(emptyResult);
   const [query, setQuery] = useState<WorklistQuery>({ q: '', status: '', assignee: '', order: defaultOrder, offset: 0 });
   const [revision, setRevision] = useState(0);
+  const [openRevision, setOpenRevision] = useState(0);
   const [listLoading, setListLoading] = useState(true);
   const [listError, setListError] = useState('');
   const [detail, setDetail] = useState<{ key: string; item?: DemoCase; error?: string }>();
@@ -122,18 +124,24 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
 
   useEffect(() => {
     const controller = new AbortController();
+    const order = query.order.map((term) => `${term.field}:${term.direction}`);
+    const filters = query.filters ?? {};
     const params = new URLSearchParams({ scope, q: query.q, offset: String(query.offset) });
-    for (const term of query.order) params.append('order', `${term.field}:${term.direction}`);
+    for (const term of order) params.append('order', term);
     if (query.status) params.set('status', states[query.status]);
     if (query.assignee) params.set('assigned_to', query.assignee);
     setListLoading(true);
     setListError('');
-    api<Result>('/api/worklist?' + params, { signal: controller.signal })
+    const request = Object.keys(filters).length ? api<Result>('/api/worklist/search', {
+      ...jsonBody('POST', { ...filters, scope, q: query.q, offset: query.offset, order,
+        status: query.status ? states[query.status] : null, assigned_to: query.assignee || null }), signal: controller.signal,
+    }) : api<Result>('/api/worklist?' + params, { signal: controller.signal });
+    request
       .then((data) => { if (!controller.signal.aborted) setResult(data); })
       .catch(() => { if (!controller.signal.aborted) { setResult(emptyResult); setListError('Unable to load the Worklist.'); } })
       .finally(() => { if (!controller.signal.aborted) setListLoading(false); });
     return () => controller.abort();
-  }, [scope, query, revision]);
+  }, [scope, query, revision, openRevision]);
 
   useEffect(() => {
     if (!detailId || !detailKey) return;
@@ -155,6 +163,22 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
     window.addEventListener('hashchange', sync);
     return () => window.removeEventListener('hashchange', sync);
   }, []);
+
+  const openedCase = current && casePage && (current.recordId
+    ? '/api/worklist/cases/' + encodeURIComponent(current.recordId) + '/opened'
+    : '/api/worklist/file-cases/' + encodeURIComponent(current.id) + '/opened');
+  const lastOpenRequest = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!openedCase) {
+      lastOpenRequest.current = undefined;
+      return;
+    }
+    if (lastOpenRequest.current === openedCase) return;
+    lastOpenRequest.current = openedCase;
+    api(openedCase, { method: 'POST', keepalive: true })
+      .then(() => setOpenRevision((value) => value + 1))
+      .catch(() => { if (lastOpenRequest.current === openedCase) lastOpenRequest.current = undefined; });
+  }, [openedCase]);
 
   const refreshFiles = useCallback(async (signal?: AbortSignal) => {
     setFilesLoading(true);
@@ -291,7 +315,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
         <div className="worklist-page" hidden={page.view !== 'worklist'}>
           {listError && <div className="notice" role="alert">{listError}<button className="button secondary" onClick={() => setRevision((value) => value + 1)}>Retry</button></div>}
           <Worklist onScope={setWorklistScope} mayShare={user.role === 'admin'} cases={worklistCases} loading={listLoading} scope={scope} current={selectedCase} onSelect={setSelected}
-            total={result.total} counts={result.counts} assignees={result.assignees} onQuery={setQuery}
+            total={result.total} counts={result.counts} filteredCounts={result.filtered_counts} assignees={result.assignees} onQuery={setQuery}
             onOpen={(id) => { const item = worklistCases.find((row) => row.id === id); if (item) navigateCase(item); }}
             onViewer={(id, slide) => { const item = worklistCases.find((row) => row.id === id); if (item) navigateViewer(item, slide); }}
             onRegister={writable ? () => showModal('register') : undefined} />
@@ -312,6 +336,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
             report={requestAllowed && current.recordId ? <ReportDraftReferences organization={user.organization} caseId={current.recordId} /> : undefined} emr={emr} onBack={goBack} onViewer={(slide) => navigateViewer(current, slide)}
             patientIntegration={current.recordId ? <PatientIntegration item={current} org={user.organization}
               editable={writable} status={integration} onChanged={patientChanged} /> : undefined}
+            dates={current.recordId ? <CaseDates item={current} organization={user.organization} editable={writable} onChanged={patientChanged} /> : undefined}
             onAssign={mayAssign ? () => openWorkflow(current, 'assignment') : undefined}
             onReview={mayReview ? () => openWorkflow(current, 'review') : undefined}
             onConfirm={intakeAllowed && current.source === 'files' ? () => openWorkflow(current, 'confirm') : undefined} />

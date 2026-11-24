@@ -30,6 +30,10 @@ Worklist에서는 **Hide Case Preview**로 목록을 넓힐 수 있습니다. WS
 
 규칙과 파일 등록 정보는 개발 PostgreSQL에 저장되며, 이미 등록한 파일은 규칙을 다시 적용해도 유지됩니다. 등록 정보는 Worklist에서 Case ID로 묶어 확인합니다. 같은 Slide ID의 NDPI와 SVS는 서로 다른 원본 파일로 표시됩니다. 등록된 스캔은 케이스 상세의 WSI 뷰어에서 열 수 있습니다.
 
+### 19. Worklist 고급 필터
+
+**More Filters**에서 환자·검체·슬라이드·LIS 상태, 날짜 구간·채취일 기준 연령·최근 열람을 조합합니다. **Case Details → Case and Specimen Dates**에서 접수 시각과 검체 채취일을 입력하고, **Save New View**로 조건을 저장합니다. 기본 열과 정렬을 다시 적용하려면 **Restore Default Worklist**를 사용합니다. [19번 검증 기록](work/worklist-filters-19.md)
+
 ### 17. 케이스 분석·자문 요청
 
 케이스 상세의 **Requests** 탭 또는 WSI 뷰어의 **Analysis and Consultation Requests**에서 요청을 등록합니다. 담당자는 상단 **Request Notifications**에서 요청을 열고 처리 상태를 저장합니다. 자문 답변과 연결된 PD-L1 스냅샷은 케이스 **Report Draft** 탭에서 참조할 수 있습니다.

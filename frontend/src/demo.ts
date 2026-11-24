@@ -1,6 +1,6 @@
 export const statuses = ['Awaiting Assignment', 'Assigned', 'In Review', 'Review Complete'] as const;
 export type CaseStatus = typeof statuses[number];
-export type Patient = { id?: string; number: string; name: string; birth: string; localRef?: string };
+export type Patient = { id?: string; number: string; name: string; birth: string; localRef?: string; sex?: 'female' | 'male' | 'intersex' | 'other' | 'unknown' | null; source?: string };
 export type WsiScan = { id: string; source: 'files' | 'clinical'; format: 'NDPI' | 'SVS' };
 export type Slide = {
   id: string; label?: string; stain: string; specimen: string; wsi?: WsiScan; intakeVersion?: number;
@@ -13,6 +13,16 @@ export type AuditEvent = {
   transaction_id: string;
 };
 export type Candidate = { id: string; name: string; username: string };
+export type WorklistData = {
+  accessioned_at?: string | null; collection_date?: string | null; age?: number | null;
+  last_opened?: string | null; created_at?: string;
+  mrns?: { value: string; source: string }[]; lis_status?: string | null;
+  lis_data?: 'available' | 'missing' | 'conflict';
+  lis_sources?: { value: string; source: string; received_at: string }[];
+  slide_state?: ('viewable' | 'missing_scan' | 'no_slides')[];
+  request_count?: number | null; review_note?: string | null; has_storage?: boolean;
+  specimens?: { id: string; number: string; collection_date: string | null; version: number }[];
+};
 export type DemoCase = {
   id: string;
   specimen: string;
@@ -28,6 +38,7 @@ export type DemoCase = {
   assignedTo?: string | null;
   candidates?: Candidate[];
   audit?: AuditEvent[];
+  worklist?: WorklistData;
 
 };
 

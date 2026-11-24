@@ -3,15 +3,18 @@ from datetime import datetime, timezone
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Path, Query
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert
+from pydantic import Field, StringConstraints
 
 from app.auth import CurrentUser, Session, WRITERS
 from app.clinical import case_visibility
 from app.intake import DATA_ROOT, scan_files, slide_entries
-from app.models import AuthUser, Case, ClinicalEvent, Patient, Slide, SlideScan, Specimen
+from app.models import AuthUser, Case, ClinicalEvent, Patient, Slide, SlideScan, Specimen, WorklistOpen
 from app.workflow import eligible_assignees
-from app.worklist_views import CaseStatus, Scope, SortTerm, ensure_unique
+from app.worklist_data import WORKLIST_ZONE, add_open_times, file_metadata, matches_advanced, read_metadata, record_key, row_fields
+from app.worklist_views import AdvancedFilters, CaseStatus, Scope, SortTerm, ensure_unique
 
 router = APIRouter(prefix="/api/worklist", tags=["Worklist"])
 
@@ -35,7 +38,7 @@ async def legacy_rows(session, user, case_numbers):
         group = groups.setdefault(case_number, {
             "record_id": None, "case_number": case_number, "assigned_to": None,
             "assignee": None, "status": "registered", "source": "files",
-            "created_at": entry["updated_at"], "specimen": "", "patient": None, "slides": [], "history": [],
+            "created_at": entry["updated_at"], "accessioned_at": None, "specimen": "", "patient": None, "slides": [], "history": [],
         })
         if fields.get("specimen"):
             specimens.setdefault(case_number, {})[fields["specimen"]] = None
@@ -52,11 +55,12 @@ async def legacy_rows(session, user, case_numbers):
             "wsi": {"id": source.id, "source": "files", "format": source.format},
         })
     for case_number, group in groups.items():
-        group["specimen"] = ", ".join(specimens.get(case_number, {}))
+        group["specimen_terms"] = list(specimens.get(case_number, {}))
+        group["specimen"] = ", ".join(group["specimen_terms"])
         identities = patients.get(case_number, set())
         if len(identities) == 1:
             name, number = next(iter(identities))
-            group["patient"] = {"name": name, "number": number, "birth": ""}
+            group["patient"] = {"name": name, "number": number, "birth": "", "source": "file registration"}
         elif len(identities) > 1:
             group["history"].append("Patient details differ between files. Check the slide list.")
     return list(groups.values())
@@ -83,12 +87,14 @@ async def clinical_details(session, organization, references):
         patient = patients.get(record.patient_id)
         details[record.id] = {
             **reference_row(record), "source": "clinical", "assignee": staff.get(record.assigned_to),
-            "patient": {"id": patient.id, "name": patient.display_name or "", "number": "", "birth": patient.birth_date or "", "localRef": patient.local_reference or ""} if patient else None,
-            "specimen": "", "slides": [], "history": [],
+            "patient": {"id": patient.id, "name": patient.display_name or "", "number": "", "birth": patient.birth_date or "", "localRef": patient.local_reference or "", "sex": patient.sex, "source": patient.source} if patient else None,
+            "specimen": "", "slides": [], "history": [], "specimens": [],
         }
     specimen_map = {item.id: item for item in specimens}
     for specimen in specimens:
         item = details[specimen.case_id]
+        item["specimens"].append({"id": specimen.id, "number": specimen.specimen_number,
+                                  "collection_date": specimen.collection_date, "version": specimen.version})
         description = specimen.description or specimen.specimen_number
         item["specimen"] = f"{item['specimen']}, {description}" if item["specimen"] else description
     scans_by_slide = {}
@@ -113,6 +119,7 @@ def reference_row(record):
     return {
         "record_id": record.id, "case_number": record.case_number, "status": record.status,
         "assigned_to": record.assigned_to, "version": record.version, "created_at": record.created_at.isoformat(),
+        "accessioned_at": record.accessioned_at,
     }
 
 
@@ -145,31 +152,26 @@ def parse_order(order, legacy):
 
 def utc_timestamp(value):
     try:
-        stamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        stamp = value if isinstance(value, datetime) else datetime.fromisoformat(value.replace("Z", "+00:00"))
         return (stamp if stamp.tzinfo else stamp.replace(tzinfo=timezone.utc)).timestamp()
     except (TypeError, ValueError, AttributeError):
         return None
 
 
-async def sorted_rows(session, organization, filtered, staff, terms):
+def sorted_rows(filtered, staff, terms):
     names = {user.id: user.display_name.casefold() for user in staff}
-    counts = {}
-    if filtered and any(term.field == "slide_count" for term in terms):
-        ids = [row["record_id"] for row in filtered if row["record_id"]]
-        counts = dict((await session.execute(select(Specimen.case_id, func.count())
-            .join(Slide, Slide.specimen_id == Specimen.id)
-            .outerjoin(SlideScan, SlideScan.slide_id == Slide.id)
-            .where(Specimen.organization == organization, Specimen.case_id.in_(ids))
-            .group_by(Specimen.case_id))).all())
-
-    def slide_count(row):
-        return counts.get(row["record_id"], 0) if row["record_id"] else len(row["slides"])
-
     keys = {"case_number": lambda row: row["case_number"].casefold(),
             "created_at": lambda row: utc_timestamp(row["created_at"]),
             "status": lambda row: STATUS_ORDER.get(row["status"]),
             "assignee": lambda row: names.get(row["assigned_to"]),
-            "slide_count": slide_count}
+            "slide_count": lambda row: row["slide_count"],
+            "accessioned_at": lambda row: row["accessioned_at"],
+            "collection_date": lambda row: row["collection_date"],
+            "last_opened": lambda row: row["last_opened"],
+            "age": lambda row: row["age"],
+            "patient_name": lambda row: ((row["patient"] or {}).get("name") or "").casefold() or None,
+            "specimen": lambda row: row["specimen_label"].casefold() or None,
+            "lis_status": lambda row: row["lis_status"].casefold() if row["lis_status"] else None}
     ordered = sorted(filtered, key=lambda row: (row["case_number"].casefold(), row["case_number"], str(row["record_id"] or "")))
     for term in reversed(terms):
         values, missing = [], []
@@ -184,23 +186,37 @@ async def sorted_rows(session, organization, filtered, staff, terms):
     return ordered
 
 
+class WorklistParameters(AdvancedFilters):
+    scope: Scope = "all"
+    q: Annotated[str, StringConstraints(strip_whitespace=True, max_length=80)] = ""
+    status: CaseStatus | None = None
+    assigned_to: UUID | None = None
+    sort: Literal["recent", "oldest", "case"] = "recent"
+    order: list[str] | None = None
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(default=50, ge=1, le=100)
+
+
 @router.get("")
-async def worklist(
-    user: CurrentUser, session: Session,
-    scope: Scope = "all",
-    q: Annotated[str, Query(max_length=80)] = "",
-    status: CaseStatus | None = None,
-    assigned_to: UUID | None = None,
-    sort: Literal["recent", "oldest", "case"] = "recent",
-    order: Annotated[list[str] | None, Query()] = None,
-    offset: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = 50,
-):
-    terms = parse_order(order, sort)
-    records = (await session.scalars(accessible_cases(user))).all()
+async def worklist(user: CurrentUser, session: Session, filters: Annotated[WorklistParameters, Query()]):
+    return await query_worklist(user, session, filters)
+
+
+@router.post("/search")
+async def search_worklist(filters: WorklistParameters, user: CurrentUser, session: Session):
+    return await query_worklist(user, session, filters)
+
+
+async def query_worklist(user, session, filters):
+    terms = parse_order(filters.order, filters.sort)
+    authorized = accessible_cases(user)
+    records = (await session.scalars(authorized)).all()
     lookup = {record.id: record for record in records}
-    rows = [reference_row(record) for record in records]
-    rows.extend(await legacy_rows(session, user, {record.case_number for record in records}))
+    metadata = await read_metadata(session, user, authorized, records) if records else {}
+    rows = [{**reference_row(record), **metadata[record.id]} for record in records]
+    files = await legacy_rows(session, user, {record.case_number for record in records})
+    rows.extend({**row, **file_metadata(row)} for row in files)
+    await add_open_times(session, user, rows)
     staff = (await session.scalars(select(AuthUser).where(
         AuthUser.organization == user.organization, AuthUser.id.in_({record.assigned_to for record in records if record.assigned_to}),
     ).order_by(AuthUser.display_name))).all()
@@ -210,19 +226,57 @@ async def worklist(
         "unassigned": sum(row["assigned_to"] is None for row in rows),
         "statuses": {key: sum(row["status"] == key for row in rows) for key in ("registered", "assigned", "in_review", "reviewed")},
     }
-    keyword = q.strip().casefold()
-    filtered = [
+    today = datetime.now(WORKLIST_ZONE).date()
+    keyword = filters.q.casefold()
+    matched = [
         row for row in rows
-        if (scope == "all" or row["assigned_to"] == (user.id if scope == "mine" else None))
-        and (status is None or row["status"] == status)
-        and (assigned_to is None or row["assigned_to"] == assigned_to)
+        if (filters.scope == "all" or row["assigned_to"] == (user.id if filters.scope == "mine" else None))
+        and (filters.assigned_to is None or row["assigned_to"] == filters.assigned_to)
         and (not keyword or keyword in row["case_number"].casefold())
+        and matches_advanced(row, filters, today)
     ]
-    filtered = await sorted_rows(session, user.organization, filtered, staff, terms)
-    page = filtered[offset:offset + limit]
+    filtered_counts = {key: sum(row["status"] == key for row in matched) for key in STATUS_ORDER}
+    filtered = sorted_rows([row for row in matched if not filters.status or row["status"] == filters.status], staff, terms)
+    page = filtered[filters.offset:filters.offset + filters.limit]
     details = await clinical_details(session, user.organization, [lookup[row["record_id"]] for row in page if row["record_id"]])
-    return {"rows": [details.get(row["record_id"], row) for row in page], "total": len(filtered), "counts": counts,
+    result = []
+    for row in page:
+        base = details.get(row["record_id"], row)
+        if not row["record_id"]:
+            base = {key: value for key, value in row.items() if key not in ("slide_ids", "specimen_terms", "specimen_label")}
+        result.append({**base, **row_fields(row), "patient": row["patient"]})
+    return {"rows": result, "total": len(filtered), "counts": counts, "filtered_counts": filtered_counts,
             "assignees": [{"id": item.id, "name": item.display_name} for item in staff]}
+
+
+async def remember_open(session, user, key):
+    await session.execute(insert(WorklistOpen).values(
+        organization=user.organization, user_id=user.id, record_key=key,
+    ).on_conflict_do_update(index_elements=["organization", "user_id", "record_key"],
+                            set_={"opened_at": func.greatest(WorklistOpen.opened_at, func.now())}))
+    return {"ok": True}
+
+
+@router.post("/cases/{case_id}/opened")
+async def clinical_open(case_id: UUID, user: CurrentUser, session: Session):
+    async with session.begin():
+        record = await session.scalar(accessible_cases(user).where(Case.id == case_id).with_for_update(read=True))
+        if record is None:
+            raise HTTPException(404, "Case not found.")
+        return await remember_open(session, user, record_key({"record_id": record.id}))
+
+
+@router.post("/file-cases/{case_number}/opened")
+async def file_open(case_number: Annotated[str, Path(max_length=80)], user: CurrentUser, session: Session):
+    async with session.begin():
+        if user.role not in WRITERS or user.organization != "local":
+            raise HTTPException(404, "Case not found.")
+        records = await session.scalars(accessible_cases(user).where(Case.case_number == case_number))
+        groups = await legacy_rows(session, user, {record.case_number for record in records})
+        row = next((row for row in groups if row["case_number"] == case_number), None)
+        if not row:
+            raise HTTPException(404, "Case not found.")
+        return await remember_open(session, user, record_key(row))
 
 
 @router.get("/{case_id}")

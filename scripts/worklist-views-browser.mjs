@@ -54,8 +54,8 @@ try {
   const doctor = await login('integration-doctor');
   const other = await login('integration-other');
   let seed = 0;
-  async function create(resource, data) {
-    const response = await page.request.post(clinical + '/' + resource, {
+  async function create(resource, data, operator = page) {
+    const response = await operator.request.post(clinical + '/' + resource, {
       data, headers: { 'Idempotency-Key': 'saved-view-fixture-' + ++seed },
     });
     assert.equal(response.status(), 201, await response.text());
@@ -104,7 +104,7 @@ try {
   await page.getByRole('status').filter({ hasText: 'Worklist defaults saved.' }).waitFor();
   await columns.locator('summary').click();
   const headerText = await table(page).getByRole('columnheader').allTextContents();
-  assert.deepEqual(headerText, ['Case ID', 'Review Status', 'Assignee', 'Slides', 'Received At', 'Registered At', 'Open']);
+  assert.deepEqual(headerText, ['Case ID', 'Review Status', 'Assignee', 'Slides', 'Accessioned At', 'Registered At', 'Open']);
   await save(page, 'Personal Filters');
   await button(page, 'Set as Startup View').click();
   await page.getByRole('status').filter({ hasText: 'Worklist defaults saved.' }).waitFor();
@@ -142,8 +142,87 @@ try {
   assert.equal((await doctor.page.request.delete(`${views}/${shared.id}?version=${shared.version}`)).status(), 403);
   await save(doctor.page, 'Pathologist Personal View', false, false);
   assert.equal(await button(doctor.page, 'Edit Selected View').count(), 1);
+  const adminPage = next.page;
+  const sampleName = 'IMS-QA-ADVANCED';
+  const patient = await create('patients', {
+    display_name: 'Synthetic Advanced', birth_date: '2006-10-01', local_reference: 'ADV-LOCAL-QA', sex: 'female',
+  }, adminPage);
+  const sample = await create('cases', {
+    case_number: sampleName, patient_id: patient.id, accessioned_at: '2024-10-04T15:15:00Z',
+  }, adminPage);
+  const specimen = await create('specimens', { case_id: sample.id, specimen_number: 'COLLECTION-QA' }, adminPage);
+  await create('slides', { specimen_id: specimen.id, slide_number: 'SCAN-QA' }, adminPage);
+  await button(adminPage, 'Restore Default Worklist').click();
+  await adminPage.getByLabel('Search Cases').fill(sampleName);
+  await button(adminPage, sampleName + ' details').click();
+  await adminPage.getByText('Case and Specimen Dates', { exact: true }).click();
+  await adminPage.getByLabel('COLLECTION-QA Collection Date').fill('2024-09-30');
+  const savedCollection = adminPage.waitForResponse((response) => response.url().endsWith('/collection-date') && response.ok());
+  await button(adminPage, 'Save Collection Date').click();
+  await savedCollection;
+  await button(adminPage, 'Worklist').click();
+  await adminPage.getByRole('heading', { name: 'Worklist', exact: true }).waitFor();
+
+  function more(page) {
+    return page.getByRole('button', { name: /^More Filters/ });
+  }
+  await more(adminPage).click();
+  await adminPage.getByRole('textbox', { name: 'Patient Name', exact: true }).fill('Synthetic Advanced');
+  await adminPage.getByLabel('MRN or Local Patient ID').fill('ADV-LOCAL-QA');
+  await adminPage.getByRole('textbox', { name: 'Specimen', exact: true }).fill('collection-qa');
+  await adminPage.getByLabel('Slide ID').fill('scan-qa');
+  await adminPage.getByLabel('Maximum Age at Collection').fill('17');
+  await adminPage.getByLabel('From Date').fill('2024-10-05');
+  await adminPage.getByLabel('Through Date').fill('2024-10-05');
+  await adminPage.getByLabel('Recent Activity').selectOption('today');
+  await button(adminPage, 'Apply Filters').click();
+  const resultRow = table(adminPage).getByRole('row').filter({ hasText: sampleName });
+  await resultRow.waitFor();
+  assert.equal(await table(adminPage).locator('tbody tr').count(), 1);
+
+  const advancedColumns = adminPage.locator('details.column-menu:not(.sort-menu)');
+  await advancedColumns.locator('summary').click();
+  for (const name of ['Patient Name', 'Age at Collection', 'Collection Date', 'Last Opened', 'Data Source']) {
+    await advancedColumns.getByRole('checkbox', { name, exact: true }).check();
+  }
+  await advancedColumns.locator('summary').click();
+  await resultRow.getByRole('cell', { name: '17', exact: true }).waitFor();
+  assert.equal(await resultRow.getByText('2024-09-30', { exact: true }).getAttribute('title'), 'Earliest Recorded Specimen Collection Date');
+  await resultRow.getByText('IMS Clinical Record', { exact: true }).waitFor();
+
+  await adminPage.getByText('Multi-Level Sort', { exact: true }).click();
+  await adminPage.getByLabel('1: Sort Field').selectOption('age');
+  await button(adminPage, 'Save My Default Sort').click();
+  await adminPage.getByRole('status').filter({ hasText: 'Worklist defaults saved.' }).waitFor();
+  await adminPage.getByLabel('1: Sort Field').selectOption('last_opened');
+  await button(adminPage, 'Restore Default Sort').click();
+  assert.equal(await adminPage.getByLabel('1: Sort Field').inputValue(), 'age');
+  await adminPage.getByText('Multi-Level Sort', { exact: true }).click();
+  await save(adminPage, 'Advanced Private View');
+  await button(adminPage, 'Set as Startup View').click();
+  await adminPage.getByRole('status').filter({ hasText: 'Worklist defaults saved.' }).waitFor();
+
+  const restored = (await login('integration-admin')).page;
+  await restored.goto('/');
+  await table(restored).getByRole('row').filter({ hasText: sampleName }).getByRole('cell', { name: '17', exact: true }).waitFor();
+  assert.equal(await table(restored).locator('tbody tr').count(), 1);
+  await restored.getByRole('button', { name: 'Remove Age at Collection: ≤ 17', exact: true }).click();
+  await button(restored, 'Reapply View').click();
+  await restored.getByRole('button', { name: 'Remove Age at Collection: ≤ 17', exact: true }).waitFor();
+  await more(restored).click();
+  await restored.getByLabel('Maximum Age at Collection').fill('16');
+  await button(restored, 'Apply Filters').click();
+  await restored.getByText('No cases match these filters.', { exact: true }).waitFor();
+  await button(restored, 'Restore Default Worklist').click();
+  assert.equal(await restored.getByLabel('Search Cases').inputValue(), '');
+  await restored.getByText('Multi-Level Sort', { exact: true }).click();
+  assert.equal(await restored.getByLabel('1: Sort Field').inputValue(), 'age');
+  assert.equal((await doctor.page.request.post('/api/worklist/search', { data: { patient_name: 'Synthetic Advanced' } })).ok(), true);
+  assert.equal((await (await doctor.page.request.post('/api/worklist/search', {
+    data: { patient_name: 'Synthetic Advanced', age_max: 17 },
+  })).json()).total, 0);
   assert.deepEqual(errors, []);
-  console.log('PASS: Worklist saved views across browser sessions, column order/preferences, sorting with filters and pagination, and shared-view RBAC');
+  console.log('PASS: Worklist saved views across browser sessions, column order/preferences, sorting with filters and pagination, shared-view RBAC, advanced filters and provenance, and sort restore');
 } finally {
   await browser.close();
 }

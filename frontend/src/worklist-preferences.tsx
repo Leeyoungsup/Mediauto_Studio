@@ -14,7 +14,7 @@ async function loadCatalog(signal?: AbortSignal): Promise<Catalog> {
   return { views, preferences };
 }
 
-export function useSavedViews(scope: Scope, apply: (configuration: ViewConfig | undefined, columns: ColumnSetting[] | null, restoreScope?: boolean, startup?: boolean) => boolean | undefined) {
+export function useSavedViews(scope: Scope, apply: (configuration: ViewConfig | undefined, preferences: Preferences, restoreScope?: boolean, startup?: boolean) => boolean | undefined) {
   const [catalog, setCatalog] = useState<Catalog>({ views: [], preferences: initialPreferences });
   const [selected, setSelected] = useState('');
   const [busy, setBusy] = useState(false);
@@ -32,7 +32,7 @@ export function useSavedViews(scope: Scope, apply: (configuration: ViewConfig | 
       setCatalog(result);
       const initial = result.views.find(({ id, configuration }) =>
         id === result.preferences.default_view_id && (!startupScope.current || configuration.scope === startupScope.current));
-      const applied = apply(initial?.configuration, result.preferences.columns, Boolean(initial), true);
+      const applied = apply(initial?.configuration, result.preferences, Boolean(initial), true);
       if (initial && applied) setSelected(initial.id);
       setReady(true);
     }).catch(() => {
@@ -44,7 +44,7 @@ export function useSavedViews(scope: Scope, apply: (configuration: ViewConfig | 
   function choose(id: string) {
     const view = views.find((entry) => entry.id === id);
     setSelected(view?.id ?? '');
-    apply(view?.configuration, preferences.columns);
+    apply(view?.configuration, preferences);
     setNotice('');
     setError('');
   }
@@ -79,10 +79,10 @@ export function useSavedViews(scope: Scope, apply: (configuration: ViewConfig | 
     });
   }
 
-  function changePreference(defaultView: string | null, columns: ColumnSetting[] | null) {
+  function changePreference(defaultView: string | null, columns: ColumnSetting[] | null, order = preferences.sort_order ?? null) {
     void perform(async () => {
       const value = await api<Preferences>(path + '/preferences', jsonBody('PUT', {
-        default_view_id: defaultView, columns, version: preferences.version,
+        default_view_id: defaultView, columns, sort_order: order, version: preferences.version,
       }));
       setCatalog((current) => ({ ...current, preferences: value }));
       setNotice('Worklist defaults saved.');
@@ -102,6 +102,7 @@ export function useSavedViews(scope: Scope, apply: (configuration: ViewConfig | 
     refresh: () => void perform(refresh),
     setDefault: () => changePreference(active?.id ?? null, preferences.columns),
     saveColumns: (value: ColumnSetting[]) => changePreference(preferences.default_view_id, value),
+    saveOrder: (value: SortTerm[] | null) => changePreference(preferences.default_view_id, preferences.columns, value),
   };
 }
 
@@ -137,6 +138,8 @@ export function SavedViewControls({ controller, configuration, mayShare }: {
       <button className="button secondary" disabled={!ready || busy || (active?.id ?? null) === preferences.default_view_id}
         onClick={controller.setDefault}>Set as Startup View</button>
       <button className="button secondary" disabled={busy} onClick={controller.refresh}>Refresh Views</button>
+      <button className="button secondary" disabled={!ready || busy} onClick={() => { setEditing(undefined); controller.choose(''); }}>Restore Default Worklist</button>
+      {active && <button className="button secondary" disabled={busy} onClick={() => { setEditing(undefined); controller.choose(active.id); }}>Reapply View</button>}
     </div>
     {controller.error && <p className="form-error" role="alert">{controller.error}</p>}
     {controller.notice && <p role="status">{controller.notice}</p>}
@@ -162,7 +165,10 @@ export function SavedViewControls({ controller, configuration, mayShare }: {
   </section>;
 }
 
-export function SortControls({ order, onChange }: { order: SortTerm[]; onChange: (value: SortTerm[]) => void }) {
+export function SortControls({ order, onChange, onReset, onSave, onClear, busy }: {
+  order: SortTerm[]; onChange: (value: SortTerm[]) => void; onReset: () => void;
+  onSave: () => void; onClear?: () => void; busy: boolean;
+}) {
   const keys = Object.keys(sortFields) as SortField[];
   function update(index: number, changes: Partial<SortTerm>) {
     onChange(order.map((term, row) => row === index ? { ...term, ...changes } : term));
@@ -186,6 +192,9 @@ export function SortControls({ order, onChange }: { order: SortTerm[]; onChange:
         const next = keys.find((key) => !order.some((term) => term.field === key));
         if (next) onChange([...order, { field: next, direction: 'asc' }]);
       }}>Add Sort Level</button>
+      <button className="button secondary" onClick={onReset}>Restore Default Sort</button>
+      <button className="button secondary" disabled={busy} onClick={onSave}>Save My Default Sort</button>
+      {onClear && <button className="button secondary" disabled={busy} onClick={onClear}>Clear My Default Sort</button>}
     </div>
   </details>;
 }

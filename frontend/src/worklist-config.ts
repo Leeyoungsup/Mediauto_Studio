@@ -1,10 +1,14 @@
+import type { AdvancedFilters } from './worklist-filters';
+
 export const columns = [
   { id: 'specimen', label: 'Specimen' }, { id: 'assignee', label: 'Assignee' },
-  { id: 'status', label: 'Review Status' }, { id: 'slides', label: 'Slides' }, { id: 'received', label: 'Received At' },
+  { id: 'status', label: 'Review Status' }, { id: 'slides', label: 'Slides' }, { id: 'received', label: 'Accessioned At' },
   { id: 'patient', label: 'Patient Name' }, { id: 'mrn', label: 'Medical Record Number (MRN)' },
   { id: 'sex', label: 'Sex' }, { id: 'birth', label: 'Date of Birth' }, { id: 'age', label: 'Age at Collection' },
   { id: 'slideState', label: 'Slide Status' }, { id: 'group', label: 'Group' }, { id: 'lis', label: 'LIS Case Status' },
   { id: 'storage', label: 'Storage Status' }, { id: 'tags', label: 'Tags' }, { id: 'created', label: 'Registered At' },
+  { id: 'collected', label: 'Collection Date' }, { id: 'lastOpened', label: 'Last Opened' },
+  { id: 'localPatientId', label: 'Local Patient ID' }, { id: 'source', label: 'Data Source' },
   { id: 'comments', label: 'Comments' }, { id: 'requests', label: 'Requests' }, { id: 'notes', label: 'Case Notes' },
 ] as const;
 export type ColumnId = typeof columns[number]['id'];
@@ -35,6 +39,8 @@ export type Scope = 'all' | 'mine' | 'unassigned';
 
 export const sortFields = {
   created_at: 'Registered At', case_number: 'Case ID', status: 'Review Status', assignee: 'Assignee', slide_count: 'Slide Count',
+  accessioned_at: 'Accessioned At', collection_date: 'Collection Date', last_opened: 'Last Opened', age: 'Age at Collection',
+  patient_name: 'Patient Name', specimen: 'Specimen', lis_status: 'LIS Case Status',
 } as const;
 export type SortField = keyof typeof sortFields;
 export type SortTerm = { field: SortField; direction: 'asc' | 'desc' };
@@ -42,10 +48,10 @@ export const defaultOrder: SortTerm[] = [{ field: 'created_at', direction: 'desc
 
 export type ViewConfig = {
   scope: Scope; q: string; status: import('./worklist-api').State | null;
-  assigned_to: string | null; order: SortTerm[]; columns: ColumnSetting[] | null;
+  assigned_to: string | null; filters?: AdvancedFilters; order: SortTerm[]; columns: ColumnSetting[] | null;
 };
 export type SavedView = {
   id: string; name: string; visibility: 'private' | 'shared'; version: number; configuration: ViewConfig; can_edit: boolean;
 };
-export type Preferences = { default_view_id: string | null; columns: ColumnSetting[] | null; version: number };
+export type Preferences = { default_view_id: string | null; columns: ColumnSetting[] | null; sort_order?: SortTerm[] | null; version: number };
 export const initialPreferences: Preferences = { default_view_id: null, columns: null, version: 0 };

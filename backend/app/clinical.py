@@ -9,7 +9,7 @@ from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path as RoutePath, Query
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints, model_validator
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
@@ -39,10 +39,14 @@ class ClinicalInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+Sex = Literal["female", "male", "intersex", "other", "unknown"]
+
+
 class PatientCreate(ClinicalInput):
     display_name: Name | None = None
     local_reference: Number | None = None
     birth_date: date | None = None
+    sex: Sex | None = None
 
     @model_validator(mode="after")
     def minimum_identity(self):
@@ -53,12 +57,14 @@ class PatientCreate(ClinicalInput):
 
 class CaseCreate(ClinicalInput):
     case_number: Number
+    accessioned_at: AwareDatetime | None = None
     patient_id: UUID | None = None
 
 
 class SpecimenCreate(ClinicalInput):
     case_id: UUID
     specimen_number: Number
+    collection_date: date | None = None
     description: Description | None = None
 
 
@@ -77,6 +83,16 @@ class LinkChange(ClinicalInput):
     target_id: UUID | None
     version: int = Field(ge=1)
     reason: Reason
+
+
+class AccessionChange(ClinicalInput):
+    version: int = Field(ge=1)
+    accessioned_at: AwareDatetime | None
+
+
+class CollectionChange(ClinicalInput):
+    version: int = Field(ge=1)
+    collection_date: date | None
 
 
 class IdentifierQuery(ClinicalInput):
@@ -153,10 +169,10 @@ def add_event(session: AsyncSession, record, action: str, before: dict, after: d
 
 def relationship_state(record) -> dict:
     state = {}
-    for field in ("status", "assigned_to", "patient_id", "case_id", "specimen_id", "slide_id"):
+    for field in ("status", "assigned_to", "patient_id", "case_id", "specimen_id", "slide_id", "accessioned_at", "collection_date"):
         if hasattr(record, field):
             value = getattr(record, field)
-            state[field] = str(value) if isinstance(value, UUID) else value
+            state[field] = str(value) if isinstance(value, UUID) else value.isoformat() if isinstance(value, date) else value
     return state
 
 
@@ -240,6 +256,28 @@ async def create_slide(organization: Organization, data: SlideCreate, key: Regis
 @router.post("/scans", status_code=201)
 async def create_scan(organization: Organization, data: ScanCreate, key: RegistrationKey, session: Session):
     return await register(session, organization, SlideScan, key, data, (Slide, data.slide_id))
+
+
+async def update_worklist_date(session, organization, model, record_id, field, value, version):
+    async with write(session):
+        row = await find(session, model, organization, record_id, lock=True)
+        require_version(row, version)
+        if getattr(row, field) != value:
+            before = relationship_state(row)
+            setattr(row, field, value)
+            row.version += 1
+            add_event(session, row, field + "_changed", before, relationship_state(row), source="ims")
+        return public_fields(row)
+
+
+@router.patch("/cases/{case_id}/accessioned-at")
+async def change_accession(organization: Organization, case_id: UUID, data: AccessionChange, session: Session):
+    return await update_worklist_date(session, organization, Case, case_id, "accessioned_at", data.accessioned_at, data.version)
+
+
+@router.patch("/specimens/{specimen_id}/collection-date")
+async def change_collection(organization: Organization, specimen_id: UUID, data: CollectionChange, session: Session):
+    return await update_worklist_date(session, organization, Specimen, specimen_id, "collection_date", data.collection_date, data.version)
 
 
 @router.get("/{category}")

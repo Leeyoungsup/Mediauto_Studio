@@ -523,6 +523,12 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         await self.wait_inbox(root, "LIS-TIMEOUT", "applied", 1)
         source = (await self.client.get(root + "/sources/case/" + case["id"])).json()
         self.assertEqual((source[0]["external_state"], source[0]["source_revision"]), ("released", 7))
+        worklist = await self.client.get("/api/worklist", params={"lis_status": "RELEASED", "lis_data": "available"})
+        self.assertEqual(worklist.status_code, 200, worklist.text)
+        row = worklist.json()["rows"][0]
+        self.assertEqual(row["record_id"], case["id"])
+        self.assertEqual((row["lis_status"], row["lis_sources"][0]["source"]), ("released", "lis.mock"))
+
         self.assertEqual((await self.client.get(f"/api/worklist/{case['id']}")).json()["status"], "registered")
         specimen = await self.create("specimens", {"case_id": case["id"], "specimen_number": "A"})
         slide = await self.create("slides", {"specimen_id": specimen["id"], "slide_number": "LIS-SLIDE"})
@@ -735,3 +741,63 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         self.assertEqual([(row["id"], row["result_note"]) for row in references], [(first["id"], "Synthetic response")])
         history = (await expect(self.client.get(request_path), 200))["history"]
         self.assertEqual([item["version"] for item in history], list(range(7, 0, -1)))
+
+    async def test_advanced_worklist_filters_and_private_open_times(self):
+        patient = await self.create("patients", {"display_name": "Synthetic Cohort", "local_reference": "LOCAL-19",
+                                                "birth_date": "2006-10-01", "sex": "female"})
+        case = await self.create("cases", {"case_number": "FILTER-A", "patient_id": patient["id"],
+                                          "accessioned_at": "2024-10-04T15:15:00Z"})
+        other = await self.create("cases", {"case_number": "FILTER-B", "patient_id": patient["id"]})
+        earliest = await self.create("specimens", {"case_id": case["id"], "specimen_number": "SP-BIO",
+                                                   "collection_date": "2024-09-30"})
+        await self.create("specimens", {"case_id": case["id"], "specimen_number": "LATER", "collection_date": "2024-10-01"})
+        await self.create("slides", {"specimen_id": earliest["id"], "slide_number": "S-QA"})
+        identifier = await self.client.post(f"{self.url}/patients/{patient['id']}/external-identifiers", json={
+            "system": "verified.test", "kind": "MRN", "value": "MRN-QA-19", "version": 1, "reason": "Synthetic linkage",
+        })
+        self.assertEqual(identifier.status_code, 200, identifier.text)
+        doctor = await create_account(self.org, "filter-doctor", "doctor")
+        assignment = await self.client.patch(f"{self.url}/cases/{case['id']}/assignment", json={
+            "assignee_id": str(doctor.id), "version": 1, "reason": "Synthetic Worklist access",
+        })
+        self.assertEqual(assignment.status_code, 200, assignment.text)
+
+        async def search(**filters):
+            response = await self.client.post("/api/worklist/search", json=filters)
+            self.assertEqual(response.status_code, 200, response.text)
+            return response.json()
+
+        result = await search(q="FILTER-", patient_name="cohort", patient_id="mrn-qa", specimen="bio",
+                              slide_id="s-qa", status="assigned", slide_state="missing_scan", sex="female",
+                              age_max=17, date_from="2024-10-05", date_to="2024-10-05")
+        self.assertEqual(result["total"], 1)
+        row = result["rows"][0]
+        self.assertEqual((row["age"], row["collection_date"], row["patient"]["number"]), (17, "2024-09-30", "MRN-QA-19"))
+        self.assertEqual(row["mrns"], [{"value": "MRN-QA-19", "source": "verified.test"}])
+        self.assertEqual(row["patient"]["localRef"], "LOCAL-19")
+        self.assertEqual((await search(age_min=18))["total"], 0)
+        self.assertEqual([row["record_id"] for row in (await search(q="FILTER-", age_data="missing"))["rows"]], [other["id"]])
+        self.assertEqual((await self.client.post("/api/worklist/search", json={"age_min": 18, "age_max": 17})).status_code, 422)
+        shared = await self.client.post("/api/worklist/views", json={
+            "name": "Must be private", "visibility": "shared",
+            "configuration": {"order": [{"field": "age", "direction": "asc"}], "filters": {"patient_id": "MRN-QA-19"}},
+        })
+        self.assertEqual(shared.status_code, 422)
+        self.assertEqual((await self.client.post(f"/api/worklist/cases/{other['id']}/opened")).status_code, 200)
+        await login(self.client, self.org, doctor.username)
+        result = await search(q="FILTER-", opened="unopened", order=["age:asc"])
+        self.assertEqual([row["record_id"] for row in result["rows"]], [case["id"]])
+        self.assertEqual(result["counts"]["all"], 1)
+        self.assertEqual(result["filtered_counts"]["registered"], 0)
+        self.assertEqual((await self.client.post(f"/api/worklist/cases/{other['id']}/opened")).status_code, 404)
+        self.assertEqual((await self.client.post(f"/api/worklist/cases/{case['id']}/opened")).status_code, 200)
+        self.assertEqual((await search(opened="today"))["total"], 1)
+        await login(self.client, self.org, self.user.username)
+        self.assertEqual([row["record_id"] for row in (await search(opened="today"))["rows"]], [other["id"]])
+        date_change = await self.client.patch(f"{self.url}/specimens/{earliest['id']}/collection-date",
+                                             json={"version": 1, "collection_date": "2024-10-01"})
+        self.assertEqual(date_change.status_code, 200, date_change.text)
+        self.assertEqual((await search(age_min=18))["total"], 1)
+        old_version = await self.client.patch(f"{self.url}/specimens/{earliest['id']}/collection-date",
+                                             json={"version": 1, "collection_date": None})
+        self.assertEqual(old_version.status_code, 409)

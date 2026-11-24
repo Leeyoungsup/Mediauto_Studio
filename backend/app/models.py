@@ -63,6 +63,7 @@ class Patient(ClinicalRecord, Base):
     display_name: Mapped[str | None] = mapped_column(String(120))
     local_reference: Mapped[str | None] = mapped_column(String(80))
     birth_date: Mapped[date | None] = mapped_column(Date)
+    sex: Mapped[str | None] = mapped_column(String(16))
     source: Mapped[str] = mapped_column(String(24), nullable=False)
 
 
@@ -77,6 +78,7 @@ class Case(ClinicalRecord, Base):
         Index("ix_cases_assignee", "organization", "assigned_to"),
     )
 
+    accessioned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     case_number: Mapped[str] = mapped_column(String(80), nullable=False)
     patient_id: Mapped[UUID | None] = mapped_column(Uuid)
     assigned_to: Mapped[UUID | None] = mapped_column(Uuid)
@@ -91,6 +93,7 @@ class Specimen(ClinicalRecord, Base):
         ForeignKeyConstraint(("organization", "case_id"), ("cases.organization", "cases.id")),
     )
 
+    collection_date: Mapped[date | None] = mapped_column(Date)
     specimen_number: Mapped[str] = mapped_column(String(80), nullable=False)
     case_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     description: Mapped[str | None] = mapped_column(String(160))
@@ -305,6 +308,7 @@ class WorklistPreference(Base):
 
     organization: Mapped[str] = mapped_column(String(64), primary_key=True)
     user_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    sort_order: Mapped[list | None] = mapped_column(JSONB)
     default_view_id: Mapped[UUID | None] = mapped_column(Uuid, ForeignKey("worklist_views.id", ondelete="SET NULL"))
     columns: Mapped[list | None] = mapped_column(JSONB)
     version: Mapped[int] = mapped_column(Integer)
@@ -357,3 +361,15 @@ class RequestNotification(Base):
     action: Mapped[str] = mapped_column(String(40))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WorklistOpen(Base):
+    __tablename__ = "worklist_opens"
+    __table_args__ = (
+        ForeignKeyConstraint(("organization", "user_id"), ("auth_users.organization", "auth_users.id"), ondelete="CASCADE"),
+    )
+
+    organization: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    record_key: Mapped[str] = mapped_column(String(90), primary_key=True)
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

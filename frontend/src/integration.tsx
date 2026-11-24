@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
+import { sexLabels } from './worklist-filters';
 import type { DemoCase } from './demo';
 import { api, jsonBody } from './session';
 
@@ -132,7 +133,7 @@ export function PatientIntegration({ item, org, editable, status, onChanged }: {
       if (action === 'manual-patient') {
         await api(caseUrl + '/' + action, jsonBody('POST', {
           case_version: item.version, display_name: fields.get('name') || null,
-          local_reference: fields.get('reference') || null, birth_date: fields.get('birth') || null,
+          local_reference: fields.get('reference') || null, birth_date: fields.get('birth') || null, sex: fields.get('sex') || null,
         }));
         setManual(false);
         setCandidate(undefined);
@@ -170,6 +171,8 @@ export function PatientIntegration({ item, org, editable, status, onChanged }: {
         <label className="form-field">Patient Name<input name="name" maxLength={120} /></label>
         <label className="form-field">Local Patient ID<input name="reference" maxLength={80} /></label>
         <label className="form-field">Date of Birth<input type="date" name="birth" /></label>
+        <label className="form-field">Sex<select name="sex"><option value="">Not Recorded</option>
+          {Object.entries(sexLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         <button className="button primary" disabled={busy}>Register Patient</button>
       </form>}
       {status?.emr.mode === 'mock' && <form className="integration-form" onSubmit={(event) => void submit(event, 'patient-lookup')}>

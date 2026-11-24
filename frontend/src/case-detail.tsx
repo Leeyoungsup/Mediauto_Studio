@@ -6,9 +6,9 @@ import { readyCount } from './demo';
 import type { DemoCase } from './demo';
 import { SlidePreview, StatusLabel } from './worklist';
 
-export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, onConfirm, patientIntegration, requests, report, initialTab }: {
+export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, onConfirm, patientIntegration, requests, report, initialTab, dates }: {
   item: DemoCase; emr: string; onBack: () => void; onViewer: (slide?: string) => void;
-  onAssign?: () => void; onReview?: () => void; onConfirm?: () => void; patientIntegration?: ReactNode; requests?: ReactNode; report?: ReactNode; initialTab?: string;
+  onAssign?: () => void; onReview?: () => void; onConfirm?: () => void; patientIntegration?: ReactNode; requests?: ReactNode; report?: ReactNode; initialTab?: string; dates?: ReactNode;
 }) {
   const [tab, setTab] = useState(initialTab ?? 'Slides');
   const available = readyCount(item);
@@ -28,7 +28,7 @@ export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, on
             ...(requests ? [{ name: 'Requests', icon: MessageSquare }, { name: 'Report Draft', icon: ClipboardList }] : [])].map(({ name, icon: Icon }) =>
             <button key={name} aria-pressed={tab === name} onClick={() => setTab(name)}><Icon size={16} />{name}</button>)}
         </nav>
-        {tab === 'Slides' && <div className="detail-content"><div className="preview-label"><div className="title-inline"><h2>Specimens and Slides</h2><span>{available}/{item.slides.length} Viewable</span></div>
+        {tab === 'Slides' && <div className="detail-content">{dates}<div className="preview-label"><div className="title-inline"><h2>Specimens and Slides</h2><span>{available}/{item.slides.length} Viewable</span></div>
         </div>
           {item.slides.length ? <div className="detail-slides">{item.slides.map((slide) => <button className="detail-slide" key={slide.id} disabled={!slide.wsi} onClick={() => onViewer(slide.id)}>
             <span className="slide-image"><SlidePreview slide={slide} /></span><span><strong>{slide.label ?? slide.id}</strong><small>Specimen {slide.specimen} · {slide.stain}{slide.wsi && ` · ${slide.wsi.format}`}</small></span><span className="muted">{slide.state}</span><ArrowRight size={16} />
