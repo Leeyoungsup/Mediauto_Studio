@@ -77,6 +77,12 @@ async def reconcile(session, message, payload):
         return "stale", "older_revision"
     if revision == current.revision:
         return ("duplicate", None) if checksum == current.digest else ("conflict", "same_revision_different_data")
+    if payload["resource"] == "history":
+        if current.revision and current.payload["patient_external_id"] != content["patient_external_id"]:
+            return "conflict", "history_patient_identifier_changed"
+        current.revision, current.payload, current.digest, current.received_at = revision, content, checksum, message.received_at
+        # History stays in the inbox snapshot and is joined only to confirmed patient links at read time.
+        return "applied", None
     current.revision, current.payload, current.digest, current.received_at = revision, content, checksum, message.received_at
     external = await session.scalar(identifier_query(*key).with_for_update())
     if external is None:
@@ -87,7 +93,7 @@ async def reconcile(session, message, payload):
     if payload["resource"] == "patient":
         # The identifier row serializes confirmations. Local demographics are never overwritten.
         local = await session.get(Patient, owner_id)
-        if patient_differences(local, content):
+        if external.connection_state == "needs_review" or patient_differences(local, content):
             external.connection_state = "needs_review"
             return "conflict", "patient_demographics_differ"
     external.connection_state, external.last_synced_at = "linked", message.received_at

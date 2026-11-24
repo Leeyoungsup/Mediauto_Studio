@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, GalleryHorizontalEnd, PanelLeftClose, PanelLeftOpen, Maximize, Minimize, Settings2, ScanLine } from 'lucide-react';
+import { ArrowLeft, GalleryHorizontalEnd, PanelLeftClose, PanelLeftOpen, Maximize, Minimize, Settings2, ScanLine, History } from 'lucide-react';
 import type { DemoCase } from './demo';
 import { ImageViewport } from './image-viewport';
+import { PatientHistoryDialog } from './patient-history';
 import { MultiView } from './multi-view';
 import { ViewerSettingsPanel, useViewerPreferences } from './viewer-preferences';
 import { ScanReference, SlidePreview, StatusLabel } from './worklist';
 
-export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsHref, initialSnapshot, editorHref }: {
-  item: DemoCase; activeSlide?: string; onSlide: (id: string) => void; onBack: (scan?: string) => void; onReview?: () => void; requestsHref?: string; initialSnapshot?: string; editorHref?: string;
+export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsHref, initialSnapshot, editorHref, historyEndpoint }: {
+  item: DemoCase; activeSlide?: string; onSlide: (id: string) => void; onBack: (scan?: string) => void; onReview?: () => void; requestsHref?: string; initialSnapshot?: string; editorHref?: string; historyEndpoint?: string;
 }) {
+  const [showHistory, setShowHistory] = useState(false);
   const [comparing, setComparing] = useState(false);
   const root = useRef<HTMLElement>(null);
   const preferences = useViewerPreferences();
@@ -72,6 +74,9 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
         {fullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
       </button>
       {!comparing && <button className="button secondary" disabled={available.length < 2} onClick={() => setComparing(true)}><GalleryHorizontalEnd size={16} /> Multi View</button>}
+      {historyEndpoint && <button type="button" className="button secondary" onClick={() => setShowHistory(true)}>
+        <History size={16} /> Patient History
+      </button>}
       {editorHref && <a className="button secondary" href={editorHref}>Case Editor</a>}
       {requestsHref && <a className="button secondary" href={requestsHref}>Analysis and Consultation Requests</a>}
       {!comparing && onReview && <button className="button secondary" disabled={!slide?.wsi} onClick={onReview}>{item.status === 'In Review' ? 'Review Complete' : 'Start Review'}</button>}</div></div>
@@ -87,5 +92,6 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
         options={{ settings, toggleFullscreen, toggleGallery, toggleMinimap: () => change('show_minimap', !settings.show_minimap) }} />
         : <div className="panel empty"><ScanLine size={30} /><strong>{activeSlide && !slide ? 'The requested scan could not be found.' : slide?.state === 'QC Hold' || slide?.state === 'Rescan Required' ? 'This scan is blocked by QC.' : 'No scans are available for review.'}</strong><button className="button secondary" onClick={() => onBack(slide?.id)}>Go to Case Details</button></div>}
     </div>}
+    {showHistory && historyEndpoint && <PatientHistoryDialog key={historyEndpoint} endpoint={historyEndpoint} onClose={() => setShowHistory(false)} />}
   </section>;
 }

@@ -19,6 +19,7 @@ from app.database import database_url
 from app.intake import router as intake_router
 from app.integration import router as integration_router
 from app.integration_service import poll_inbox
+from app.patient_history import router as patient_history_router
 from app.pdl1 import router as pdl1_router
 from app.models import ApplicationSetting, IntegrationConnection
 from app.viewer_records import router as viewer_records_router
@@ -76,6 +77,7 @@ app.include_router(wsi_router)
 app.include_router(viewer_records_router)
 app.include_router(viewer_preferences_router)
 app.include_router(pdl1_router)
+app.include_router(patient_history_router)
 
 
 @app.get("/api/health", responses={503: {"model": Health}})

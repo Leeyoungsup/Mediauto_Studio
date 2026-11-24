@@ -18,6 +18,7 @@ from app.connectors import AdapterUnavailable, invoke
 from app.integration_service import (KIND, SYSTEM, digest, identifier_query, now, patient_differences,
                                      set_connection_state, snapshot_key)
 from app.models import Case, ExternalIdentifier, ExternalSnapshot, IntegrationConnection, IntegrationMessage, Patient
+from app.patient_history import HistoryDocument
 
 router = APIRouter(prefix="/api/integration/{organization}", tags=["EMR and LIS"])
 Channel = Literal["emr", "lis"]
@@ -41,12 +42,16 @@ class LisPayload(ClinicalInput):
     external_state: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)]
 
 
+class HistoryPayload(HistoryDocument):
+    patient_external_id: ExternalId
+
+
 class Envelope(ClinicalInput):
     message_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
-    resource: Resource
+    resource: Resource | Literal["history"]
     external_id: ExternalId
     revision: Version
-    data: PatientPayload | LisPayload
+    data: PatientPayload | LisPayload | HistoryPayload
 
 
 class PatientLookup(ClinicalInput):
@@ -137,8 +142,13 @@ async def probe(organization: Organization, channel: Channel, session: Session):
 
 @router.post("/connections/{channel}/messages", status_code=202)
 async def receive(organization: Organization, channel: Channel, data: Envelope, session: Session):
-    if (channel == "emr" and (data.resource != "patient" or not isinstance(data.data, PatientPayload))
-            or channel == "lis" and (data.resource == "patient" or not isinstance(data.data, LisPayload))):
+    if data.resource == "history":
+        valid = isinstance(data.data, HistoryPayload)
+    elif data.resource == "patient":
+        valid = channel == "emr" and isinstance(data.data, PatientPayload)
+    else:
+        valid = channel == "lis" and isinstance(data.data, LisPayload)
+    if not valid:
         raise HTTPException(422, "This message type is unsupported for the channel.")
     payload = data.model_dump(mode="json")
     fingerprint = digest(payload)
@@ -272,8 +282,9 @@ async def confirm_patient(organization: Organization, case_id: UUID, data: Patie
                                           value=data.external_id, patient_id=patient.id, source="emr",
                                           linked_by=str(session.info["user"].id), first_received_at=candidate.first_received_at)
             session.add(existing)
-        elif existing.connection_state == "linked" and existing.last_synced_at == candidate.received_at:
+        elif existing.source == "emr" and existing.connection_state == "linked" and existing.last_synced_at == candidate.received_at:
             return public_fields(existing)
+        existing.source = "emr"
         existing.connection_state, existing.last_synced_at = "linked", candidate.received_at
         patient.version += 1
         await session.flush()

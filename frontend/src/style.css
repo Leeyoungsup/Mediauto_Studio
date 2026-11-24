@@ -489,3 +489,28 @@ dialog::backdrop { background: #21193575; }
 .viewer-layout[data-orientation=vertical] .tray-items[data-gallery=true] {
   grid-template-columns: repeat(auto-fit, minmax(75px, 1fr));
 }
+
+.patient-history { display: grid; gap: 12px; min-width: 0; }
+.history-heading .actions { margin-left: auto; }
+.history-connections { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.history-connections div { padding: 8px; border: 1px solid var(--line); border-radius: 7px; }
+.history-connections dt { font-size: 12px; font-weight: 700; }
+.history-connections dd { margin: 3px 0 0; font-size: 12px; color: var(--muted); }
+.history-documents { display: grid; grid-template-columns: minmax(190px, 1fr) minmax(0, 2fr); gap: 10px; align-items: start; }
+.history-documents h3 { margin-bottom: 7px; }
+.history-documents ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; max-height: 400px; overflow-y: auto; }
+.history-documents li button { width: 100%; text-align: left; padding: 7px; background: white; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); overflow-wrap: anywhere; }
+.history-documents li button[aria-pressed=true] { background: var(--accent-soft); border-color: var(--accent); }
+.history-documents li small { display: block; margin-top: 4px; color: var(--muted); }
+.history-document { min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 7px; overflow-wrap: anywhere; }
+.history-document .muted { font-size: 12px; }
+.history-document-text { white-space: pre-wrap; margin-top: 12px; line-height: 1.5; }
+.history-pages { margin-top: 8px; }
+.history-manual { display: grid; gap: 8px; border: 1px solid var(--line); padding: 10px; border-radius: 7px; }
+.history-manual textarea { width: 100%; border: 1px solid var(--line); border-radius: 7px; padding: 7px; }
+.patient-history-dialog { width: min(920px, calc(100vw - 28px)); max-height: calc(100dvh - 28px); overflow: auto; }
+.patient-history-dialog > .panel-title { position: sticky; top: 0; background: white; z-index: 1; }
+@media (max-width: 600px) {
+  .history-documents { grid-template-columns: minmax(0, 1fr); }
+  .history-documents ul { max-height: 175px; }
+}

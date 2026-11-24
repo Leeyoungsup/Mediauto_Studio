@@ -30,6 +30,10 @@ Worklist에서는 **Hide Case Preview**로 목록을 넓힐 수 있습니다. WS
 
 규칙과 파일 등록 정보는 개발 PostgreSQL에 저장되며, 이미 등록한 파일은 규칙을 다시 적용해도 유지됩니다. 등록 정보는 Worklist에서 Case ID로 묶어 확인합니다. 같은 Slide ID의 NDPI와 SVS는 서로 다른 원본 파일로 표시됩니다. 등록된 스캔은 케이스 상세의 WSI 뷰어에서 열 수 있습니다.
 
+### 23. 환자 임상 History
+
+**Case Details → History** 또는 **WSI Viewer → Patient History**에서 이전 진단 보고서와 진료 기록을 읽습니다. 로컬 환자를 연결한 뒤 **Add Clinical Record**로 수기 기록을 추가합니다. 외부 기록은 **Patient Information**에서 대조를 확인한 환자에 대해 수신 시각과 원천을 표시합니다. [23번 조회 계약과 검증 기록](work/patient-history-23.md)
+
 ### 22. 스캔 선택과 뷰어 설정
 
 Worklist의 **Case Preview**에서 포맷과 **Scan** 번호를 확인한 뒤 썸네일을 눌러 해당 원본을 엽니다. 뷰어의 **Case Details**로 돌아가면 같은 스캔이 선택되어 있습니다. **Gallery**에서 썸네일 배치를 바꾸고, **Viewer Settings**에서 라벨·Overview·동적 미니맵, Tray 방향과 Autopan 속도·방향을 설정한 뒤 **Save as Default**를 누르면 재접속 후 복원됩니다. 캔버스에 포커스한 상태에서 `F`는 전체화면, `M`은 미니맵, `G`는 갤러리, `Space`는 Autopan을 제어합니다. [22번 검증 기록](work/viewer-settings-22.md)

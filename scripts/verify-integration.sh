@@ -127,4 +127,5 @@ ImageDraw.Draw(image).text((30, 30), "QA-EDITOR-21", font=font, fill="black")
 image.save(sys.argv[1])
 PYLABEL
     node scripts/case-editor-browser.mjs
+    node scripts/patient-history-browser.mjs
 fi

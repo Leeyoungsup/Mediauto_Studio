@@ -520,6 +520,117 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.post(other_url + "/patient-confirm",
                           json={**confirm, "source_revision": 3, "confirm_differences": True})).status_code, 409)
 
+    async def test_patient_history_matches_confirmed_source_and_case_permissions(self):
+        root = f"/api/integration/{self.org}"
+        patient = await self.create("patients", {"display_name": "Synthetic history patient"})
+        other = await self.create("patients", {"display_name": "Synthetic other patient"})
+        case = await self.create("cases", {"case_number": "HISTORY-ONE", "patient_id": patient["id"]})
+        sibling = await self.create("cases", {"case_number": "HISTORY-TWO", "patient_id": patient["id"]})
+        unrelated = await self.create("cases", {"case_number": "HISTORY-OTHER", "patient_id": other["id"]})
+        orphan = await self.create("cases", {"case_number": "HISTORY-NO-PATIENT"})
+        path = self.url + "/cases/" + case["id"] + "/patient-history"
+        config = root + "/connections/"
+
+        async def check(request, code=200):
+            response = await request
+            self.assertEqual(response.status_code, code, response.text)
+            return response.json()
+
+        async def state():
+            return await check(self.client.get(path))
+
+        async def send(channel, message, expected):
+            await check(self.client.post(config + channel + "/messages", json=message), 202)
+            return await self.wait_inbox(root, message["message_id"], expected)
+
+        self.assertEqual((await state())["connections"]["emr"]["state"], "not_configured")
+        self.assertEqual((await state())["match"], "not_linked")
+        empty_path = self.url + "/cases/" + orphan["id"] + "/patient-history"
+        self.assertEqual((await check(self.client.get(empty_path)))["match"], "no_patient")
+        record = {"kind": "encounter_note", "title": "Manual synthetic encounter",
+                  "occurred_on": "2026-10-23", "body": "Manual clinical body", "case_version": 1}
+        header = {"Idempotency-Key": "history-manual"}
+        await check(self.client.post(empty_path, json=record, headers=header), 409)
+        local = await check(self.client.post(path, json=record, headers=header), 201)
+        self.assertEqual(await check(self.client.post(path, json=record, headers=header), 201), local)
+        await check(self.client.post(path, json={**record, "body": "changed"}, headers=header), 409)
+        for channel in ("emr", "lis"):
+            await check(self.client.put(config + channel, json={"version": 0, "mode": "mock"}))
+
+        identity = {"message_id": "H-PATIENT", "resource": "patient", "external_id": "H-MRN", "revision": 1,
+                    "data": {"display_name": patient["display_name"]}}
+        await send("emr", identity, "pending_link")
+        external = {"message_id": "H-DOC", "resource": "history", "external_id": "H-PRIVATE/DOC", "revision": 1,
+                    "data": {"patient_external_id": "H-MRN", "kind": "diagnostic_report", "title": "External report",
+                             "body": "External clinical body", "occurred_on": "2026-10-24"}}
+        await send("emr", external, "applied")
+        self.assertEqual([item["source"] for item in (await state())["records"]], ["manual"])
+        generic = await check(self.client.post(self.url + "/patients/" + patient["id"] + "/external-identifiers", json={
+            "system": "emr.mock", "kind": "MRN", "value": "H-MRN", "version": 1, "reason": "Generic import",
+        }))
+        self.assertEqual(generic["record_version"], 2)
+        self.assertEqual((await state())["match"], "not_linked")
+        actions = root + "/cases/" + case["id"] + "/patient-confirm"
+        confirm = {"external_id": "H-MRN", "case_version": 1, "patient_version": 2, "source_revision": 1,
+                   "reason": "Synthetic external match verified"}
+        await check(self.client.post(actions, json=confirm))
+        result = await state()
+        self.assertEqual(result["match"], "linked")
+        self.assertIsNone(result["connections"]["lis"]["last_received_at"])
+        self.assertEqual([item["source"] for item in result["records"]], ["emr", "manual"])
+        doc = result["records"][0]
+        self.assertNotIn("body", doc)
+        self.assertNotIn("H-PRIVATE", str(result))
+        params = {"source": "emr", "record_id": doc["id"]}
+        self.assertEqual((await check(self.client.get(path + "/document", params=params)))["body"], "External clinical body")
+        same_patient = self.url + "/cases/" + sibling["id"] + "/patient-history/document"
+        self.assertEqual((await check(self.client.get(same_patient, params={"record_id": local["id"], "source": "manual"})))["body"], record["body"])
+        await check(self.client.get(self.url + "/cases/" + unrelated["id"] + "/patient-history/document", params=params), 404)
+
+        await send("lis", {**external, "message_id": "H-LIS"}, "applied")
+        await send("emr", {**external, "message_id": "H-DOC-REPLAY"}, "duplicate")
+        await send("emr", {**external, "message_id": "H-DOC-UPDATE", "revision": 3,
+                           "data": {**external["data"], "body": "Latest clinical body"}}, "applied")
+        await send("emr", {**external, "message_id": "H-DOC-STALE", "revision": 2}, "stale")
+        change = await send("emr", {**external, "message_id": "H-DOC-MOVE", "revision": 4,
+                                   "data": {**external["data"], "patient_external_id": "H-OTHER"}}, "conflict")
+        self.assertEqual(change["error"], "history_patient_identifier_changed")
+        self.assertEqual((await check(self.client.get(path + "/document", params=params)))["body"], "Latest clinical body")
+        await check(self.client.put(config + "emr", json={"version": 1, "mode": "mock", "scenario": "timeout"}))
+        outage = asyncio.create_task(self.client.post(config + "emr/probe"))
+        self.assertEqual(len((await state())["records"]), 3)
+        self.assertEqual((await outage).status_code, 503)
+        cached = await state()
+        self.assertEqual(cached["connections"]["emr"]["state"], "degraded")
+        self.assertIsNotNone(cached["connections"]["emr"]["last_received_at"])
+
+        assigned = await create_account(self.org, "history-assigned", "doctor")
+        not_assigned = await create_account(self.org, "history-unassigned", "doctor")
+        labeler = await create_account(self.org, "history-labeler", "labeler")
+        async with app.state.engine.begin() as connection:
+            await connection.execute(text("UPDATE cases SET assigned_to = :user WHERE id = CAST(:case AS uuid)"),
+                                     {"user": assigned.id, "case": case["id"]})
+        await login(self.client, self.org, assigned.username)
+        self.assertEqual((await check(self.client.get(path + "/document", params=params)))["body"], "Latest clinical body")
+        await login(self.client, self.org, not_assigned.username)
+        await check(self.client.get(path), 404)
+        await check(self.client.get(path + "/document", params=params), 404)
+        await login(self.client, self.org, labeler.username)
+        await check(self.client.get(path), 403)
+        await check(self.client.post(path, json=record, headers=header), 403)
+        await create_account(self.org + "-foreign", "other-admin", "admin")
+        await login(self.client, self.org + "-foreign", "other-admin")
+        await check(self.client.get(path), 403)
+
+        await login(self.client, self.org, self.user.username)
+        await check(self.client.put(config + "emr", json={"version": 2, "mode": "mock"}))
+        await send("emr", {**identity, "message_id": "H-PATIENT-CONFLICT", "revision": 2,
+                           "data": {"display_name": "Different external patient"}}, "conflict")
+        hidden = await state()
+        self.assertEqual(hidden["match"], "needs_review")
+        self.assertEqual([item["source"] for item in hidden["records"]], ["manual"])
+        await check(self.client.get(path + "/document", params=params), 404)
+
     async def test_lis_timeout_retry_dead_letter_and_local_independence(self):
         root = f"/api/integration/{self.org}"
         config = root + "/connections/lis"

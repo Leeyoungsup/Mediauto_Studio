@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, ForeignKeyConstraint, Index, Integer, LargeBinary, String, UniqueConstraint, Uuid, func
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, ForeignKeyConstraint, Index, Integer, LargeBinary, String, Text, UniqueConstraint, Uuid, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -308,6 +308,25 @@ class IntegrationMessage(Base):
     error: Mapped[str | None] = mapped_column(String(48))
 
 
+class PatientHistoryRecord(ClinicalRecord, Base):
+    __tablename__ = "patient_history_records"
+    __table_args__ = (
+        ForeignKeyConstraint(("organization", "patient_id"), ("patients.organization", "patients.id")),
+        ForeignKeyConstraint(("organization", "case_id"), ("cases.organization", "cases.id")),
+        UniqueConstraint("organization", "created_by", "request_key"),
+        CheckConstraint("kind IN ('diagnostic_report', 'encounter_note')", name="patient_history_kind"),
+        Index("ix_patient_history_date", "organization", "patient_id", "occurred_on", "id"),
+    )
+
+    patient_id: Mapped[UUID] = mapped_column(Uuid)
+    case_id: Mapped[UUID] = mapped_column(Uuid)
+    request_key: Mapped[str] = mapped_column(String(128))
+    kind: Mapped[str] = mapped_column(String(24))
+    title: Mapped[str] = mapped_column(String(160))
+    body: Mapped[str] = mapped_column(Text)
+    occurred_on: Mapped[date] = mapped_column(Date)
+
+
 class ExternalSnapshot(Base):
     __tablename__ = "integration_snapshots"
 
@@ -320,6 +339,11 @@ class ExternalSnapshot(Base):
     digest: Mapped[str] = mapped_column(String(64))
     first_received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+Index("ix_history_external_patient", ExternalSnapshot.organization,
+      ExternalSnapshot.payload["patient_external_id"].astext,
+      postgresql_where=ExternalSnapshot.resource == "history")
 
 
 class ViewerPosition(Base):
