@@ -82,6 +82,26 @@ try {
   await previewTabs.getByRole('tab', { name: 'Case Summary', exact: true }).click();
   await preview.getByText('integration-other', { exact: true }).waitFor();
   await previewTabs.getByRole('tab', { name: 'Slides', exact: true }).click();
+
+  const technologist = await browser.newPage({ baseURL, viewport: wide });
+  technologist.setDefaultTimeout(12000);
+  const intakeLogin = await technologist.request.post('/api/auth/login', { data: {
+    organization: 'local', username: 'integration-pap-primary', password: 'synthetic-test-password',
+  } });
+  assert.equal(intakeLogin.status(), 200, await intakeLogin.text());
+  await technologist.goto('/');
+  await technologist.getByLabel('Search Cases').fill('IMS-DEMO-NO-SCAN');
+  const intakePreview = technologist.getByRole('complementary', { name: 'Selected Case Preview' });
+  await intakePreview.getByText('IMS-DEMO-NO-SCAN', { exact: true }).waitFor();
+  await button(intakePreview, 'Reassign Case').click();
+  const intakeAssignment = technologist.getByRole('dialog', { name: 'Reassign Case', exact: true });
+  await intakeAssignment.getByLabel('Assigned Pathologist').selectOption({ label: 'integration-doctor (integration-doctor)' });
+  await intakeAssignment.getByLabel('Reason for Change').fill('Synthetic technologist reassignment');
+  await button(intakeAssignment, 'Save').click();
+  await intakeAssignment.waitFor({ state: 'hidden' });
+  await intakePreview.getByRole('tab', { name: 'Case Summary', exact: true }).click();
+  await intakePreview.getByText('integration-doctor', { exact: true }).waitFor();
+  await technologist.close();
   await page.getByLabel('Search Cases').fill('IMS-DEMO-101');
   await button(page, 'IMS-DEMO-101 details').click();
   await page.getByRole('heading', { name: 'IMS-DEMO-101', exact: true }).waitFor();

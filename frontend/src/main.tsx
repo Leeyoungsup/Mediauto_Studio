@@ -192,7 +192,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
   const detailKey = detailId ? `${casePage?.view}/${detailId}` : undefined;
   const current = casePage?.files ? buildFileCases(files).find(({ id }) => id === casePage.id)
     : detail?.key === detailKey ? detail?.item : undefined;
-  const mayAssign = user.role === 'admin' && current?.recordId && current.status !== 'Review Complete';
+  const mayAssign = writable && current?.recordId && current.status !== 'Review Complete';
   const mayReview = user.role === 'doctor' && current?.assignedTo === user.id &&
     (current.status === 'Assigned' || current.status === 'In Review');
   const emr = integration ? integrationLabel(integration.emr) : health ? emrLabels[health.emr] : serviceError ? 'Unavailable' : 'Checking…';
@@ -516,7 +516,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
             total={result.total} counts={result.counts} filteredCounts={result.filtered_counts} queues={queues} workload={result.workload} onQueueChanged={refreshQueues} assignees={result.assignees} onQuery={setQuery}
             onOpen={(id) => { const item = worklistCases.find((row) => row.id === id); if (item) navigateCase(item); }}
             onViewer={(id, slide) => { const item = worklistCases.find((row) => row.id === id); if (item) navigateViewer(item, slide); }}
-            onAssign={settingsAllowed ? (item) => {
+            onAssign={writable ? (item) => {
               setWorkflowError('');
               setWorkflow({ item, action: 'assignment', loading: true });
             } : undefined}

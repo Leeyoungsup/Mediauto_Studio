@@ -54,14 +54,14 @@ def record_change(session, case, action, before, reason, *, note=""):
 
 @router.patch("/cases/{case_id}/assignment")
 async def assign_case(organization: Organization, case_id: UUID, data: Assignment, session: Session):
-    async with write(session, ("admin",)):
+    async with write(session):
         user = session.info["user"]
         case = await find(session, Case, organization, case_id, lock=True)
         require_version(case, data.version)
         if case.status not in ("registered", "assigned", "in_review"):
             raise HTTPException(409, "Assignment cannot be changed in the current status.")
         if case.group_key:
-            await lock_group(session, session.info["user"], case.group_key)
+            await lock_group(session, user, case.group_key, require_membership=False)
         assignee = await session.scalar(eligible_assignees(organization, case.group_key).where(AuthUser.id == data.assignee_id).with_for_update())
         if assignee is None:
             raise HTTPException(422, "Select an active pathologist eligible for this workgroup.")

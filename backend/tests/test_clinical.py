@@ -413,8 +413,9 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         await change(assignment, 1, 422, assignee_id=str(off_site.id))
         await change(assignment, 1, 422, assignee_id=str(staff.id))
         await login(self.client, self.org, staff.username)
-        await change(assignment, 1, 403, assignee_id=str(doctors[0].id))
-        await login(self.client, self.org, self.user.username)
+        self.assertEqual((await self.client.get("/api/auth/accounts")).status_code, 403)
+        await change(assignment, 1, 422, assignee_id=str(off_site.id))
+        await change(assignment, 1, 422, assignee_id=str(staff.id))
         candidates = (await self.client.get(f"/api/worklist/{case['id']}")).json()["candidates"]
         self.assertEqual({candidate["id"] for candidate in candidates}, {str(doctor.id) for doctor in doctors})
         one, two = await asyncio.gather(*[
@@ -431,7 +432,7 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         await login(self.client, self.org, doctors[0].username)
         await change(review, 2, 409, status="reviewed")
         self.assertEqual((await change(review, 2, status="in_review"))["status"], "in_review")
-        await login(self.client, self.org, self.user.username)
+        await login(self.client, self.org, staff.username)
         reassigned = await change(assignment, 3, assignee_id=str(doctors[1].id))
         self.assertEqual(reassigned["status"], "assigned")
         await login(self.client, self.org, doctors[0].username)
@@ -453,6 +454,8 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         self.assertEqual(events[0]["actor"], str(doctors[1].id))
         self.assertEqual(events[0]["after"]["review_note"], "Synthetic review note")
         self.assertEqual(details["audit"][0]["after"]["review_note"], "Synthetic review note")
+        self.assertEqual(events[2]["actor"], str(staff.id))
+        self.assertEqual(events[4]["actor"], str(staff.id))
         self.assertEqual(events[2]["before"]["assigned_to"], str(doctors[0].id))
         self.assertEqual(events[2]["after"]["assigned_to"], str(doctors[1].id))
         self.assertEqual(events[2]["source"], "ims")
@@ -2263,6 +2266,7 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
     async def test_workgroup_subscription_classification_and_workload_permissions(self):
         first = await create_account(self.org, "group-first", "doctor")
         second = await create_account(self.org, "group-second", "doctor")
+        staff = await create_account(self.org, "group-intake", "labeler")
         outside = await create_account(self.org + "-outside", "group-outsider", "admin")
         endpoint = "/api/worklist"
         roster = endpoint + "/workgroups/breast/members/"
@@ -2326,10 +2330,16 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         result = await expect(self.client.get(endpoint, params={"group_key": "breast"}), 200)
         self.assertEqual((result["total"], result["workload"]), (0, []))
         await expect(self.client.get(endpoint + "/" + case["id"]), 404)
-        await login(self.client, self.org, self.user.username)
+        await login(self.client, self.org, staff.username)
+        details = await expect(self.client.get(endpoint + "/" + case["id"]), 200)
+        self.assertEqual({person["id"] for person in details["candidates"]}, {str(first.id), str(second.id)})
+        await expect(self.client.patch(assignment, json={
+            "version": active["version"], "assignee_id": str(excluded.id), "reason": "Synthetic wrong group for intake",
+        }), 422)
         await expect(self.client.patch(assignment, json={
             "version": active["version"], "assignee_id": str(second.id), "reason": "Synthetic reassignment",
         }), 200)
+        await login(self.client, self.org, self.user.username)
         await change_role(first, roster_version, False)
         await login(self.client, self.org, first.username)
         catalog = await expect(self.client.get(endpoint + "/queues"), 200)

@@ -24,13 +24,14 @@ async def get_groups(session, user):
     return {**BUILTINS, **groups} if user.role == "admin" else groups
 
 
-async def lock_group(session, user, key):
+async def lock_group(session, user, key, *, require_membership=True):
     if key in BUILTINS and user.role == "admin":
         await session.execute(insert(Workgroup).values(organization=user.organization, key=key, name=BUILTINS[key],
             created_by=str(user.id)).on_conflict_do_nothing(index_elements=["organization", "key"]))
     group = await session.scalar(select(Workgroup).where(
         Workgroup.organization == user.organization, Workgroup.key == key).with_for_update())
-    if group is None or (user.role != "admin" and not await session.get(WorkgroupMember, (user.organization, key, user.id))):
+    if group is None or (require_membership and user.role != "admin" and
+                         not await session.get(WorkgroupMember, (user.organization, key, user.id))):
         raise HTTPException(404, "Workgroup not found.")
     return group
 

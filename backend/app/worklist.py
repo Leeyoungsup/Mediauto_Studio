@@ -341,7 +341,7 @@ async def worklist_case(case_id: UUID, user: CurrentUser, session: Session):
         "after_assignee": names.get(account_id(event.after.get("assigned_to"))),
         "transaction_id": event.transaction_id,
     } for event in events]
-    if user.role == "admin" and record.status != "reviewed":
+    if user.role in WRITERS and record.status != "reviewed":
         result["candidates"] = [{"id": doctor.id, "name": doctor.display_name, "username": doctor.username}
                                 for doctor in await session.scalars(eligible_assignees(user.organization, record.group_key)
                                 .order_by(AuthUser.display_name, AuthUser.username))]
