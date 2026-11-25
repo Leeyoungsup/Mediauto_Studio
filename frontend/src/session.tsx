@@ -9,6 +9,15 @@ export const accountRoleLabels: Record<User['role'], string> = {
 };
 export const canWrite = (user: User) => user.role === 'admin' || user.role === 'labeler';
 const expired = 'mediauto-session-expired';
+const defaultDemoAccount = 'admin1';
+const demoAccounts = [
+  { username: defaultDemoAccount, label: 'Administrator 1' },
+  { username: 'admin2', label: 'Administrator 2' },
+  { username: 'pathologist_a', label: 'Pathologist A' },
+  { username: 'pathologist_b', label: 'Pathologist B' },
+  { username: 'mt_a', label: 'MT A' },
+  { username: 'mt_b', label: 'MT B' },
+];
 
 export function auditAttemptId() {
   const hex = Array.from(crypto.getRandomValues(new Uint8Array(16)), (value) => value.toString(16).padStart(2, '0')).join('');
@@ -40,12 +49,13 @@ export function SessionGate({ children }: { children: (user: User, logout: () =>
   const [registering, setRegistering] = useState(false);
   const [organization, setOrganization] = useState('local');
   const [confirmationCode, setConfirmationCode] = useState('');
-  const [submittedUsername, setSubmittedUsername] = useState('');
+  const [loginUsername, setLoginUsername] = useState(defaultDemoAccount);
   const [copyStatus, setCopyStatus] = useState('');
   const [error, setError] = useState('');
   const formHeading = useRef<HTMLHeadingElement>(null);
   const codeOutput = useRef<HTMLOutputElement>(null);
   const focusHeading = useRef(false);
+  const usernameField = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!focusHeading.current) return;
@@ -70,7 +80,7 @@ export function SessionGate({ children }: { children: (user: User, logout: () =>
     const fields = new FormData(event.currentTarget);
     try {
       setUser(await api<User>('/api/auth/login', jsonBody('POST', Object.fromEntries(fields))));
-      setSubmittedUsername('');
+      setLoginUsername(defaultDemoAccount);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Unable to sign in.');
     } finally { setBusy(false); }
@@ -87,7 +97,7 @@ export function SessionGate({ children }: { children: (user: User, logout: () =>
     setBusy(true); setError('');
     try {
       const result = await api<{ code: string }>('/api/auth/register', jsonBody('POST', Object.fromEntries(fields)));
-      setSubmittedUsername(String(fields.get('username') ?? ''));
+      setLoginUsername(String(fields.get('username') ?? ''));
       focusHeading.current = true;
       setConfirmationCode(result.code);
     } catch (failure) {
@@ -129,6 +139,7 @@ export function SessionGate({ children }: { children: (user: User, logout: () =>
     <input name="organization" value={organization} onChange={(event) => setOrganization(event.target.value)} required maxLength={64} />
   </label>;
   const heading = confirmationCode ? 'Registration Confirmation Code' : registering ? 'Request an Account' : 'Sign In';
+  const selectedAccount = demoAccounts.find(({ username }) => username === loginUsername.toLowerCase());
 
   return <main className="login-page">
     <section className="login-panel panel" aria-labelledby="auth-heading">
@@ -161,7 +172,18 @@ export function SessionGate({ children }: { children: (user: User, logout: () =>
             <button className="button secondary" type="button" disabled={busy} onClick={() => changeMode(false)}><ArrowLeft size={16} aria-hidden="true" /> Back to Sign In</button>
           </form> : <form key="login" className="login-form" aria-labelledby="auth-heading" onSubmit={(event) => void login(event)}>
             {organizationField}
-            <label className="form-field">Username<input name="username" autoComplete="username" defaultValue={submittedUsername || 'admin1'} required maxLength={80} /></label>
+            {organization === 'local' && <label className="form-field">Demo Account
+              <select value={selectedAccount?.username ?? ''} onChange={(event) => {
+                setLoginUsername(event.target.value);
+                setError('');
+                if (!event.target.value) usernameField.current?.focus();
+              }}>
+                {demoAccounts.map(({ username, label }) => <option key={username} value={username}>{label} · {username}</option>)}
+                <option value="">Other Account</option>
+              </select>
+            </label>}
+            <label className="form-field">Username<input ref={usernameField} name="username" autoComplete="username"
+              value={loginUsername} onChange={(event) => setLoginUsername(event.target.value)} required maxLength={80} /></label>
             <label className="form-field">Password<input name="password" type="password" autoComplete="current-password" required maxLength={256} /></label>
             {error && <p className="form-error" role="alert">{error}</p>}
             <button className="button primary" type="submit" disabled={busy}><LogIn size={16} aria-hidden="true" /> {busy ? 'Checking…' : 'Sign In'}</button>
