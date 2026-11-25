@@ -31,6 +31,17 @@ try {
   await button(page, 'Expand Navigation').click();
   assert.equal(await page.getByRole('link', { name: 'Open Tumor Board and Collections', exact: true }).getAttribute('href'), '#collections');
   assert.equal(await page.getByRole('link', { name: 'Open Operating Room Results', exact: true }).getAttribute('href'), '#or');
+  const nav = page.getByRole('navigation', { name: 'Workspace Navigation' });
+  const worklists = nav.getByRole('group', { name: 'Case Worklists' });
+  const myCases = worklists.getByRole('link', { name: 'My Cases' });
+  await myCases.click();
+  await page.waitForURL('**/#worklist/mine');
+  await worklists.locator('a[aria-current="location"]', { hasText: 'My Cases' }).waitFor();
+  await worklists.getByRole('link', { name: 'Open Slide Intake' }).click();
+  await page.waitForURL('**/#scans');
+  await worklists.getByRole('link', { name: 'Worklist', exact: true }).click();
+  await page.waitForURL('**/#worklist/all');
+  await preview.waitFor();
   const previewTabs = preview.getByRole('tablist', { name: 'Case Preview Workspace' });
   await previewTabs.getByRole('tab', { name: 'Case Summary', exact: true }).click();
   await preview.getByRole('tabpanel', { name: 'Case Summary' }).getByText('Accessioned At', { exact: true }).waitFor();
@@ -82,6 +93,10 @@ try {
   await button(page, 'Open Viewer').click();
   await button(page, 'Pan using minimap').waitFor();
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'Viewer must not overflow horizontally');
+  await button(page, 'Polygon ROI').click();
+  const drawing = page.getByRole('group', { name: 'Drawing Controls' });
+  await drawing.getByText('Polygon ROI', { exact: true }).waitFor();
+  await button(page, 'Cancel Drawing').click();
   assert.ok((await canvas.boundingBox()).width >= compact.width - 26);
   await page.getByRole('button', { name: /SYNTH-01.*SVS/ }).click();
   await page.getByRole('button', { name: /SYNTH-01.*SVS/, pressed: true }).waitFor();

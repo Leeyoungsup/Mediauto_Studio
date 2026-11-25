@@ -155,10 +155,10 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
     refreshIntegration();
   }
   const worklistTabs = [
-    { id: 'all', href: '#worklist/all', label: 'All Cases', count: result.counts.all, icon: LayoutList },
-    ...(user.role !== 'labeler' ? [{ id: 'mine', href: '#worklist/mine', label: 'Assigned to Me', count: result.counts.mine, icon: UserRoundCheck }] : []),
-    ...(writable ? [{ id: 'unassigned', href: '#worklist/unassigned', label: 'Unassigned', count: result.counts.unassigned, icon: ClipboardList }] : []),
-    ...(intakeAllowed ? [{ id: 'scans', href: '#scans', label: 'Slide Registration', count: files.filter(({ entry }) => !entry).length, icon: ScanLine }] : []),
+    { id: 'all', href: '#worklist/all', sideLabel: 'Worklist', label: 'All Cases', count: result.counts.all, icon: LayoutList },
+    ...(user.role !== 'labeler' ? [{ id: 'mine', href: '#worklist/mine', sideLabel: 'My Cases', label: 'Assigned to Me', count: result.counts.mine, icon: UserRoundCheck }] : []),
+    ...(writable ? [{ id: 'unassigned', href: '#worklist/unassigned', sideLabel: 'Unassigned Cases', label: 'Unassigned', count: result.counts.unassigned, icon: ClipboardList }] : []),
+    ...(intakeAllowed ? [{ id: 'scans', href: '#scans', sideLabel: 'Intake', label: 'Slide Registration', count: files.filter(({ entry }) => !entry).length, icon: ScanLine }] : []),
   ];
 
   useEffect(() => {
@@ -352,14 +352,30 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
     <aside className="sidebar" id="main-navigation">
       <a className="brand" href="#worklist/all" aria-label="MeDIAuto Studio Home" title="MeDIAuto Studio Home"><span className="brand-icon"><Microscope size={23} /></span><span className="brand-name">MeDIAuto<strong>Studio</strong></span></a>
       <nav aria-label="Workspace Navigation" className="side-nav">
-        <p>Workspace</p>
-        <a href="#worklist/all" aria-label="Worklist" title="Worklist" aria-current={page.view !== 'settings' && page.view !== 'or' && page.view !== 'collections' ? 'location' : undefined}><LayoutList size={19} /> <span>Worklist</span><small>{result.counts.all}</small></a>
-        {orAllowed && <a href="#or" aria-label="OR Results" title="OR Results" aria-current={page.view === 'or' ? 'page' : undefined}><ClipboardList size={19} /> <span>OR Results</span></a>}
-        {requestAllowed && <a href="#collections" aria-label="Collections and Tumor Board" title="Collections and Tumor Board"
-          aria-current={page.view === 'collections' ? 'page' : undefined}><ClipboardList size={19} /> <span>Collections and Tumor Board</span></a>}
-        {settingsAllowed && <a href="#settings/accounts" aria-label="Account Management" title="Account Management"
-          aria-current={page.view === 'settings' && page.section === 'accounts' ? 'page' : undefined}><UserRoundPlus size={19} /> <span>Accounts</span></a>}
-        {settingsAllowed && <a href="#settings" aria-label="Settings" title="Settings" aria-current={page.view === 'settings' && page.section !== 'accounts' ? 'page' : undefined}><Settings2 size={19} /> <span>Settings</span></a>}
+        <p className="side-nav-title">Workspace</p>
+        <div className="side-nav-group" role="group" aria-label="Case Worklists">
+          <p>Case Worklists</p>
+          {worklistTabs.map(({ id, href, count, icon: Icon, sideLabel: label }) => {
+            const selected = page.view === 'scans' ? id === 'scans'
+              : ['worklist', 'case', 'viewer', 'related-comparison', 'request', 'roi-search'].includes(page.view) && id === scope;
+            const accessibleLabel = id === 'scans' ? 'Open Slide Intake' : label;
+            return <a key={id} href={href} aria-label={accessibleLabel} title={label} aria-current={selected ? 'location' : undefined}>
+              <Icon size={18} aria-hidden="true" /><span>{label}</span><small>{count}</small>
+            </a>;
+          })}
+        </div>
+        {(orAllowed || requestAllowed) && <div className="side-nav-group" role="group" aria-label="Collaboration">
+          <p>Collaboration</p>
+          {orAllowed && <a href="#or" aria-label="OR Results" title="OR Results" aria-current={page.view === 'or' ? 'page' : undefined}><RadioTower size={18} /> <span>OR Results</span></a>}
+          {requestAllowed && <a href="#collections" aria-label="Collections and Tumor Board" title="Collections and Tumor Board"
+            aria-current={page.view === 'collections' ? 'page' : undefined}><FolderKanban size={18} /> <span>Collections and Tumor Board</span></a>}
+        </div>}
+        {settingsAllowed && <div className="side-nav-group" role="group" aria-label="Administration">
+          <p>Administration</p>
+          <a href="#settings/accounts" aria-label="Account Management" title="Account Management"
+            aria-current={page.view === 'settings' && page.section === 'accounts' ? 'page' : undefined}><UsersRound size={18} /> <span>Accounts</span></a>
+          <a href="#settings" aria-label="Settings" title="Settings" aria-current={page.view === 'settings' && page.section !== 'accounts' ? 'page' : undefined}><Settings2 size={18} /> <span>Settings</span></a>
+        </div>}
       </nav>
       <div className="side-footer"><button aria-label="Service Status" title="Service Status" onClick={() => showModal('system')}><Activity size={18} /><span>Service Status</span><i className={health?.status === 'ok' ? 'online' : ''} /></button></div>
     </aside>

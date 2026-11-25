@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
 const { chromium } = await import(process.env.MEDIAUTO_PLAYWRIGHT_MODULE ?? 'playwright-core');
@@ -40,26 +41,64 @@ try {
 
   const canvas = page.getByLabel('WSI Canvas', { exact: true });
   const panel = page.getByRole('region', { name: 'Review Position and Annotations', exact: true });
-  const tool = page.getByRole('combobox', { name: 'Additional Tool' });
+  const tools = page.getByRole('group', { name: 'Review Tools', exact: true });
+  const drawing = page.getByRole('group', { name: 'Drawing Controls', exact: true });
   async function saveAs(name) {
     await panel.getByRole('textbox', { name: 'Annotation Name' }).fill(name);
     await button(panel, 'Save Annotation').click();
     await panel.getByText(name, { exact: true }).waitFor();
     return panel.getByRole('listitem').filter({ hasText: name });
   }
-  await tool.selectOption('path');
+  await button(tools, 'Polygon ROI').click();
+  assert.equal(await button(drawing, 'Close Polygon').isDisabled(), true);
+  await dragOrClick(canvas, [[-44, -28], [40, 30], [-44, 30], [40, -28]]);
+  const openPolygon = page.locator('[data-record="drawing"]');
+  await openPolygon.locator('.polygon-start').waitFor();
+  assert.equal(await openPolygon.locator('polygon').count(), 0, 'Open polygons should have no closing edge or fill');
+  await page.keyboard.press('Enter');
+  await drawing.getByRole('alert').filter({ hasText: 'Polygon edges cannot cross' }).waitFor();
+  await page.keyboard.press('Backspace');
+  await drawing.getByText('3 / 256 points', { exact: true }).waitFor();
+  await dragOrClick(canvas, [[-44, -28]]);
+  const polygon = await saveAs('Synthetic polygon closure');
+  await polygon.waitFor();
+  await button(panel, 'Close Annotations').click();
+  await panel.waitFor({ state: 'hidden' });
+  await page.reload();
+  await button(page, 'Annotations').click();
+  await panel.getByText('Synthetic polygon closure', { exact: true }).waitFor();
+  const persistedPolygon = await (await page.request.get(wsi + '/viewer-records')).json();
+  const savedPolygon = persistedPolygon.annotations.find((row) => row.label === 'Synthetic polygon closure');
+  assert.equal(savedPolygon.points.length, 3, 'The first vertex should only appear once in saved geometry');
+  await page.locator(`polygon[data-record="${savedPolygon.id}"]`).waitFor();
+  await button(tools, 'Polygon ROI').click();
+  await dragOrClick(canvas, [[-25, -15], [25, 15]]);
+  await button(drawing, 'Cancel Drawing').click();
+  await openPolygon.waitFor({ state: 'hidden' });
+  for (const [points, error] of [
+    [[[100, 100], [200, 200], [300, 300]], /enclose an area/],
+    [[[100, 100], [200, 200], [100, 200], [200, 100]], /cannot cross/],
+  ]) {
+    const response = await page.request.post(wsi + '/viewer-records/annotations', { data: {
+      id: randomUUID(), kind: 'polygon', points, label: 'Invalid synthetic polygon',
+    } });
+    assert.equal(response.status(), 422, await response.text());
+    assert.match(await response.text(), error);
+  }
+
+  await button(tools, 'Multi-segment Distance').click();
   await dragOrClick(canvas, [[-35, -35], [-35, 15], [30, 15]]);
-  await button(panel, 'Finish Points').click();
+  await button(drawing, 'Finish Points').click();
   const path = await saveAs('Synthetic measured path');
   await path.getByText(/mm|µm/).waitFor();
 
-  await tool.selectOption('count');
+  await button(tools, 'Point Count').click();
   await dragOrClick(canvas, [[-25, -30], [0, 0], [20, 22]]);
-  await button(panel, 'Undo Point').click();
-  await button(panel, 'Finish Points').click();
+  await button(drawing, 'Undo Point').click();
+  await button(drawing, 'Finish Points').click();
   const marks = await saveAs('Synthetic point count');
   await marks.getByText(/2 points/).waitFor();
-  await tool.selectOption('ellipse');
+  await button(tools, 'Ellipse ROI').click();
   await dragOrClick(canvas, [[-40, -30], [35, 25]], true);
   const roi = await saveAs('Synthetic ellipse');
   await panel.getByRole('checkbox', { name: 'Include ROI Annotation' }).uncheck();
@@ -71,7 +110,7 @@ try {
   const png = await readFile(await download.path());
   assert.deepEqual(png.subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
 
-  await tool.selectOption('preset');
+  await button(tools, 'Calibrated ROI Preset').click();
   await page.getByRole('combobox', { name: 'Preset Size' }).selectOption('500');
   await dragOrClick(canvas, [[12, 0]]);
   await saveAs('Synthetic calibrated preset');
@@ -140,7 +179,7 @@ try {
   await button(pane(1), 'Zoom In').click();
   const results = await tissueError.textContent();
   assert.deepEqual(errors, []);
-  console.log('PASS: extended geometry, calibrated preset, bookmark restore, ROI PNG, specimen recount, report evidence and tissue landmark registration');
+  console.log('PASS: polygon preview, closing, invalid geometry, undo, cancel and reload; extended geometry, calibrated preset, bookmark restore, ROI PNG, specimen recount, report evidence and tissue landmark registration');
   console.log('Browser tissue residual (rounded pointer inputs):', results);
 } finally {
   await browser.close();

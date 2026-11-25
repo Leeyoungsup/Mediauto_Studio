@@ -43,6 +43,32 @@ def measure(points, mpp_x, mpp_y):
     return length, "um" if mpp_x and mpp_y else "px"
 
 
+def check_polygon(points):
+    if len({tuple(point) for point in points}) != len(points):
+        raise HTTPException(422, "Use a different position for each vertex.")
+
+    def cross(a, b, c):
+        return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+    def within(p, a, b):
+        return all(min(start, end) <= value <= max(start, end) for value, start, end in zip(p, a, b))
+
+    edges = list(zip(points, points[1:] + points[:1]))
+    for i, (a, b) in enumerate(edges):
+        # Adjacent edges share a vertex, including the first and last edge.
+        for j in range(i + 2, len(edges) - (i == 0)):
+            c, d = edges[j]
+            ac, ad, ca, cb = cross(a, b, c), cross(a, b, d), cross(c, d, a), cross(c, d, b)
+            if ((ac * ad < 0 and ca * cb < 0) or (ac == 0 and within(c, a, b)) or (ad == 0 and within(d, a, b))
+                    or (ca == 0 and within(a, c, d)) or (cb == 0 and within(b, c, d))):
+                raise HTTPException(422, "Polygon edges cannot cross or touch.")
+    xs, ys = zip(*points)
+    bounds_area = (max(xs) - min(xs)) * (max(ys) - min(ys))
+    twice_area = sum(cross(points[0], a, b) for a, b in edges)
+    if abs(twice_area) <= bounds_area * 1e-12:
+        raise HTTPException(422, "The polygon must enclose an area.")
+
+
 def check_geometry(kind, points, zoom):
     count = len(points)
     if kind in ("rectangle", "ellipse", "arrow") and count != 2:
@@ -53,7 +79,9 @@ def check_geometry(kind, points, zoom):
         raise HTTPException(422, "Add more points before saving the annotation.")
     if any(a == b for a, b in zip(points, points[1:])):
         raise HTTPException(422, "Consecutive points must be different.")
-    if kind in ("rectangle", "ellipse", "polygon"):
+    if kind == "polygon":
+        check_polygon(points)
+    if kind in ("rectangle", "ellipse"):
         axes = tuple(zip(*points))
         if any(min(axis) == max(axis) for axis in axes):
             raise HTTPException(422, "The ROI must cover both image axes.")

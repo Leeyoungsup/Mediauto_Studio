@@ -1,4 +1,4 @@
-import { Bookmark, Hand, LocateFixed, MapPin, Ruler, Scan } from 'lucide-react';
+import { ArrowUpRight, Bookmark, Check, CircleDot, Hand, LocateFixed, MapPin, Pencil, Ruler, Scan, Spline, SquareDashed, Tally5, Undo2, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api, auditAttemptId, jsonBody, request } from './session';
 import type { SlideInfo, Viewport } from './tile-viewer';
@@ -6,7 +6,7 @@ import type { SlideInfo, Viewport } from './tile-viewer';
 export type Point = [number, number];
 type Kind = 'rectangle' | 'distance' | 'ellipse' | 'point' | 'arrow' | 'polygon' | 'brush' | 'count' | 'bookmark';
 export type Tool = Exclude<Kind, 'bookmark'> | 'pan' | 'path' | 'preset';
-export const hasVertices = (tool: Tool) => tool === 'path' || tool === 'polygon' || tool === 'count';
+export const hasVertices = (tool: Tool): tool is 'path' | 'polygon' | 'count' => tool === 'path' || tool === 'polygon' || tool === 'count';
 export type Geometry = { kind: Kind; points: Point[] };
 export type Camera = { x: number; y: number; zoom: number };
 type Position = Camera & { version: number; saved_at: string };
@@ -19,7 +19,36 @@ const date = new Intl.DateTimeFormat('en-US', { dateStyle: 'short', timeStyle: '
 const labels: Record<Kind, string> = { rectangle: 'Rectangular ROI', distance: 'Distance Measurement', ellipse: 'Ellipse ROI',
   point: 'Point', arrow: 'Arrow', polygon: 'Polygon ROI', brush: 'Brush', count: 'Point Count', bookmark: 'Bookmark' };
 const exportable = new Set<Kind>(['rectangle', 'ellipse', 'polygon', 'brush']);
-const additionalTools = ['ellipse', 'point', 'arrow', 'polygon', 'brush', 'count', 'path', 'preset'] as const;
+function PolygonIcon({ size = 18 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+    <path d="m4 8 10-4 6 6-3 10-11-1Z" />
+    {[[4, 8], [14, 4], [20, 10], [17, 20], [6, 19]].map(([x, y]) => <circle key={x} cx={x} cy={y} r="1.4" fill="currentColor" />)}
+  </svg>;
+}
+
+function EllipseIcon({ size = 18 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+    <ellipse cx="12" cy="12" rx="9" ry="6" />
+  </svg>;
+}
+
+const toolGroups = [
+  { label: 'Navigation', tools: [{ id: 'pan', name: 'Pan', icon: Hand }] },
+  { label: 'Regions of Interest', tools: [
+    { id: 'rectangle', name: labels.rectangle, icon: SquareDashed },
+    { id: 'ellipse', name: labels.ellipse, icon: EllipseIcon },
+    { id: 'polygon', name: labels.polygon, icon: PolygonIcon },
+    { id: 'brush', name: labels.brush, icon: Pencil },
+    { id: 'preset', name: 'Calibrated ROI Preset', icon: Scan },
+  ] },
+  { label: 'Markers and Measurements', tools: [
+    { id: 'point', name: labels.point, icon: CircleDot },
+    { id: 'arrow', name: labels.arrow, icon: ArrowUpRight },
+    { id: 'distance', name: labels.distance, icon: Ruler },
+    { id: 'path', name: 'Multi-segment Distance', icon: Spline },
+    { id: 'count', name: labels.count, icon: Tally5 },
+  ] },
+] as const;
 
 function formatLength(length: number, unit: 'um' | 'px') {
   if (unit === 'um' && length >= 1000) return `${formatter.format(length / 1000)} mm`;
@@ -40,6 +69,26 @@ export function screenToSlide(x: number, y: number, view: Viewport): Point {
 }
 function slideToScreen([x, y]: Point, view: Viewport): Point {
   return [(x - view.x) * view.zoom, (y - view.y) * view.zoom];
+}
+
+function polygonProblem(points: Point[]) {
+  if (new Set(points.map((point) => point.join(','))).size !== points.length) return 'Use a different position for each vertex.';
+  const cross = ([ax, ay]: Point, [bx, by]: Point, [cx, cy]: Point) => (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+  const within = ([x, y]: Point, a: Point, b: Point) => x >= Math.min(a[0], b[0]) && x <= Math.max(a[0], b[0])
+    && y >= Math.min(a[1], b[1]) && y <= Math.max(a[1], b[1]);
+  const edges = points.map((point, index) => [point, points[(index + 1) % points.length]]);
+  for (const [i, [a, b]] of edges.entries()) {
+    for (let j = i + 2; j < edges.length - Number(i === 0); j++) {
+      const [c, d] = edges[j];
+      const ac = cross(a, b, c), ad = cross(a, b, d), ca = cross(c, d, a), cb = cross(c, d, b);
+      if ((ac * ad < 0 && ca * cb < 0) || (ac === 0 && within(c, a, b)) || (ad === 0 && within(d, a, b))
+        || (ca === 0 && within(a, c, d)) || (cb === 0 && within(b, c, d))) return 'Polygon edges cannot cross or touch.';
+    }
+  }
+  const area = edges.reduce((sum, [a, b]) => sum + cross(points[0], a, b), 0);
+  const xs = points.map(([x]) => x), ys = points.map(([, y]) => y);
+  const boundsArea = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
+  return Math.abs(area) <= boundsArea * 1e-12 ? 'The polygon must enclose an area.' : '';
 }
 
 export function useViewerRecords(endpoint: string, enabled: boolean, restore: (camera: Camera) => void) {
@@ -76,8 +125,8 @@ export function useViewerRecords(endpoint: string, enabled: boolean, restore: (c
   function chooseTool(next: Tool) {
     setTool(next);
     setVertices([]);
-    setDraft(undefined);
     setError('');
+    setNotice('');
   }
 
   function complete(kind: Kind, points: Point[], zoom?: number) {
@@ -95,6 +144,7 @@ export function useViewerRecords(endpoint: string, enabled: boolean, restore: (c
   }
 
   function addVertex(point: Point) {
+    setError('');
     setVertices((current) => {
       const last = current.at(-1);
       return current.length < 256 && (!last || last[0] !== point[0] || last[1] !== point[1]) ? [...current, point] : current;
@@ -103,9 +153,12 @@ export function useViewerRecords(endpoint: string, enabled: boolean, restore: (c
 
   const minimum = tool === 'polygon' ? 3 : tool === 'path' ? 2 : 1;
   function finishVertices() {
-    if (hasVertices(tool) && vertices.length >= minimum) {
-      complete(tool === 'path' ? 'distance' : tool as 'polygon' | 'count', vertices);
+    if (!hasVertices(tool) || vertices.length < minimum) return;
+    if (tool === 'polygon') {
+      const problem = polygonProblem(vertices);
+      if (problem) { setError(problem); return; }
     }
+    complete(tool === 'path' ? 'distance' : tool, vertices);
   }
 
   function placePreset([x, y]: Point, info: SlideInfo) {
@@ -183,7 +236,7 @@ export function useViewerRecords(endpoint: string, enabled: boolean, restore: (c
   }
 
   return { records, draft, tool, chooseTool, complete, savePosition, saveAnnotation, edit, remove, capture, error, notice,
-    preset, setPreset, placePreset, vertices, addVertex, finishVertices, minimum, undoVertex: () => setVertices((current) => current.slice(0, -1)),
+    preset, setPreset, placePreset, vertices, addVertex, finishVertices, minimum, undoVertex: () => { setError(''); setVertices((current) => current.slice(0, -1)); },
     busy: busy || loading, refresh: () => setAttempt((value) => value + 1),
     applySaved: () => { if (records?.position) restore(records.position); },
     cancel: () => setDraft(undefined),
@@ -193,39 +246,55 @@ export function useViewerRecords(endpoint: string, enabled: boolean, restore: (c
 
 type ToolState = ReturnType<typeof useViewerRecords>;
 
-export function ViewerToolsBar({ state, view, info }: { state: ToolState; view?: Viewport; info: SlideInfo }) {
-  const { records, tool, chooseTool, busy, savePosition, applySaved } = state;
-  return <div className="image-actions viewer-record-buttons" aria-label="Review Tools">
-    {records?.can_annotate && <>
-      <button className="button secondary" aria-pressed={tool === 'pan'} disabled={busy} onClick={() => chooseTool('pan')}><Hand size={15} aria-hidden="true" />Pan</button>
-      <button className="button secondary" aria-pressed={tool === 'rectangle'} disabled={busy} onClick={() => chooseTool('rectangle')}><Scan size={15} aria-hidden="true" />Rectangular ROI</button>
-      <button className="button secondary" aria-pressed={tool === 'distance'} disabled={busy} onClick={() => chooseTool('distance')}><Ruler size={15} aria-hidden="true" />Distance Measurement</button>
-      <label>Additional Tool <select aria-label="Additional Tool" disabled={busy}
-        value={additionalTools.find((item) => item === tool) ?? ''}
-        onChange={(event) => chooseTool(event.target.value as Tool || 'pan')}>
-        <option value="">Select Tool</option>
-        {additionalTools.map((item) => <option key={item} value={item} disabled={item === 'preset' && !(info.mpp_x && info.mpp_y)}>
-          {item === 'path' ? 'Multi-segment Distance' : item === 'preset' ? 'Calibrated ROI Preset' : labels[item]}
-        </option>)}
-      </select></label>
-      {tool === 'preset' && <label>Preset Size <select value={state.preset} onChange={(event) => state.setPreset(Number(event.target.value))}>
-        {[250, 500, 1000].map((size) => <option key={size} value={size}>{size} × {size} µm</option>)}
-      </select></label>}
-      <button className="button secondary viewer-icon-tool" aria-label="Save Bookmark" title="Save Bookmark" disabled={!view || busy} onClick={() => {
+export function ViewerToolsBar({ state, view, info, onChoose }: { state: ToolState; view?: Viewport; info: SlideInfo; onChoose: (tool: Tool) => void }) {
+  const { records, tool, busy, savePosition, applySaved } = state;
+  return <div className="viewer-record-buttons" role="group" aria-label="Review Tools">
+    {records?.can_annotate && toolGroups.map((group) => <div key={group.label} className="viewer-tool-group" role="group" aria-label={group.label}>
+      {group.tools.map(({ id, name, icon: Icon }) => <button key={id} type="button" className="button secondary viewer-icon-tool"
+        aria-label={name} title={id === 'preset' && !(info.mpp_x && info.mpp_y) ? 'Pixel size unavailable for calibrated presets' : name}
+        aria-pressed={tool === id} disabled={busy || !!state.draft && id !== 'pan' || id === 'preset' && !(info.mpp_x && info.mpp_y)}
+        onClick={() => onChoose(id)}><Icon size={18} aria-hidden="true" /></button>)}
+    </div>)}
+    <div className="viewer-tool-group" role="group" aria-label="Saved Positions">
+      {records?.can_annotate && <button type="button" className="button secondary viewer-icon-tool" aria-label="Save Bookmark" title="Save Bookmark" disabled={!view || busy || !!state.draft || tool !== 'pan'} onClick={() => {
         if (!view) return;
         const x = Math.max(0, Math.min(info.dimensions[0] - 0.001, view.x + view.width / 2));
         const y = Math.max(0, Math.min(info.dimensions[1] - 0.001, view.y + view.height / 2));
         state.complete('bookmark', [[x, y]], view.zoom);
-      }}><Bookmark size={15} aria-hidden="true" /><span>Save Bookmark</span></button>
-
-    </>}
-    <button className="button secondary viewer-icon-tool" aria-label="Save Position" title="Save Position" disabled={!view || !records || busy} onClick={() => { if (view) savePosition(view); }}><MapPin size={15} aria-hidden="true" /><span>Save Position</span></button>
-    <button className="button secondary viewer-icon-tool" aria-label="Restore Saved Position" title="Restore Saved Position" disabled={!records?.position || busy} onClick={applySaved}><LocateFixed size={15} aria-hidden="true" /><span>Restore Saved Position</span></button>
+      }}><Bookmark size={18} aria-hidden="true" /></button>}
+      <button type="button" className="button secondary viewer-icon-tool" aria-label="Save Position" title="Save Position" disabled={!view || !records || busy || tool !== 'pan'} onClick={() => { if (view) savePosition(view); }}><MapPin size={18} aria-hidden="true" /></button>
+      <button type="button" className="button secondary viewer-icon-tool" aria-label="Restore Saved Position" title="Restore Saved Position" disabled={!records?.position || busy} onClick={applySaved}><LocateFixed size={18} aria-hidden="true" /></button>
+    </div>
   </div>;
 }
 
-export function AnnotationOverlay({ view, annotations, draft, drawing }: {
-  view?: Viewport; annotations: Mark[]; draft?: Draft; drawing?: Geometry;
+export function DrawingControls({ state, shortcuts }: { state: ToolState; shortcuts: boolean }) {
+  const { tool, vertices, minimum } = state;
+  if (tool === 'pan') return null;
+  const name = tool === 'path' ? 'Multi-segment Distance' : tool === 'preset' ? 'Calibrated ROI Preset' : labels[tool];
+  const instructions = tool === 'polygon' ? 'Click to add vertices. Click the first vertex to close the shape.'
+    : hasVertices(tool) ? 'Click the slide to add points.'
+    : tool === 'point' || tool === 'preset' ? 'Click the slide to place the annotation.'
+    : 'Drag on the slide to draw.';
+  return <div className="viewer-drawing-controls" role="group" aria-label="Drawing Controls">
+    <div><strong>{name}</strong>{hasVertices(tool) && <span className="drawing-point-count" aria-live="polite">{vertices.length} / 256 points</span>}</div>
+    <p>{instructions}{hasVertices(tool) && shortcuts && ' Press Enter when ready.'}</p>
+    {state.error && <p className="drawing-error" role="alert">{state.error}</p>}
+    {tool === 'preset' && <label>Preset Size <select value={state.preset} onChange={(event) => state.setPreset(Number(event.target.value))}>
+      {[250, 500, 1000].map((size) => <option key={size} value={size}>{size} × {size} µm</option>)}
+    </select></label>}
+    <div className="actions">
+      {hasVertices(tool) && <>
+        <button type="button" className="button secondary" disabled={!vertices.length} onClick={state.undoVertex}><Undo2 size={15} /> Undo Point</button>
+        <button type="button" className="button primary" disabled={vertices.length < minimum} onClick={state.finishVertices}><Check size={15} /> {tool === 'polygon' ? 'Close Polygon' : 'Finish Points'}</button>
+      </>}
+      <button type="button" className="icon-button" title="Cancel Drawing" aria-label="Cancel Drawing" onClick={() => state.chooseTool('pan')}><X size={17} /></button>
+    </div>
+  </div>;
+}
+
+export function AnnotationOverlay({ view, annotations, draft, drawing, guide, closeHint }: {
+  view?: Viewport; annotations: Mark[]; draft?: Draft; drawing?: Geometry; guide?: Point; closeHint?: boolean;
 }) {
   if (!view || (!annotations.length && !draft && !drawing)) return null;
   const display = (item: Geometry, preview: boolean, key: string, caption?: string) => {
@@ -249,6 +318,16 @@ export function AnnotationOverlay({ view, annotations, draft, drawing }: {
       </g>;
     }
     const path = points.map((point) => point.join(',')).join(' ');
+    if (item.kind === 'polygon' && key === 'drawing') {
+      const [lastX, lastY] = points.at(-1)!;
+      const [guideX, guideY] = closeHint ? points[0] : guide ? slideToScreen(guide, view) : points.at(-1)!;
+      return <g key={key} data-record={key}>
+        <polyline className="polygon-outline" points={path} />
+        {guide && <line className="polygon-guide" x1={lastX} y1={lastY} x2={guideX} y2={guideY} />}
+        {points.map(([x, y], index) => <circle key={index} className={index === 0 && points.length >= 3 ? 'polygon-start' : 'polygon-vertex'}
+          cx={x} cy={y} r={index === 0 && points.length >= 3 ? (closeHint ? 8 : 6) : 3.5} />)}
+      </g>;
+    }
     if (item.kind === 'polygon' && points.length >= 3) return <polygon key={key} data-record={key} className={style} points={path} />;
     return <g key={key}>
       {item.kind === 'distance' && points.length === 2
@@ -264,25 +343,22 @@ export function AnnotationOverlay({ view, annotations, draft, drawing }: {
   </svg>;
 }
 
-export function ViewerRecordsPanel({ state, info, move, searchHref }: {
-  state: ToolState; info: SlideInfo; move: (points: Point[], zoom?: number | null) => void; searchHref?: (id: string) => string;
+export function ViewerRecordsPanel({ state, info, move, searchHref, onClose }: {
+  state: ToolState; info: SlideInfo; move: (points: Point[], zoom?: number | null) => void; searchHref?: (id: string) => string; onClose?: () => void;
 }) {
   const { records, draft, tool, error, busy, notice } = state;
   const [includeAnnotation, setIncludeAnnotation] = useState(true);
   const [includeScale, setIncludeScale] = useState(!!info.mpp_x);
+  const [newestFirst, setNewestFirst] = useState(true);
+  const annotations = newestFirst ? records?.annotations.slice().reverse() : records?.annotations;
   const [editing, setEditing] = useState<{ mark: Mark; label: string }>();
   return <section className="viewer-record-panel" aria-label="Review Position and Annotations">
-    <h2>Review Position and Annotations</h2>
-    {error && <div className="notice" role="alert">{error}<button className="button secondary" disabled={busy} onClick={() => { setEditing(undefined); state.refresh(); }}>Refresh Saved Records</button></div>}
+    <div className="viewer-record-heading"><h2>Annotations</h2>
+      {onClose && <button type="button" className="icon-button" aria-label="Close Annotations" title="Close Annotations" onClick={onClose}><X size={18} /></button>}
+    </div>
+    {error && tool === 'pan' && <div className="notice" role="alert">{error}<button className="button secondary" disabled={busy} onClick={() => { setEditing(undefined); state.refresh(); }}>Refresh Saved Records</button></div>}
     {notice && <p role="status">{notice}</p>}
     {records?.position && <p>Saved Position {date.format(new Date(records.position.saved_at))}</p>}
-    {tool !== 'pan' && <p role="status">{hasVertices(tool) ? `Click the image to add points · ${state.vertices.length}`
-      : tool === 'point' || tool === 'preset' ? 'Click the image to place the annotation.'
-        : 'Drag from the start point to the end point on the image.'}</p>}
-    {hasVertices(tool) && <div className="actions">
-      <button className="button secondary" disabled={!state.vertices.length} onClick={state.undoVertex}>Undo Point</button>
-      <button className="button primary" disabled={state.vertices.length < state.minimum} onClick={state.finishVertices}>Finish Points</button>
-    </div>}
     {records?.can_export && records.annotations.some((item) => exportable.has(item.kind)) && <fieldset className="roi-export-options">
       <legend>ROI Export Options</legend>
       <label><input type="checkbox" checked={includeAnnotation} onChange={(event) => setIncludeAnnotation(event.target.checked)} /> Include ROI Annotation</label>
@@ -294,7 +370,11 @@ export function ViewerRecordsPanel({ state, info, move, searchHref }: {
       <div className="actions"><button className="button primary" disabled={busy}>Save Annotation</button>
         <button className="button secondary" type="button" disabled={busy} onClick={state.cancel}>Cancel</button></div>
     </form>}
-    {records?.annotations.length ? <ul className="viewer-record-list">{records.annotations.map((item) => <li key={item.id}>
+    {!!annotations?.length && <label className="annotation-order">Sort by <select value={newestFirst ? 'newest' : 'oldest'}
+      onChange={(event) => setNewestFirst(event.target.value === 'newest')}>
+      <option value="newest">Newest First</option><option value="oldest">Oldest First</option>
+    </select></label>}
+    {annotations?.length && records ? <ul className="viewer-record-list">{annotations.map((item) => <li key={item.id}>
       <div><strong>{item.label || labels[item.kind]}</strong>
         {item.kind === 'count' && <span> · {item.points.length} points</span>}
         {item.length !== null && item.unit && <span> · {formatLength(item.length, item.unit)}{item.unit === 'px' && ' (Pixel size unavailable)'}</span>}

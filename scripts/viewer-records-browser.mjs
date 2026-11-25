@@ -78,6 +78,7 @@ try {
 
   for (let click = 0; click < 4; click++) await page.getByRole('button',{name:'Zoom In',exact:true}).click();
   await page.waitForFunction((width) => Math.abs(Number(document.querySelector('rect.annotation-roi')?.getAttribute('width')) / width - 1.4 ** 4) < .001, initialWidth);
+  await page.getByRole('button', { name: 'Close Annotations', exact: true }).click();
   await canvas.scrollIntoViewIfNeeded();
   const area = await canvas.boundingBox();
   await page.mouse.move(area.x+area.width/2,area.y+area.height/2);
@@ -94,6 +95,7 @@ try {
 
   const viewerHash = page.url();
   await page.reload();
+  await page.getByRole('button', { name: 'Annotations', exact: true }).click();
   await page.getByText('Synthetic distance',{exact:true}).waitFor();
   await page.waitForFunction((attributes) => {
     const roi = document.querySelector('rect.annotation-roi');
@@ -102,12 +104,15 @@ try {
   }, {x:displayX,width:displayWidth});
   assert.deepEqual((await records()).position,read.position);
   await page.locator('.viewer-tray').getByRole('button',{name:/SYNTH-01.*SVS/}).click();
+  await page.getByRole('button', { name: 'Annotations', exact: true }).click();
   await page.getByText('No saved annotations.',{exact:true}).waitFor();
   await page.locator('rect.annotation-roi').waitFor({state:'detached'});
   await page.goto(viewerHash);
+  await page.getByRole('button', { name: 'Annotations', exact: true }).click();
   await page.getByText('Synthetic ROI',{exact:true}).waitFor();
   await page.getByRole('button',{name:'Sign Out',exact:true}).click();
   await signIn();
+  await page.getByRole('button', { name: 'Annotations', exact: true }).click();
   await page.getByText('Synthetic distance',{exact:true}).waitFor();
   assert.equal(await page.locator('.annotation-length').textContent(),readable);
   assert.deepEqual((await records()).annotations.find(a=>a.kind==='distance').points,distance.points);

@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
-import { AlertTriangle, LocateFixed, Map, Minus, Pause, Play, Plus, ScanLine } from 'lucide-react';
+import { AlertTriangle, List, LocateFixed, Map, Minus, Pause, Play, Plus, ScanLine } from 'lucide-react';
 import type { WsiScan } from './demo';
 import { api, auditAttemptId, jsonBody, request } from './session';
 import { ViewerAnalysis } from './viewer-analysis';
@@ -13,8 +13,8 @@ import { roiSearchHref } from './roi-search';
 import { LymphCounts } from './lymph-counts';
 import { TileViewer } from './tile-viewer';
 import type { CameraFrame, SlideInfo, Viewport } from './tile-viewer';
-import { AnnotationOverlay, ViewerRecordsPanel, ViewerToolsBar, hasVertices, screenToSlide, useViewerRecords } from './viewer-tools';
-import type { Camera, Geometry, Point } from './viewer-tools';
+import { AnnotationOverlay, DrawingControls, ViewerRecordsPanel, ViewerToolsBar, hasVertices, screenToSlide, useViewerRecords } from './viewer-tools';
+import type { Camera, Geometry, Point, Tool } from './viewer-tools';
 import type { ViewerSettings } from './viewer-preferences';
 import { ScanReference, slideEndpoint } from './worklist';
 
@@ -89,6 +89,10 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   const drag = useRef<{ id: number; x: number; y: number } | null>(null);
   const drawing = useRef<{ id: number; kind: Geometry['kind']; points: Point[] } | null>(null);
   const [preview, setPreview] = useState<Geometry>();
+  const [polygonGuide, setPolygonGuide] = useState<Point>();
+  const [annotationsOpen, setAnnotationsOpen] = useState(false);
+  const annotationsButton = useRef<HTMLButtonElement>(null);
+  const annotationsDock = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<Viewport>();
   const [info, setInfo] = useState<SlideInfo>();
   const [overview, setOverview] = useState('');
@@ -148,6 +152,36 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     }
   }, [compareMode]);
   const viewerRecords = useViewerRecords(endpoint, Boolean(info) && !readOnlyEndpoint, restoreCamera);
+
+  const { tool, draft, notice: recordNotice, error: recordError } = viewerRecords;
+  useEffect(() => {
+    if (draft || recordNotice || (recordError && tool === 'pan')) setAnnotationsOpen(true);
+  }, [draft, recordNotice, recordError, tool]);
+
+  useEffect(() => {
+    if (draft && annotationsOpen && window.matchMedia('(max-width: 760px)').matches) {
+      annotationsDock.current?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [draft?.id, annotationsOpen]);
+
+  function chooseReviewTool(next: Tool) {
+    setAutopan(false);
+    ihc.setPicking(false);
+    skin.setMode(undefined);
+    setPolygonGuide(undefined);
+    viewerRecords.chooseTool(next);
+    if (next !== 'pan') {
+      setAnnotationsOpen(false);
+      if (analysis?.open) analysis.change(false);
+    }
+    canvas.current?.focus({ preventScroll: true });
+  }
+
+  function nearPolygonStart(point: Point) {
+    if (!view || tool !== 'polygon' || viewerRecords.vertices.length < 3) return false;
+    const [x, y] = viewerRecords.vertices[0];
+    return Math.hypot(point[0] - x, point[1] - y) * view.zoom <= 10;
+  }
 
   function cameraFor(points: Point[], view: Viewport, savedZoom?: number | null): Camera {
     const xs = points.map(([x]) => x);
@@ -345,8 +379,12 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
 
   const minimap = settings?.show_minimap ?? showNavigator;
   const toggleMinimap = options?.toggleMinimap ?? (() => setShowNavigator(!showNavigator));
-  const reviewTools = info && !compareMode && !readOnlyEndpoint && !following
-    ? <ViewerToolsBar state={viewerRecords} view={view} info={info} /> : null;
+  const canReview = info && !compareMode && !readOnlyEndpoint && !following;
+  const reviewTools = canReview && <ViewerToolsBar state={viewerRecords} view={view} info={info} onChoose={chooseReviewTool} />;
+  const recordsPanel = canReview && <ViewerRecordsPanel state={viewerRecords} info={info}
+    onClose={options ? () => { setAnnotationsOpen(false); annotationsButton.current?.focus({ preventScroll: true }); } : undefined}
+    searchHref={roiCaseId && scan.source === 'clinical' ? (roiId) => roiSearchHref({ caseId: roiCaseId, scanId: scan.id, roiId }) : undefined}
+    move={(points, zoom) => { if (view) navigate((viewer) => viewer.restoreCamera(cameraFor(points, view, zoom))); }} />;
   function closeAnalysis() {
     analysis?.change(false);
     analysisButton.current?.focus({ preventScroll: true });
@@ -359,6 +397,12 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       <div className="image-actions">{analysis && <button type="button" ref={analysisButton} className="button primary"
         aria-expanded={analysis.open} aria-controls={analysis.open ? 'viewer-analysis-panel' : undefined}
         onClick={() => analysis.change(!analysis.open)}>Analysis</button>}{extraAction}
+        {options && canReview && <button type="button" ref={annotationsButton} className="button secondary viewer-annotations-toggle"
+          aria-expanded={annotationsOpen && !analysis?.open}
+          onClick={() => {
+            if (analysis?.open) { analysis.change(false); setAnnotationsOpen(true); }
+            else setAnnotationsOpen(!annotationsOpen);
+          }}><List size={17} aria-hidden="true" /> Annotations{viewerRecords.records?.annotations.length ? <small aria-hidden="true">{viewerRecords.records.annotations.length}</small> : null}</button>}
         {canOpenSlideReview && <button type="button" className="button secondary" aria-expanded={showPapReview}
           onClick={() => setShowPapReview((open) => !open)}>Pap Review</button>}
         {canOpenSlideReview && <button type="button" className="button secondary" aria-expanded={showPap}
@@ -381,7 +425,8 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     </div>
     {!options && reviewTools}
     <div className={showPap ? 'analysis-workspace pap-workspace' : 'analysis-workspace'}>
-    <div className="image-surface">
+    {options && reviewTools && <div className="viewer-tool-dock">{reviewTools}</div>}
+    <div className="image-surface" data-review-dock={Boolean(options && reviewTools)}>
       <canvas className={viewerRecords.tool === 'pan' && !ihc.picking && !skin.mode ? 'wsi-canvas' : 'wsi-canvas drawing-tool'} ref={canvas} tabIndex={0} aria-label="WSI Canvas"
         onPointerDown={(event) => {
           if (following || event.button !== 0 || !info || drag.current || drawing.current) return;
@@ -406,7 +451,10 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
           if (tool !== 'pan') {
             const start = getPoint(event, false);
             if (!start) return;
-            if (hasVertices(tool)) viewerRecords.addVertex(start);
+            if (hasVertices(tool)) {
+              if (nearPolygonStart(start)) viewerRecords.finishVertices();
+              else viewerRecords.addVertex(start);
+            }
             else if (tool === 'preset') viewerRecords.placePreset(start, info);
             else if (tool === 'point') viewerRecords.complete('point', [start]);
             else {
@@ -430,11 +478,13 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
             }
             return;
           }
+          if (!following && tool === 'polygon' && viewerRecords.vertices.length) setPolygonGuide(getPoint(event, false) ?? undefined);
           const last = drag.current;
           if (following || !last || last.id !== event.pointerId) return;
           navigate((viewer) => viewer.pan(event.clientX - last.x, event.clientY - last.y));
           drag.current = { id: last.id, x: event.clientX, y: event.clientY };
         }}
+        onPointerLeave={() => setPolygonGuide(undefined)}
         onPointerUp={(event) => {
           const gesture = drawing.current;
           if (gesture?.id !== event.pointerId) return;
@@ -469,8 +519,10 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
             viewerRecords.chooseTool('pan');
             return;
           }
-          if (key === 'enter' && hasVertices(viewerRecords.tool)) {
-            viewerRecords.finishVertices();
+          if (hasVertices(tool) && (key === 'enter' || key === 'backspace')) {
+            event.preventDefault();
+            if (key === 'enter') viewerRecords.finishVertices();
+            else viewerRecords.undoVertex();
             return;
           }
           if (options && ['f', 'm', 'g', ' '].includes(key)) {
@@ -501,7 +553,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
           width={(pap.selected.bounds[2] - pap.selected.bounds[0]) * view.zoom}
           height={(pap.selected.bounds[3] - pap.selected.bounds[1]) * view.zoom} />
       </svg>}
-      <AnnotationOverlay view={view} annotations={viewerRecords.records?.annotations ?? []} draft={viewerRecords.draft} drawing={preview ?? (viewerRecords.vertices.length ? {
+      <AnnotationOverlay view={view} annotations={viewerRecords.records?.annotations ?? []} draft={viewerRecords.draft} guide={polygonGuide} closeHint={!!polygonGuide && nearPolygonStart(polygonGuide)} drawing={preview ?? (viewerRecords.vertices.length ? {
         kind: viewerRecords.tool === 'polygon' ? 'polygon' : viewerRecords.tool === 'count' ? 'count' : 'distance',
         points: viewerRecords.vertices,
       } : undefined)} />
@@ -529,11 +581,12 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         </div>}
       </aside>}
       {info && <ScaleBar mpp={info.mpp_x} zoom={view?.zoom} />}
+      {canReview && <DrawingControls state={viewerRecords} shortcuts={settings?.shortcuts !== false} />}
     </div>
     {canOpenSlideReview && showPap && <Suspense fallback={<p role="status">Loading Pap Gallery…</p>}>
       <PapGallery state={pap} following={following} />
     </Suspense>}
-    {options && reviewTools && <div className="viewer-tool-dock">{reviewTools}</div>}
+    {options && annotationsOpen && !analysis?.open && recordsPanel && <div className="viewer-annotations-dock" ref={annotationsDock}>{recordsPanel}</div>}
     {analysis?.open && <ViewerAnalysis caseEndpoint={analysis.caseEndpoint} scanId={scan.id} label={label} stain={stain}
       onClose={closeAnalysis} onResult={(id) => {
         pdl1.setSelected(id);
@@ -569,9 +622,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         canvas.current?.scrollIntoView({ block: 'nearest' });
       }} />}
     {roiUnavailable && <p className="notice" role="status">The linked ROI is unavailable. The scan is still open.</p>}
-    {info && !compareMode && !readOnlyEndpoint && !following && <ViewerRecordsPanel state={viewerRecords} info={info}
-      searchHref={roiCaseId && scan.source === 'clinical' ? (roiId) => roiSearchHref({ caseId: roiCaseId, scanId: scan.id, roiId }) : undefined}
-      move={(points, savedZoom) => { if (view) navigate((viewer) => viewer.restoreCamera(cameraFor(points, view, savedZoom))); }} />}
+    {!options && recordsPanel}
     {info && !compareMode && !readOnlyEndpoint && scan.source === 'clinical' && viewerRecords.records?.can_annotate &&
       <LymphCounts endpoint={endpoint} />}
     {info && !compareMode && !readOnlyEndpoint && <Pdl1Panel state={pdl1} />}

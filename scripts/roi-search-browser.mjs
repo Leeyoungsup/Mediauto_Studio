@@ -42,6 +42,7 @@ try {
 
   async function openSearch(roi) {
     await page.goto(roi.url);
+    await button(page, 'Annotations').click();
     const item = archived.getByRole('listitem').filter({ hasText: roi.name });
     await item.getByRole('link', { name: 'Find Similar ROIs', exact: true }).click();
     await page.getByRole('heading', { name: 'ROI Similarity Search', exact: true }).waitFor();
