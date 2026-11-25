@@ -1,23 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowDown, ArrowRight, ArrowUp, CheckCircle2, CircleDashed, Columns3, Files, FolderOpen, Layers3, PanelRightClose, PanelRightOpen, Plus, ScanLine, Search, UserRoundCheck, X } from 'lucide-react';
+import { ArrowRight, CheckCircle2, CircleDashed, Columns3, Files, FolderOpen, PanelRightClose, PanelRightOpen, Plus, ScanLine, Search, UserRoundCheck, X } from 'lucide-react';
 import { readyCount, statuses } from './demo';
 import type { CaseStatus, DemoCase, Slide } from './demo';
 import type { Assignee, Counts, WorklistQuery } from './worklist-api';
 
 import { columns, defaultColumns, defaultOrder, loadLegacyColumns, normalizeColumns } from './worklist-config';
-import type { ColumnId, ColumnSetting, Preferences, Scope, SortTerm, ViewConfig } from './worklist-config';
+import type { ColumnSetting, Preferences, Scope, ViewConfig } from './worklist-config';
 import { SavedViewControls, SortControls, useSavedViews } from './worklist-preferences';
 import { stateLabel, states } from './worklist-api';
-import { QueueNavigation, Workload, priorityLabels } from './workgroups';
+import { QueueNavigation, Workload } from './workgroups';
 import type { AssignmentLoad, Queue } from './workgroups';
-import { MoreFilters, normalizeFilters, sexLabels, slideStates } from './worklist-filters';
+import { MoreFilters, normalizeFilters } from './worklist-filters';
 import type { AdvancedFilters } from './worklist-filters';
 
-export type { Scope } from './worklist-config';
+import { ColumnPicker, StatusLabel, columnValue } from './worklist-columns';
+import { WorklistColumnPreview } from './worklist-column-preview';
 
-export function StatusLabel({ status }: { status: CaseStatus }) {
-  return <span className={`status-pill status-${statuses.indexOf(status)}`}><span />{status}</span>;
-}
+export { StatusLabel } from './worklist-columns';
+export type { Scope } from './worklist-config';
 
 export function slideEndpoint(scan: NonNullable<Slide['wsi']>) {
   return `/api/wsi/${scan.source}/${scan.id}`;
@@ -32,46 +32,6 @@ export function SlidePreview({ slide }: { slide: Slide }) {
   return slide.wsi && !failed
     ? <img src={slideEndpoint(slide.wsi) + '/overview.jpeg?size=160'} loading="lazy" alt="" onError={() => setFailed(true)} />
     : <ScanLine size={24} aria-hidden="true" />;
-}
-
-const worklistDate = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', dateStyle: 'medium', timeStyle: 'short' });
-
-function columnValue(item: DemoCase, id: ColumnId) {
-  const data = item.worklist;
-  const provenance = item.source === 'files' ? 'File Registration' : 'IMS Clinical Record';
-  const blank = <span className="muted" title="Not recorded or not available">—<span className="sr-only">Not available</span></span>;
-  const value = (text: string | number | null | undefined, source = provenance) =>
-    text != null && text !== '' ? <span title={source}>{text}</span> : blank;
-  const dateValue = (text: string | null | undefined, source: string) => value(text && worklistDate.format(new Date(text)), source);
-  const patientSource = item.patient?.source === 'manual' ? 'Manual Patient Record' : item.patient?.source ?? provenance;
-  switch (id) {
-    case 'specimen': return item.specimen === 'Not Entered' ? blank : value(item.specimen);
-    case 'assignee': return value(item.assignee || 'Unassigned', 'IMS Case Assignment');
-    case 'status': return <span title="IMS Review Workflow"><StatusLabel status={item.status} /></span>;
-    case 'slides': return <span className="slide-count" title={provenance}><Layers3 size={14} />{item.source === 'files' ? `${item.slides.length} files` : `${readyCount(item)}/${item.slides.length}`}</span>;
-    case 'received': return dateValue(data?.accessioned_at, 'Locally Entered Accession Time');
-    case 'created': return dateValue(data?.created_at, item.source === 'files' ? 'File Registration Update' : 'IMS Registration Timestamp');
-    case 'collected': return value(data?.collection_date, 'Earliest Recorded Specimen Collection Date');
-    case 'lastOpened': return dateValue(data?.last_opened, 'Your Last Case or Viewer Open');
-    case 'patient': return value(item.patient?.name, patientSource);
-    case 'mrn': return value(item.patient?.number, data?.mrns?.map(({ value, source }) => `${value}: ${source}`).join(' · ') || 'Linked External MRN');
-    case 'localPatientId': return value(item.patient?.localRef, patientSource);
-    case 'birth': return value(item.patient?.birth, patientSource);
-    case 'sex': return value(item.patient?.sex ? sexLabels[item.patient.sex] : null, patientSource);
-    case 'age': return value(data?.age, 'Completed Years at Earliest Recorded Collection Date');
-    case 'group': return value(data?.group_name, 'IMS Workgroup Classification');
-    case 'priority': return data?.priority
-      ? <span className={`priority-badge priority-${data.priority}`} title={data.priority_source === 'manual' ? 'Manual Classification' : 'IMS Classification'}>{priorityLabels[data.priority]}</span>
-      : blank;
-    case 'slideState': return value(data?.slide_state?.map((key) => slideStates[key]).join(' · '), provenance);
-    case 'lis': return value(data?.lis_data === 'conflict' ? 'Conflicting Sources' : data?.lis_status,
-      data?.lis_sources?.map(({ value, source, received_at }) => `${value} · ${source} · ${worklistDate.format(new Date(received_at))}`).join('; ') || 'No Linked LIS Status');
-    case 'storage': return value(data?.has_storage ? 'Local WSI' : null, 'Registered Scan Location');
-    case 'requests': return value(data?.request_count, 'IMS Case Requests');
-    case 'notes': return value(data?.review_note, 'Latest IMS Review Note');
-    case 'source': return value(provenance);
-    default: return <span className="muted" title="Workflow not yet available">—<span className="sr-only">Not yet available</span></span>;
-  }
 }
 
 type Props = {
@@ -105,6 +65,7 @@ export function Worklist({ cases, loading, total, counts, filteredCounts, queues
   const [order, setOrder] = useState(defaultOrder);
   const [offset, setOffset] = useState(0);
   const [columnSettings, setColumnSettings] = useState(defaultColumns);
+  const [showColumnPreview, setShowColumnPreview] = useState(false);
   const [columnSearch, setColumnSearch] = useState('');
   const [previewVisible, setPreviewVisible] = useState(true);
   const edited = useRef(false);
@@ -129,12 +90,6 @@ export function Worklist({ cases, loading, total, counts, filteredCounts, queues
     assigned_to: assignee || null, order, filters, columns: columnSettings };
   useEffect(() => setOffset(0), [scope]);
   useEffect(() => onQuery({ q: search, status, assignee, order, filters, offset }), [search, status, assignee, order, filters, offset, onQuery]);
-
-  function moveColumn(index: number, offset: number) {
-    const next = [...columnSettings];
-    [next[index], next[index + offset]] = [next[index + offset], next[index]];
-    setColumnSettings(next);
-  }
 
   const selected = cases.find(({ id }) => current?.id === id) ?? cases[0];
   const metrics = [
@@ -163,6 +118,7 @@ export function Worklist({ cases, loading, total, counts, filteredCounts, queues
   return <>
     <div className="page-heading worklist-heading"><h1>Worklist</h1>
       <div className="actions">
+        <button type="button" className="button secondary" onClick={() => setShowColumnPreview(true)}><Columns3 size={16} /> Column Preview</button>
         <button type="button" className="button secondary" aria-controls="worklist-preview" aria-expanded={previewVisible}
           onClick={() => setPreviewVisible(!previewVisible)}>
           {previewVisible ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
@@ -171,6 +127,8 @@ export function Worklist({ cases, loading, total, counts, filteredCounts, queues
         {onRegister && <button className="button primary" onClick={onRegister}><Plus size={17} /> Register Case</button>}
       </div>
     </div>
+    {showColumnPreview && <WorklistColumnPreview currentColumns={columnSettings} onClose={() => setShowColumnPreview(false)}
+      onApply={(settings) => { edited.current = true; setColumnSettings(settings); setShowColumnPreview(false); }} />}
     <QueueNavigation queues={queues} active={activeQueue} isAdmin={mayShare} onSelect={selectQueue} onChanged={onQueueChanged} />
     <SavedViewControls controller={saved} configuration={configuration} mayShare={mayShare} />
     <div className="worklist-layout" data-preview={previewVisible}>
@@ -193,14 +151,8 @@ export function Worklist({ cases, loading, total, counts, filteredCounts, queues
             onSave={() => saved.saveOrder(order)} busy={saved.busy || !saved.ready}
             onClear={saved.preferences.sort_order ? () => saved.saveOrder(null) : undefined} />
           <details className="column-menu"><summary className="button secondary"><Columns3 size={15} /> Columns</summary><div className="column-options">
-            <label className="search-field"><Search size={14} /><input aria-label="Search Columns" placeholder="Search Columns" value={columnSearch} onChange={(event) => setColumnSearch(event.target.value)} /></label>
-            <div className="column-list">{columnSettings.map(({ id, visible }, index) => {
-              const label = columns.find((column) => column.id === id)!.label;
-              if (!label.toLowerCase().includes(columnSearch.trim().toLowerCase())) return null;
-              return <div className="column-row" key={id}><label><input type="checkbox" checked={visible} onChange={() => setColumnSettings(columnSettings.map((column) => column.id === id ? { id, visible: !visible } : column))} />{label}</label>
-                <button className="icon-button" aria-label={`${label} up`} disabled={index === 0} onClick={() => moveColumn(index, -1)}><ArrowUp size={14} /></button>
-                <button className="icon-button" aria-label={`${label} down`} disabled={index === columnSettings.length - 1} onClick={() => moveColumn(index, 1)}><ArrowDown size={14} /></button></div>;
-            })}</div><button className="button secondary" onClick={() => { setColumnSettings(defaultColumns); setColumnSearch(''); }}>Restore Default Columns</button>
+            <ColumnPicker settings={columnSettings} search={columnSearch} onSearch={setColumnSearch} onChange={setColumnSettings} />
+            <button className="button secondary" onClick={() => { setColumnSettings(defaultColumns); setColumnSearch(''); }}>Restore Default Columns</button>
             <button className="button secondary" onClick={() => setColumnSettings(loadLegacyColumns())}>Import Previous Browser Columns</button>
             <button className="button secondary" disabled={saved.busy || !saved.ready} onClick={() => saved.saveColumns(columnSettings)}>Save My Default Columns</button>
           </div></details>

@@ -742,3 +742,15 @@ dialog::backdrop { background: #21193575; }
 .viewer-analysis-runs { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
 .viewer-analysis-runs li { padding: 9px; border: 1px solid var(--line); border-radius: 8px; }
 .viewer-analysis-runs li > div { font-size: 12px; margin-top: 6px; }
+
+.column-preview-dialog { width: min(1150px, calc(100% - 24px)); max-height: calc(100dvh - 24px); padding: 16px; }
+.column-preview-dialog > p { margin: 10px 0; }
+.column-preview-actions { margin: 12px 0; flex-wrap: wrap; }
+.column-preview-actions .column-options { left: 0; right: auto; min-width: min(280px, 80vw); }
+.column-preview-dialog .table-scroll { border: 1px solid var(--line); border-radius: 8px; }
+.column-preview-dialog table th:first-child,
+.column-preview-dialog table td:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); }
+.column-preview-dialog table tr.selected-row td:first-child { background: var(--accent-soft); }
+.column-preview-case { margin-top: 14px; }
+.column-preview-slides { display: flex; flex-wrap: wrap; gap: 8px; margin: 7px 0; padding: 0; list-style: none; }
+.column-preview-slides li { padding: 5px 9px; border: 1px solid var(--line); border-radius: 6px; }

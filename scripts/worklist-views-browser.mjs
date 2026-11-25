@@ -227,7 +227,43 @@ try {
     data: { patient_name: 'Synthetic Advanced', age_max: 17 },
   })).json()).total, 0);
   assert.deepEqual(errors, []);
-  console.log('PASS: Worklist saved views across browser sessions, column order/preferences, sorting with filters and pagination, shared-view RBAC, advanced filters and provenance, and sort restore');
+  const beforePreview = await table(restored).getByRole('columnheader').allTextContents();
+  await button(restored, 'Column Preview').click();
+  const preview = restored.getByRole('dialog', { name: 'Worklist Column Preview', exact: true });
+  const sampleTable = preview.getByRole('table', { name: 'Sample Worklist', exact: true });
+  const sampleHeadings = await sampleTable.getByRole('columnheader').allTextContents();
+  assert.equal(sampleHeadings.length, 25);
+  const sampleRow = (id) => sampleTable.getByRole('row').filter({ hasText: id });
+  await sampleRow('SAMPLE-001').getByRole('cell', { name: 'TEST-MRN-01', exact: true }).waitFor();
+  await sampleRow('SAMPLE-002').getByRole('cell', { name: 'QC Blocked · Missing Scan', exact: true }).waitFor();
+  await sampleRow('SAMPLE-002').getByRole('cell', { name: '0', exact: true }).waitFor();
+  await sampleRow('SAMPLE-003').getByRole('cell', { name: 'Conflicting Sources', exact: true }).waitFor();
+  await sampleRow('SAMPLE-004').getByRole('cell', { name: 'File Registration', exact: true }).waitFor();
+  await button(preview, 'SAMPLE-001').click();
+  await preview.getByText(/NDPI · Viewable/).waitFor();
+  await preview.getByText(/SVS · Viewable/).waitFor();
+  await preview.getByText(/Tags and Comments are not connected/).waitFor();
+  await preview.getByText('Test Columns', { exact: true }).click();
+  await preview.getByRole('textbox', { name: 'Search Columns', exact: true }).fill('patient name');
+  await preview.getByRole('checkbox', { name: 'Patient Name', exact: true }).uncheck();
+  assert.equal(await sampleTable.getByRole('columnheader', { name: 'Patient Name', exact: true }).count(), 0);
+  await preview.getByRole('checkbox', { name: 'Patient Name', exact: true }).check();
+  await button(preview, 'Patient Name up').click();
+  assert.equal((await sampleTable.getByRole('columnheader').allTextContents())[5], 'Patient Name');
+  await button(preview, 'Close Preview').click();
+  assert.deepEqual(await table(restored).getByRole('columnheader').allTextContents(), beforePreview);
+  assert.equal(await table(restored).getByText('SAMPLE-001', { exact: true }).count(), 0);
+
+  await button(restored, 'Column Preview').click();
+  await button(preview, 'Restore Default Columns').click();
+  assert.equal(await sampleTable.getByRole('columnheader').count(), 6);
+  await button(preview, 'Use Current Worklist Columns').click();
+  assert.deepEqual(await sampleTable.getByRole('columnheader').allTextContents(), beforePreview.slice(0, -1));
+  await button(preview, 'Show All Columns').click();
+  await button(preview, 'Apply Columns to Worklist').click();
+  assert.deepEqual(await table(restored).getByRole('columnheader').allTextContents(), [...sampleHeadings, 'Open']);
+
+  console.log('PASS: Worklist views, sorting, provenance, role scope, and isolated sample column preview and apply');
 } finally {
   await browser.close();
 }

@@ -24,6 +24,8 @@ Worklist에서 등록한 케이스는 개발 PostgreSQL에 저장됩니다.
 
 Worklist에서는 **Hide Case Preview**로 목록을 넓힐 수 있습니다. WSI 뷰어는 탐색 메뉴를 기본으로 접고, **Hide Slide Tray**로 이미지 영역을 더 넓힐 수 있습니다. 탐색 메뉴는 상단 아이콘에서 다시 펼칩니다.
 
+**Worklist → Column Preview**에서 합성 케이스 4건의 슬라이드 메타데이터와 24개 선택 컬럼을 확인합니다. **Test Columns**에서 검색·표시·숨김·순서를 시험합니다. **Apply Columns to Worklist**는 현재 목록의 컬럼만 바꾸며, 기본값으로 저장할 때는 목록의 **Columns → Save My Default Columns**를 사용합니다.
+
 ### 예제 슬라이드 등록
 
 `Worklist → Slide Registration`은 `data/`의 NDPI·SVS를 읽기 전용으로 검색합니다. `Settings → Filename Rules`에서 규칙을 작성하거나 CODIPAI 예제를 불러온 뒤 `Preview → Save Rules → Apply to Unregistered Slides`을 실행합니다. 규칙 미일치 파일은 `Unregistered Slides`에서 Case ID와 Slide ID를 직접 등록할 수 있습니다.
