@@ -287,11 +287,12 @@ curl -b "$MEDIAUTO_COOKIE_JAR" 'http://127.0.0.1:9920/api/clinical/local/cases?u
 
 ### 실행 상태와 중지
 
-`./start.sh`는 `mediauto-studio` Conda 환경을 찾아 사용자 서비스로 시작합니다. 이 프로젝트의 서비스가 이미 실행 중이면 종료한 뒤 9920 포트에서 다시 시작하고, 헬스 체크가 통과하면 접속 주소를 출력합니다. 사용자 systemd를 사용할 수 없는 환경에서는 현재 터미널에서 실행되며 `Ctrl+C`로 중지합니다.
+`./start.sh`는 `mediauto-studio` Conda 환경으로 서비스를 시작하거나 재시작합니다. 헬스 체크가 통과하면 9920 접속 주소를 출력하고 터미널에 서버 로그를 이어 표시합니다. 사용자 systemd로 실행 중이면 `Ctrl+C`는 로그 보기를 종료하며 서버는 계속 실행됩니다. 사용자 systemd가 없는 환경에서는 같은 터미널에서 서버가 실행되고 `Ctrl+C`로 중지합니다.
 
 ```bash
+./start.sh --detach  # 서비스 시작 후 터미널 프롬프트로 복귀
+./start.sh --logs    # 이미 실행 중인 서비스의 로그 표시
 systemctl --user status mediauto-studio-dev.service
-journalctl --user -u mediauto-studio-dev.service -f
 systemctl --user stop mediauto-studio-dev.service
 ```
 

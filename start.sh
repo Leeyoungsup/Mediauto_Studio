@@ -3,6 +3,11 @@ set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 unit=mediauto-studio-dev
+mode=${1:-}
+case "$#:$mode" in
+    0:|1:--detach|1:--logs) ;;
+    *) printf 'Usage: %s [--detach | --logs]\n' "$0" >&2; exit 2 ;;
+esac
 export PATH="$HOME/.local/bin:$PATH"
 export MEDIAUTO_HOST="${MEDIAUTO_HOST:-0.0.0.0}"
 
@@ -24,13 +29,30 @@ wait_for_server() {
     return 1
 }
 
+follow_logs() {
+    echo 'Following server logs. Press Ctrl+C to stop viewing logs.'
+    echo "To stop the server: systemctl --user stop $unit.service"
+    exec journalctl --user --unit="$unit.service" --lines=25 --follow --no-pager
+}
+
+finish_start() {
+    wait_for_server
+    if [[ "$mode" != --detach ]]; then
+        follow_logs
+    fi
+}
+
+if [[ "$mode" == --logs ]]; then
+    follow_logs
+fi
+
 if systemctl --user is-active --quiet "$unit.service"; then
     if [[ $(systemctl --user show -p WorkingDirectory --value "$unit.service") != "$root" ]]; then
         echo 'The service is running from a different workspace.' >&2
         exit 1
     fi
     systemctl --user restart "$unit.service"
-    wait_for_server
+    finish_start
     exit
 fi
 
@@ -63,6 +85,10 @@ if [[ ! -f "$root/frontend/dist/index.html" ]]; then
 fi
 
 if ! systemctl --user show --property=Version --value >/dev/null 2>&1; then
+    if [[ "$mode" == --detach ]]; then
+        echo 'Detached mode requires a systemd user session. Run without --detach to start in this terminal.' >&2
+        exit 1
+    fi
     exec /bin/bash "$root/scripts/run-dev.sh"
 fi
 
@@ -71,4 +97,4 @@ if [[ -n ${MEDIAUTO_PG_BIN:-} ]]; then options+=(--setenv="MEDIAUTO_PG_BIN=$MEDI
 systemd-run --user --quiet --collect --unit="$unit" --working-directory="$root" \
     --property=Type=exec --property=KillMode=mixed "${options[@]}" \
     /bin/bash "$root/scripts/run-dev.sh"
-wait_for_server
+finish_start
