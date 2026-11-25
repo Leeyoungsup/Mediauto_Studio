@@ -111,7 +111,8 @@ if ! systemctl --user show --property=Version --value >/dev/null 2>&1; then
 fi
 
 options=(--setenv="CONDA_PREFIX=$CONDA_PREFIX" --setenv="MEDIAUTO_HOST=$MEDIAUTO_HOST"
-    --setenv="MEDIAUTO_PORT=$MEDIAUTO_PORT" --setenv="MEDIAUTO_COOKIE_SECURE=$MEDIAUTO_COOKIE_SECURE")
+    --setenv="MEDIAUTO_PORT=$MEDIAUTO_PORT" --setenv="MEDIAUTO_COOKIE_SECURE=$MEDIAUTO_COOKIE_SECURE"
+    --setenv="MEDIAUTO_DEMO_SESSION_NO_EXPIRY=${MEDIAUTO_DEMO_SESSION_NO_EXPIRY:-0}")
 if [[ -n ${MEDIAUTO_PG_BIN:-} ]]; then options+=(--setenv="MEDIAUTO_PG_BIN=$MEDIAUTO_PG_BIN"); fi
 systemd-run --user --quiet --collect --unit="$unit" --working-directory="$root" \
     --property=Type=exec --property=KillMode=mixed "${options[@]}" \

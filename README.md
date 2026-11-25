@@ -313,6 +313,12 @@ curl --resolve studio.mediauto.dev:9920:127.0.0.1 https://studio.mediauto.dev:99
 
 실행 중인 서비스는 `./start.sh`로 재시작하고 `./start.sh --logs`로 로그를 봅니다. 서비스를 완전히 중지한 뒤 처음 시작할 때는 위 환경 변수를 다시 지정합니다. 기존 HTTP 개발 모드로 되돌리려면 해당 Nginx 설정을 제거하고 `sudo nginx -t` 후 Nginx를 다시 로드한 다음, 사용자 서비스를 중지하고 `./start.sh`로 시작합니다.
 
+### 템플릿 로그인
+
+로그인 폼은 `admin1`을 기본 사용자명으로 표시합니다. 비밀번호 자동 입력에는 브라우저의 저장된 자격 증명을 사용합니다.
+
+HTTPS 템플릿 배포에서 세션 만료를 끄려면 사용자 서비스를 중지한 뒤 Nginx 배포용 실행 명령에 `MEDIAUTO_DEMO_SESSION_NO_EXPIRY=1`을 추가합니다. 이후 HTTPS로 새로 로그인하면 15분 만료가 없는 브라우저 세션 쿠키를 발급합니다. 로그아웃하면 세션이 폐기됩니다. 15분 만료를 복원하려면 서비스를 중지한 뒤 이 옵션 없이 다시 시작합니다.
+
 ### 프런트엔드 수정
 
 API를 실행한 상태에서 `npm --prefix frontend run dev`를 실행합니다. 로컬 Vite 주소 `http://127.0.0.1:5173/`에서 코드 수정이 반영되며, `/api` 요청은 기본적으로 9920으로 전달됩니다. Nginx 배포 모드에서는 `MEDIAUTO_PORT=9921 npm --prefix frontend run dev`로 내부 API에 연결합니다. 배포 화면을 갱신하려면 `npm --prefix frontend run build`로 다시 빌드합니다.

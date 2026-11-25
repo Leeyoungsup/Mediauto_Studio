@@ -22,6 +22,7 @@ WRITERS = ("admin", "labeler")
 COOKIE = "mediauto_session"
 ISSUER = "mediauto-studio"
 SESSION_SECONDS = 15 * 60
+UNLIMITED_SESSION_END = datetime.max.replace(tzinfo=timezone.utc)
 DUMMY_HASH = bcrypt.hashpw(b"nonexistent-account", bcrypt.gensalt(rounds=12))
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
@@ -82,6 +83,14 @@ def access_error() -> HTTPException:
     return HTTPException(401, "Sign in to continue.", headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"})
 
 
+def demo_sessions_enabled(request: Request) -> bool:
+    return (
+        os.environ.get("MEDIAUTO_DEMO_SESSION_NO_EXPIRY") == "1"
+        and os.environ.get("MEDIAUTO_COOKIE_SECURE") == "1"
+        and request.url.scheme == "https"
+    )
+
+
 async def current_user(request: Request, response: Response) -> AuthUser:
     same_origin(request)
     response.headers["Cache-Control"] = "no-store"
@@ -91,7 +100,8 @@ async def current_user(request: Request, response: Response) -> AuthUser:
         raise access_error()
     try:
         claims = jwt.decode(token, request.app.state.auth_key.hex(), algorithms=["HS256"], issuer=ISSUER,
-                            options={"require_exp": True, "require_sub": True, "require_iss": True})
+                            options={"require_exp": scheme.lower() == "bearer" or not demo_sessions_enabled(request),
+                                     "require_sub": True, "require_iss": True})
         if claims.get("type") != "access":
             raise ValueError
         user_id, session_id = UUID(claims["sub"]), UUID(claims["jti"])
@@ -128,6 +138,7 @@ async def login(data: Login, request: Request, response: Response, session: Sess
     response.headers["Cache-Control"] = "no-store"
     key = request.app.state.auth_key
     now = datetime.now(timezone.utc)
+    demo_session = demo_sessions_enabled(request)
     identity = None
     async with session.begin():
         user = await session.scalar(select(AuthUser).where(
@@ -141,14 +152,17 @@ async def login(data: Login, request: Request, response: Response, session: Sess
                 user.locked_until, user.failed_attempts = None, 0
             if matches:
                 user.failed_attempts = 0
-                expires = now + timedelta(seconds=SESSION_SECONDS)
+                expires = UNLIMITED_SESSION_END if demo_session else now + timedelta(seconds=SESSION_SECONDS)
                 session_id = uuid4()
                 await session.execute(delete(AuthSession).where(AuthSession.expires_at <= now))
                 session.add(AuthSession(id=session_id, user_id=user.id, expires_at=expires))
-                token = jwt.encode({
+                claims = {
                     "sub": str(user.id), "role": user.role, "type": "access", "jti": str(session_id),
-                    "iss": ISSUER, "iat": now, "exp": expires,
-                }, key.hex(), algorithm="HS256")
+                    "iss": ISSUER, "iat": now,
+                }
+                if not demo_session:
+                    claims["exp"] = expires
+                token = jwt.encode(claims, key.hex(), algorithm="HS256")
                 identity = user_view(user)
             else:
                 user.failed_attempts += 1
@@ -156,7 +170,7 @@ async def login(data: Login, request: Request, response: Response, session: Sess
                     user.locked_until = now + timedelta(minutes=30)
     if identity is None:
         raise HTTPException(401, "Check your username and password.", headers={"Cache-Control": "no-store"})
-    response.set_cookie(COOKIE, token, max_age=SESSION_SECONDS, httponly=True, samesite="strict",
+    response.set_cookie(COOKIE, token, max_age=None if demo_session else SESSION_SECONDS, httponly=True, samesite="strict",
                         secure=os.environ.get("MEDIAUTO_COOKIE_SECURE") == "1")
     return identity
 

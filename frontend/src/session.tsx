@@ -161,7 +161,7 @@ export function SessionGate({ children }: { children: (user: User, logout: () =>
             <button className="button secondary" type="button" disabled={busy} onClick={() => changeMode(false)}><ArrowLeft size={16} aria-hidden="true" /> Back to Sign In</button>
           </form> : <form key="login" className="login-form" aria-labelledby="auth-heading" onSubmit={(event) => void login(event)}>
             {organizationField}
-            <label className="form-field">Username<input name="username" autoComplete="username" defaultValue={submittedUsername} required maxLength={80} /></label>
+            <label className="form-field">Username<input name="username" autoComplete="username" defaultValue={submittedUsername || 'admin1'} required maxLength={80} /></label>
             <label className="form-field">Password<input name="password" type="password" autoComplete="current-password" required maxLength={256} /></label>
             {error && <p className="form-error" role="alert">{error}</p>}
             <button className="button primary" type="submit" disabled={busy}><LogIn size={16} aria-hidden="true" /> {busy ? 'Checking…' : 'Sign In'}</button>

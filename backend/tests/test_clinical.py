@@ -9,6 +9,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 import httpx
+from jose import jwt
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import DBAPIError
@@ -313,6 +314,31 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.post("/api/auth/logout")).status_code, 200)
         self.assertEqual((await self.client.get("/api/worklist")).status_code, 401)
         self.assertEqual((await self.client.get("/api/worklist", headers={"Authorization": f"Bearer {cookie}"})).status_code, 401)
+
+    async def test_demo_browser_session_can_disable_expiry_and_still_logout(self):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="https://demo.example",
+        ) as browser, httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://localhost",
+        ) as direct:
+            with patch.dict(os.environ, {"MEDIAUTO_COOKIE_SECURE": "1", "MEDIAUTO_DEMO_SESSION_NO_EXPIRY": "0"}):
+                standard = await login(browser, self.org, self.user.username)
+                self.assertIn("Max-Age=900", standard.headers["set-cookie"])
+                self.assertIn("exp", jwt.get_unverified_claims(browser.cookies.get("mediauto_session")))
+            with patch.dict(os.environ, {"MEDIAUTO_COOKIE_SECURE": "1", "MEDIAUTO_DEMO_SESSION_NO_EXPIRY": "1"}):
+                demo = await login(browser, self.org, self.user.username)
+                self.assertIn("Secure", demo.headers["set-cookie"])
+                self.assertIn("HttpOnly", demo.headers["set-cookie"])
+                self.assertNotIn("Max-Age", demo.headers["set-cookie"])
+                token = browser.cookies.get("mediauto_session")
+                self.assertNotIn("exp", jwt.get_unverified_claims(token))
+                self.assertEqual((await browser.get("/api/auth/me")).status_code, 200)
+                self.assertEqual((await browser.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})).status_code, 401)
+                self.assertIn("Max-Age=900", (await login(direct, self.org, self.user.username)).headers["set-cookie"])
+                with patch.dict(os.environ, {"MEDIAUTO_DEMO_SESSION_NO_EXPIRY": "0"}):
+                    self.assertEqual((await browser.get("/api/auth/me")).status_code, 401)
+                self.assertEqual((await browser.post("/api/auth/logout")).status_code, 200)
+                self.assertEqual((await browser.get("/api/auth/me", headers={"Cookie": f"mediauto_session={token}"})).status_code, 401)
 
     async def test_wsi_scan_scope_and_source_errors(self):
         case = await self.create("cases", {"case_number": "WSI-TEST"})
