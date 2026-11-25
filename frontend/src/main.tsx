@@ -9,8 +9,9 @@ import { AccountsSettings, accountSettingsHref } from './accounts-settings';
 import type { AccountTab } from './accounts-settings';
 import { CaseReport } from './case-report';
 import { NotificationCenter, NotificationSettings } from './notifications';
+import { NavigationResizeHandle, useNavigationWidth } from './workspace-navigation-width';
 import { lazy, Suspense, StrictMode, useCallback, useEffect, useRef, useState } from 'react';
-import type { FormEvent, ReactNode } from 'react';
+import type { CSSProperties, FormEvent, ReactNode } from 'react';
 import { Activity, Bell, ChevronRight, CircleHelp, ClipboardList, FlaskConical, FolderKanban, LayoutList, Microscope, PanelLeftClose, PanelLeftOpen, RadioTower, ScanLine, Settings2, UserRound, UserRoundCheck, UserRoundPlus, UsersRound, X } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
 import { CaseEditor } from './case-editor';
@@ -158,6 +159,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
   const roiSearchPreference = useRef<{ roi: string; organ: string }>(undefined);
   const [navigationCollapsed, setNavigationCollapsed] = useState<boolean>();
   const collapseNavigation = navigationCollapsed ?? page.view === 'viewer';
+  const [navigationWidth, setNavigationWidth] = useNavigationWidth();
   const settingsPage = page.view === 'settings' ? page : undefined;
   const showsIntegrationSettings = settingsAllowed && !!settingsPage && !settingsPage.section;
   const accountTab = settingsPage?.accountTab;
@@ -454,7 +456,8 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
     </div>
   </nav>;
 
-  return <div className="app-shell" data-view={page.view} data-navigation-collapsed={collapseNavigation}>
+  return <div className="app-shell" data-view={page.view} data-navigation-collapsed={collapseNavigation}
+    style={navigationWidth === undefined ? undefined : { '--sidebar-width': `${navigationWidth}px` } as CSSProperties}>
     <aside className="sidebar" id="main-navigation">
       <a className="brand" href="#worklist/all" aria-label="MeDIAuto Studio Home" title="MeDIAuto Studio Home">
         <img className="brand-logo" src={brandLogo} alt="" width={3776} height={1120} />
@@ -492,6 +495,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
         </div>
       </nav>
       <div className="side-footer"><button aria-label="Service Status" title="Service Status" onClick={() => showModal('system')}><Activity size={18} /><span>Service Status</span><i className={health?.status === 'ok' ? 'online' : ''} /></button></div>
+      {!collapseNavigation && <NavigationResizeHandle onResize={setNavigationWidth} />}
     </aside>
     <div className="workspace">
       <header className="topbar"><div className="breadcrumbs">
