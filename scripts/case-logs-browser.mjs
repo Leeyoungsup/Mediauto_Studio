@@ -65,9 +65,8 @@ try {
   await button(updated, 'Delete').click();
   await updated.waitFor({ state: 'detached' });
 
-  await doctor.locator('.viewer-case-tools summary').click();
-  await button(doctor, 'Case Logs').click();
-  const dialog = doctor.getByRole('dialog', { name: 'Case Logs' });
+  await doctor.getByRole('tab', { name: 'Case Logs', exact: true }).click();
+  const dialog = doctor.getByRole('tabpanel', { name: 'Case Logs', exact: true }).getByRole('region', { name: 'Case Logs', exact: true });
   await dialog.getByLabel('User').selectOption({ label: 'integration-doctor' });
   await dialog.getByLabel('Action').selectOption({ label: 'Updated Annotation' });
   await dialog.getByLabel('Entity').selectOption({ label: 'Annotation' });
@@ -87,7 +86,7 @@ try {
   await dialog.getByLabel('Result').selectOption({ label: 'Failed' });
   await button(dialog, 'Apply Filters').click();
   await dialog.getByRole('cell', { name: 'Failed', exact: true }).first().waitFor();
-  await button(dialog, 'Close Case Logs').click();
+  await button(dialog, 'Return to Slides').click();
 
   await other.goto(caseRoute);
   await other.getByText('Unable to load the case.', { exact: true }).waitFor();

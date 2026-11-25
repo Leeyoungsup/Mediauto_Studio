@@ -3,26 +3,26 @@ import { CollaborativeReview, useCollaborativeReview } from './collaborative-rev
 import { roiSearchHref, roiViewerHref } from './roi-search';
 import type { RoiLocation } from './roi-search';
 import { useEffect, useRef, useState } from 'react';
-import { ClipboardList, ArrowLeft, GalleryHorizontalEnd, PanelLeftClose, PanelLeftOpen, Maximize, Minimize, Settings2, ScanLine, History, FileText, Camera, List, MessageSquare, UsersRound } from 'lucide-react';
+import { ClipboardList, ArrowLeft, GalleryHorizontalEnd, PanelLeftClose, PanelLeftOpen, Maximize, Minimize, Settings2, ScanLine, History, FileText, Camera, List, MessageSquare, UsersRound, FlaskConical, PanelsTopLeft, SquarePen } from 'lucide-react';
 import type { DemoCase } from './demo';
-import { NotesDialog } from './case-notes';
-import { CaseLogsDialog } from './case-logs';
-import { AttachmentDialog } from './case-attachments';
-import type { AttachmentKind } from './case-attachments';
+import { CaseNotes } from './case-notes';
+import { CaseLogs } from './case-logs';
+import { CaseAttachments } from './case-attachments';
 import { ImageViewport } from './image-viewport';
-import { PatientHistoryDialog } from './patient-history';
+import { PatientHistory } from './patient-history';
 import { MultiView } from './multi-view';
 import { ViewerSettingsPanel, useViewerPreferences } from './viewer-preferences';
 import { ScanReference, SlidePreview, StatusLabel } from './worklist';
+
+import { WorkspaceTabs } from './workspace-tabs';
+
+type ViewerTab = 'slides' | 'analysis' | 'history' | 'media' | 'gross' | 'notes' | 'logs';
 
 export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsHref, initialSnapshot, initialRoi, roiOrigin, editorHref, historyEndpoint, attachmentsEndpoint, logsEndpoint, notesEndpoint, reviewEndpoint, viewerAccount, relatedEndpoint, analysisEndpoint }: {
   item: DemoCase; activeSlide?: string; onSlide: (id: string) => void; onBack: (scan?: string) => void; onReview?: () => void; requestsHref?: string; initialSnapshot?: string; initialRoi?: string; roiOrigin?: RoiLocation; editorHref?: string; historyEndpoint?: string; attachmentsEndpoint?: string; logsEndpoint?: string; notesEndpoint?: string; reviewEndpoint?: string; relatedEndpoint?: string; viewerAccount: string;
   analysisEndpoint?: string;
 }) {
-  const [showNotes, setShowNotes] = useState(false);
-  const [showLogs, setShowLogs] = useState(false);
-  const [attachmentKind, setAttachmentKind] = useState<AttachmentKind>();
-  const [showHistory, setShowHistory] = useState(false);
+  const [contextTab, setContextTab] = useState<Exclude<ViewerTab, 'analysis'>>('slides');
   const [comparing, setComparing] = useState(false);
   const [analysisOpen, setAnalysisOpen] = useState(false);
   const [reviewSelection, setReviewSelection] = useState<string>();
@@ -82,6 +82,23 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
     onSlide(id);
   }
 
+  const canAnalyze = Boolean(analysisEndpoint && slide?.wsi?.source === 'clinical' && !review.following && !comparing);
+  const activeTab: ViewerTab = analysisOpen && canAnalyze ? 'analysis' : contextTab;
+  const tabs = [
+    { key: 'slides', label: 'Slides', icon: PanelsTopLeft },
+    ...(analysisEndpoint ? [{ key: 'analysis', label: 'Analysis', icon: FlaskConical, disabled: !canAnalyze }] : []),
+    ...(historyEndpoint ? [{ key: 'history', label: 'History', icon: History }] : []),
+    ...(attachmentsEndpoint ? [{ key: 'media', label: 'Media', icon: FileText }, { key: 'gross', label: 'Gross Images', icon: Camera }] : []),
+    ...(notesEndpoint ? [{ key: 'notes', label: 'Notes', icon: MessageSquare }] : []),
+    ...(logsEndpoint ? [{ key: 'logs', label: 'Case Logs', icon: List }] : []),
+  ] as { key: ViewerTab; label: string; icon: typeof ScanLine; disabled?: boolean }[];
+  const activeLabel = tabs.find((tab) => tab.key === activeTab)?.label;
+  const isDocument = contextTab !== 'slides';
+  function selectTab(tab: ViewerTab) {
+    setAnalysisOpen(tab === 'analysis');
+    setContextTab(tab === 'analysis' ? 'slides' : tab);
+  }
+
   if (noCaseAccess) return <section className="panel detail-content" aria-label="Slide Review">
     <p role="alert">Case access is no longer available.</p>
     <a href="#worklist/all">Back to Worklist</a>
@@ -113,27 +130,15 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
         {fullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
       </button>
       {!comparing && <button className="button secondary" disabled={available.length < 2 || inReview} onClick={() => setComparing(true)}><GalleryHorizontalEnd size={16} /> Multi View</button>}
-      {(historyEndpoint || attachmentsEndpoint || notesEndpoint || logsEndpoint || editorHref) &&
-        <details className="viewer-case-tools" onClick={(event) => {
-          if ((event.target as HTMLElement).closest('button, a')) event.currentTarget.open = false;
-        }}>
-          <summary className="button secondary">Case Tools</summary>
-          <div className="viewer-case-menu">
-            {historyEndpoint && <button type="button" className="button secondary" onClick={() => setShowHistory(true)}>
-              <History size={16} /> Patient History
-            </button>}
-            {attachmentsEndpoint && <><button type="button" className="button secondary" onClick={() => setAttachmentKind('pdf')}><FileText size={16} /> Media</button>
-              <button type="button" className="button secondary" onClick={() => setAttachmentKind('gross')}><Camera size={16} /> Gross Images</button></>}
-            {notesEndpoint && <button type="button" className="button secondary" onClick={() => setShowNotes(true)}><MessageSquare size={16} /> Notes</button>}
-            {logsEndpoint && <button type="button" className="button secondary" onClick={() => setShowLogs(true)}><List size={16} /> Case Logs</button>}
-            {editorHref && <a className="button secondary" href={editorHref}>Case Editor</a>}
-          </div>
-        </details>}
+      {editorHref && <a className="button secondary viewer-editor-link" href={editorHref}><SquarePen size={15} /> Case Editor</a>}
       {requestsHref && <a className="button secondary" href={requestsHref.replace(/\/requests$/, '/report')}><ClipboardList size={16} /> Report Draft</a>}
-      {requestsHref && <a className="button secondary" href={requestsHref} aria-label="Analysis and Consultation Requests">Requests</a>}
+      {requestsHref && <a className="button secondary" href={requestsHref} aria-label="Analysis and Consultation Requests"><MessageSquare size={15} /> Requests</a>}
       {!comparing && onReview && <button className="button secondary" disabled={!slide?.wsi} onClick={onReview}>{item.status === 'In Review' ? 'Review Complete' : 'Start Review'}</button>}</div></div>
+    <WorkspaceTabs label="Viewer Workspace" tabs={tabs} active={activeTab} onSelect={selectTab} panelId="viewer-workspace-panel" />
     {fullscreenError && <p className="notice" role="alert">{fullscreenError}</p>}
     {review.open && reviewEndpoint && <CollaborativeReview review={review} />}
+    <div id="viewer-workspace-panel" role="tabpanel" aria-labelledby={'viewer-workspace-panel-tab-' + activeTab} className="viewer-stage" data-document={isDocument}>
+      <div inert={isDocument} className="viewer-scan-stage">
     {comparing ? <MultiView slides={available} primary={slide?.id} onClose={() => setComparing(false)}
       onSingle={(id) => { selectSlide(id); setComparing(false); }} /> : <div className="viewer-layout" data-tray={trayVisible} data-orientation={settings.tray_orientation}>
       <aside className="panel viewer-tray" id="viewer-slide-tray" hidden={!trayVisible}><div className="panel-title"><h2>Slide Tray</h2><span className="count">{item.slides.length}</span></div>
@@ -144,7 +149,7 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
       {slide?.wsi ? <ImageViewport key={slide.wsi.id + ':' + (initialSnapshot ?? initialRoi ?? '')} scan={slide.wsi} initialSnapshot={initialSnapshot}
         initialRoi={initialRoi} roiCaseId={requestsHref && item.recordId ? item.recordId : undefined} label={slide.label ?? slide.id} stain={slide.stain}
         analysis={analysisEndpoint && slide.wsi.source === 'clinical' && !review.following ?
-          { caseEndpoint: analysisEndpoint, open: analysisOpen, change: setAnalysisOpen } : undefined}
+          { caseEndpoint: analysisEndpoint, open: analysisOpen, change: (open) => selectTab(open ? 'analysis' : 'slides') } : undefined}
         sharedReview={reviewEndpoint ? {
           locked: review.following,
           camera: followingFrame?.scan_id === slide.wsi.id ? followingFrame : undefined,
@@ -155,9 +160,21 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
         options={{ settings, toggleFullscreen, toggleGallery, toggleMinimap: () => change('show_minimap', !settings.show_minimap) }} />
         : <div className="panel empty"><ScanLine size={30} /><strong>{activeSlide && !slide ? 'The requested scan could not be found.' : slide?.state === 'QC Hold' || slide?.state === 'Rescan Required' ? 'This scan is blocked by QC.' : 'No scans are available for review.'}</strong><button className="button secondary" onClick={() => onBack(slide?.id)}>Go to Case Details</button></div>}
     </div>}
-    {attachmentKind && attachmentsEndpoint && <AttachmentDialog endpoint={attachmentsEndpoint} kind={attachmentKind} onClose={() => setAttachmentKind(undefined)} />}
-    {showNotes && notesEndpoint && <NotesDialog endpoint={notesEndpoint} onClose={() => setShowNotes(false)} />}
-    {showLogs && logsEndpoint && <CaseLogsDialog endpoint={logsEndpoint} onClose={() => setShowLogs(false)} />}
-    {showHistory && historyEndpoint && <PatientHistoryDialog key={historyEndpoint} endpoint={historyEndpoint} onClose={() => setShowHistory(false)} />}
+      </div>
+      {isDocument && <section className="viewer-document panel" aria-label={activeLabel}>
+        <div className="panel-title"><h2>{activeLabel}</h2>
+          <button type="button" className="button secondary" onClick={() => {
+            selectTab('slides');
+            document.getElementById('viewer-workspace-panel-tab-slides')?.focus();
+          }}><ScanLine size={15} /> Return to Slides</button></div>
+        <div className="detail-content">
+          {contextTab === 'history' && historyEndpoint && <PatientHistory endpoint={historyEndpoint} />}
+          {attachmentsEndpoint && (contextTab === 'media' || contextTab === 'gross') &&
+            <CaseAttachments key={contextTab} endpoint={attachmentsEndpoint} kind={contextTab === 'media' ? 'pdf' : 'gross'} />}
+          {contextTab === 'notes' && notesEndpoint && <CaseNotes endpoint={notesEndpoint} />}
+          {contextTab === 'logs' && logsEndpoint && <CaseLogs endpoint={logsEndpoint} />}
+        </div>
+      </section>}
+    </div>
   </section>;
 }

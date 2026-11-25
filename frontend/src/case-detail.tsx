@@ -22,7 +22,9 @@ export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, on
 
   return <>
     <button className="back-link" onClick={onBack}><ArrowLeft size={16} /> Worklist</button>
-    <div className="page-heading"><div><h1>{item.id}</h1><p>{item.specimen} · Received {item.received}</p></div>
+    <div className="page-heading case-workspace-heading"><div className="case-workspace-title">
+      <span className="workspace-title-icon"><ClipboardList size={22} aria-hidden="true" /></span>
+      <div><h1>{item.id}</h1><p>{item.specimen} · Received {item.received}</p></div></div>
       <div className="actions"><StatusLabel status={item.status} />
         {onReview && <button className="button secondary" disabled={!available} onClick={onReview}>{item.status === 'In Review' ? 'Review Complete' : 'Start Review'}</button>}
         {relatedEndpoint && item.recordId && <RelatedCasesControl endpoint={relatedEndpoint} caseId={item.recordId} scanId={selected?.wsi?.id} />}

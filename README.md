@@ -34,7 +34,11 @@ Worklist에서는 **Hide Case Preview**로 목록을 넓힐 수 있습니다. WS
 
 ### Viewer Analysis
 
-등록된 스캔을 열고 **Analysis → Run Analysis**에서 현재 스캔의 실행 옵션, 상태 및 완료 결과를 확인합니다. **Case Tools**에서 환자 이력, 첨부, 메모, 로그, Case Editor를 엽니다. [Viewer 분석 사용법과 지원 범위](work/viewer-analysis-usability.md)
+등록된 스캔을 열고 **Analysis → Run Analysis**에서 현재 스캔의 실행 옵션, 상태 및 완료 결과를 확인합니다. Viewer의 **History**, **Media**, **Gross Images**, **Notes**, **Case Logs** 탭에서 같은 케이스 정보를 확인합니다. **Case Editor**는 상단에서 엽니다. [Viewer 분석 사용법과 지원 범위](work/viewer-analysis-usability.md)
+
+### Workspace Layout
+
+**Worklist**에서 업무 탭과 Frozen Cases, Tumor Board, OR Results에 접근합니다. 오른쪽 **Case Preview**의 **Slides**, **Case Summary**, **Review** 탭은 선택 케이스를 이어서 표시합니다. Viewer와 Settings도 업무별 탭으로 이동합니다. [화면 구성 변경과 검증](work/pdf-workspace-layout.md)
 
 ### 42. Integrated Workflow Verification
 

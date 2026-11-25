@@ -35,7 +35,7 @@ export function CaseLogsDialog({ endpoint, onClose }: { endpoint: string; onClos
   </dialog>;
 }
 
-function CaseLogs({ endpoint }: { endpoint: string }) {
+export function CaseLogs({ endpoint }: { endpoint: string }) {
   const [draft, setDraft] = useState(emptyFilters);
   const [applied, setApplied] = useState(emptyFilters);
   const [pages, setPages] = useState<string[]>([]);

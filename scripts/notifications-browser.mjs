@@ -56,14 +56,13 @@ try {
   const scanId = record.slides.find((item) => item.wsi).id;
   await doctor.goto('/#viewer/' + caseId + '/' + scanId);
   await button(doctor, 'Pan using minimap').waitFor();
-  await doctor.locator('.viewer-case-tools summary').click();
-  await button(doctor, 'Notes').click();
-  const dialog = doctor.getByRole('dialog', { name: 'Case Notes', exact: true });
+  await doctor.getByRole('tab', { name: 'Notes', exact: true }).click();
+  const dialog = doctor.getByRole('tabpanel', { name: 'Notes', exact: true });
   await button(dialog, 'Add Comment').click();
   await dialog.getByRole('textbox', { name: 'Comment', exact: true }).fill('Synthetic WSI reply');
   await button(dialog, 'Post Comment').click();
   await dialog.getByText('Synthetic WSI reply', { exact: true }).waitFor();
-  await button(dialog, 'Close Case Notes').click();
+  await button(dialog, 'Return to Slides').click();
   await button(doctor, 'Pan using minimap').waitFor();
 
   await summary(admin).click();

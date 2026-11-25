@@ -100,13 +100,12 @@ try {
   await button(doctor, 'Zoom In').click();
   await doctor.waitForFunction((fit) => Number(document.querySelector('.image-panel').dataset.viewZoom) > fit, fitZoom);
   const zoom = await slide.getAttribute('data-view-zoom');
-  await doctor.locator('.viewer-case-tools summary').click();
-  await button(doctor, 'Patient History').click();
-  const dialog = doctor.getByRole('dialog', { name: 'Patient History' });
+  await doctor.getByRole('tab', { name: 'History', exact: true }).click();
+  const dialog = doctor.getByRole('tabpanel', { name: 'History', exact: true });
   await dialog.getByText('External clinical text.', { exact: true }).waitFor();
   await dialog.getByRole('button', { name: /Local synthetic encounter/ }).click();
   await dialog.getByText('Manual follow-up text.', { exact: false }).waitFor();
-  await button(dialog, 'Close History').click();
+  await button(dialog, 'Return to Slides').click();
   assert.ok(await canvas.evaluate((node, before) => node === before, prior));
   assert.equal(await slide.getAttribute('data-view-zoom'), zoom);
 

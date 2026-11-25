@@ -1,3 +1,4 @@
+import { Bookmark, Hand, LocateFixed, MapPin, Ruler, Scan } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api, auditAttemptId, jsonBody, request } from './session';
 import type { SlideInfo, Viewport } from './tile-viewer';
@@ -196,9 +197,9 @@ export function ViewerToolsBar({ state, view, info }: { state: ToolState; view?:
   const { records, tool, chooseTool, busy, savePosition, applySaved } = state;
   return <div className="image-actions viewer-record-buttons" aria-label="Review Tools">
     {records?.can_annotate && <>
-      <button className="button secondary" aria-pressed={tool === 'pan'} disabled={busy} onClick={() => chooseTool('pan')}>Pan</button>
-      <button className="button secondary" aria-pressed={tool === 'rectangle'} disabled={busy} onClick={() => chooseTool('rectangle')}>Rectangular ROI</button>
-      <button className="button secondary" aria-pressed={tool === 'distance'} disabled={busy} onClick={() => chooseTool('distance')}>Distance Measurement</button>
+      <button className="button secondary" aria-pressed={tool === 'pan'} disabled={busy} onClick={() => chooseTool('pan')}><Hand size={15} aria-hidden="true" />Pan</button>
+      <button className="button secondary" aria-pressed={tool === 'rectangle'} disabled={busy} onClick={() => chooseTool('rectangle')}><Scan size={15} aria-hidden="true" />Rectangular ROI</button>
+      <button className="button secondary" aria-pressed={tool === 'distance'} disabled={busy} onClick={() => chooseTool('distance')}><Ruler size={15} aria-hidden="true" />Distance Measurement</button>
       <label>Additional Tool <select aria-label="Additional Tool" disabled={busy}
         value={additionalTools.find((item) => item === tool) ?? ''}
         onChange={(event) => chooseTool(event.target.value as Tool || 'pan')}>
@@ -210,16 +211,16 @@ export function ViewerToolsBar({ state, view, info }: { state: ToolState; view?:
       {tool === 'preset' && <label>Preset Size <select value={state.preset} onChange={(event) => state.setPreset(Number(event.target.value))}>
         {[250, 500, 1000].map((size) => <option key={size} value={size}>{size} × {size} µm</option>)}
       </select></label>}
-      <button className="button secondary" disabled={!view || busy} onClick={() => {
+      <button className="button secondary viewer-icon-tool" aria-label="Save Bookmark" title="Save Bookmark" disabled={!view || busy} onClick={() => {
         if (!view) return;
         const x = Math.max(0, Math.min(info.dimensions[0] - 0.001, view.x + view.width / 2));
         const y = Math.max(0, Math.min(info.dimensions[1] - 0.001, view.y + view.height / 2));
         state.complete('bookmark', [[x, y]], view.zoom);
-      }}>Save Bookmark</button>
+      }}><Bookmark size={15} aria-hidden="true" /><span>Save Bookmark</span></button>
 
     </>}
-    <button className="button secondary" disabled={!view || !records || busy} onClick={() => { if (view) savePosition(view); }}>Save Position</button>
-    <button className="button secondary" disabled={!records?.position || busy} onClick={applySaved}>Restore Saved Position</button>
+    <button className="button secondary viewer-icon-tool" aria-label="Save Position" title="Save Position" disabled={!view || !records || busy} onClick={() => { if (view) savePosition(view); }}><MapPin size={15} aria-hidden="true" /><span>Save Position</span></button>
+    <button className="button secondary viewer-icon-tool" aria-label="Restore Saved Position" title="Restore Saved Position" disabled={!records?.position || busy} onClick={applySaved}><LocateFixed size={15} aria-hidden="true" /><span>Restore Saved Position</span></button>
   </div>;
 }
 

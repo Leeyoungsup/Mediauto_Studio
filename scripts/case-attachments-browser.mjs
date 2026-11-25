@@ -65,14 +65,12 @@ try {
   await button(assigned, 'Pan using minimap').waitFor();
   const canvas = assigned.getByLabel('WSI Canvas', { exact: true });
   const before = await canvas.elementHandle();
-  await assigned.locator('.viewer-case-tools summary').click();
-  await button(assigned, 'Media').click();
-  const mediaDialog = assigned.getByRole('dialog', { name: 'Media', exact: true });
+  await assigned.getByRole('tab', { name: 'Media', exact: true }).click();
+  const mediaDialog = assigned.getByRole('tabpanel', { name: 'Media', exact: true });
   await mediaDialog.getByRole('img', { name: 'PDF page 1', exact: true }).waitFor();
-  await button(mediaDialog, 'Close Attachments').click();
-  await assigned.locator('.viewer-case-tools summary').click();
-  await button(assigned, 'Gross Images').click();
-  const gross = assigned.getByRole('dialog', { name: 'Gross Images', exact: true });
+  await button(mediaDialog, 'Return to Slides').click();
+  await assigned.getByRole('tab', { name: 'Gross Images', exact: true }).click();
+  const gross = assigned.getByRole('tabpanel', { name: 'Gross Images', exact: true });
   await button(gross, 'Add Gross Image').click();
   await gross.getByLabel('Target Specimen').selectOption({ label: 'Specimen SYNTH-A' });
   await gross.getByLabel('Attachment File').setInputFiles(photo);
@@ -82,7 +80,7 @@ try {
   await gross.getByText('No gross images for this selection.', { exact: true }).waitFor();
   await gross.getByLabel('Filter by Specimen').selectOption({ label: 'Specimen SYNTH-A' });
   await gross.getByRole('img', { name: 'Gross specimen photograph', exact: true }).waitFor();
-  await button(gross, 'Close Attachments').click();
+  await button(gross, 'Return to Slides').click();
   assert.ok(await canvas.evaluate((node, prior) => node === prior, before));
 
   await admin.reload();

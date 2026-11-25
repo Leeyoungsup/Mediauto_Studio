@@ -345,6 +345,8 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
 
   const minimap = settings?.show_minimap ?? showNavigator;
   const toggleMinimap = options?.toggleMinimap ?? (() => setShowNavigator(!showNavigator));
+  const reviewTools = info && !compareMode && !readOnlyEndpoint && !following
+    ? <ViewerToolsBar state={viewerRecords} view={view} info={info} /> : null;
   function closeAnalysis() {
     analysis?.change(false);
     analysisButton.current?.focus({ preventScroll: true });
@@ -377,7 +379,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         </button>}
       </div>
     </div>
-    {info && !compareMode && !readOnlyEndpoint && !following && <ViewerToolsBar state={viewerRecords} view={view} info={info} />}
+    {!options && reviewTools}
     <div className={showPap ? 'analysis-workspace pap-workspace' : 'analysis-workspace'}>
     <div className="image-surface">
       <canvas className={viewerRecords.tool === 'pan' && !ihc.picking && !skin.mode ? 'wsi-canvas' : 'wsi-canvas drawing-tool'} ref={canvas} tabIndex={0} aria-label="WSI Canvas"
@@ -531,6 +533,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     {canOpenSlideReview && showPap && <Suspense fallback={<p role="status">Loading Pap Gallery…</p>}>
       <PapGallery state={pap} following={following} />
     </Suspense>}
+    {options && reviewTools && <div className="viewer-tool-dock">{reviewTools}</div>}
     {analysis?.open && <ViewerAnalysis caseEndpoint={analysis.caseEndpoint} scanId={scan.id} label={label} stain={stain}
       onClose={closeAnalysis} onResult={(id) => {
         pdl1.setSelected(id);

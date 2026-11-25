@@ -7,7 +7,7 @@ import { CaseReport } from './case-report';
 import { NotificationCenter, NotificationSettings } from './notifications';
 import { lazy, Suspense, StrictMode, useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import { Activity, ChevronRight, CircleHelp, ClipboardList, FlaskConical, LayoutList, Microscope, PanelLeftClose, PanelLeftOpen, ScanLine, Settings2, UserRound, UserRoundCheck, X } from 'lucide-react';
+import { Activity, Bell, ChevronRight, CircleHelp, ClipboardList, FlaskConical, FolderKanban, LayoutList, Microscope, PanelLeftClose, PanelLeftOpen, RadioTower, ScanLine, Settings2, UserRound, UserRoundCheck, UsersRound, X } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
 import { CaseEditor } from './case-editor';
 import { PatientMatch } from './patient-match';
@@ -336,6 +336,17 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
     } finally { setSaving(false); }
   }
 
+  const worklistNavigation = <nav aria-label="Worklist Navigation" className="worklist-nav">
+    <div className="worklist-nav-scopes">{worklistTabs.map(({ id, href, label, count, icon: Icon }) => <a key={id} href={href}
+      aria-current={(page.view === 'scans' ? id === 'scans' : page.view === 'worklist' && id === page.scope) ? 'page' : undefined}>
+      <Icon size={16} aria-hidden="true" /><span>{label}</span><small>{count}</small>
+    </a>)}</div>
+    <div className="worklist-nav-destinations">
+      {requestAllowed && <a href="#collections" aria-label="Open Tumor Board and Collections"><FolderKanban size={16} aria-hidden="true" /> Tumor Board</a>}
+      {orAllowed && <a href="#or" aria-label="Open Operating Room Results"><RadioTower size={16} aria-hidden="true" /> OR Results</a>}
+    </div>
+  </nav>;
+
   return <div className="app-shell" data-navigation-collapsed={collapseNavigation}>
     <aside className="sidebar" id="main-navigation">
       <a className="brand" href="#worklist/all" aria-label="MeDIAuto Studio Home" title="MeDIAuto Studio Home"><span className="brand-icon"><Microscope size={23} /></span><span className="brand-name">MeDIAuto<strong>Studio</strong></span></a>
@@ -359,27 +370,33 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
         <div className="header-actions"><NotificationCenter key={user.id} organization={user.organization} /><span className="demo-label"><FlaskConical size={15} /> Demo Environment</span><button className="emr-chip" onClick={() => showModal('system')}><span /> EMR {emr} · LIS {lis}</button><span className="identity"><UserRound size={17} />{user.display_name}</span><button className="button secondary" onClick={logout}>Sign Out</button></div>
       </header>
       <main className="workspace-main" data-view={page.view}>
-        {(page.view === 'worklist' || page.view === 'scans') && <nav aria-label="Worklist Navigation" className="worklist-nav">
-          {worklistTabs.map(({ id, href, label, count, icon: Icon }) => <a key={id} href={href}
-            aria-current={(page.view === 'scans' ? id === 'scans' : id === page.scope) ? 'page' : undefined}>
-            <Icon size={16} />{label}<small>{count}</small>
-          </a>)}
-        </nav>}
+        {page.view === 'scans' && worklistNavigation}
         <div className="worklist-page" hidden={page.view !== 'worklist'}>
           {listError && <div className="notice" role="alert">{listError}<button className="button secondary" onClick={() => setRevision((value) => value + 1)}>Retry</button></div>}
-          <Worklist onScope={setWorklistScope} canReportFrozen={requestAllowed} mayShare={user.role === 'admin'} cases={worklistCases} loading={listLoading} scope={scope} current={selectedCase} onSelect={setSelected}
+          <Worklist navigation={page.view === 'worklist' ? worklistNavigation : undefined} onScope={setWorklistScope} canReportFrozen={requestAllowed} mayShare={user.role === 'admin'} cases={worklistCases} loading={listLoading} scope={scope} current={selectedCase} onSelect={setSelected}
             total={result.total} counts={result.counts} filteredCounts={result.filtered_counts} queues={queues} workload={result.workload} onQueueChanged={refreshQueues} assignees={result.assignees} onQuery={setQuery}
             onOpen={(id) => { const item = worklistCases.find((row) => row.id === id); if (item) navigateCase(item); }}
             onViewer={(id, slide) => { const item = worklistCases.find((row) => row.id === id); if (item) navigateViewer(item, slide); }}
             onReference={requestAllowed ? (item) => { if (item.recordId) setReferenceCase({ id: item.recordId, title: item.id }); } : undefined}
             onRegister={writable ? () => showModal('register') : undefined} />
         </div>
+        {page.view === 'settings' && (settingsAllowed || page.section === 'notifications') && <section className="panel settings-masthead">
+          <div className="page-heading"><div className="worklist-title"><span className="workspace-title-icon"><Settings2 size={20} aria-hidden="true" /></span><h1>Settings</h1></div></div>
+          <nav className="worklist-nav" aria-label="Settings Navigation">
+            {settingsAllowed && <>
+              <a href="#settings" aria-current={!page.section ? 'page' : undefined}><ScanLine size={16} aria-hidden="true" /> Intake and Integration</a>
+              <a href="#settings/groups" aria-current={page.section === 'groups' ? 'page' : undefined}><UsersRound size={16} aria-hidden="true" /> Manage Workgroups</a>
+              <a href="#settings/analysis" aria-current={page.section === 'analysis' ? 'page' : undefined}><FlaskConical size={16} aria-hidden="true" /> Analysis Pre-run Rules</a>
+              <a href="#settings/pap" aria-current={page.section === 'pap' ? 'page' : undefined}><Microscope size={16} aria-hidden="true" /> Pap Review Policy</a>
+            </>}
+            <a href="#settings/notifications" aria-current={page.section === 'notifications' ? 'page' : undefined}><Bell size={16} aria-hidden="true" /> Notifications</a>
+          </nav>
+        </section>}
         {page.view === 'settings' && page.section === 'notifications' && <NotificationSettings organization={user.organization} />}
         {page.view === 'settings' && page.section !== 'notifications' && settingsAllowed && (page.section === 'groups'
           ? <WorkgroupSettings onChanged={refreshQueues} /> : page.section === 'analysis' ? <AnalysisSettings organization={user.organization} />
           : page.section === 'pap' ? <Suspense fallback={<p role="status">Loading Pap policy…</p>}>
             <PapPolicySettings organization={user.organization} /></Suspense> : <>
-          <div className="settings-actions"><a className="button secondary" href="#settings/groups">Manage Workgroups</a><a className="button secondary" href="#settings/analysis">Analysis Pre-run Rules</a><a className="button secondary" href="#settings/pap">Pap Review Policy</a></div>
           {intakeAllowed && <IntakeSettings refresh={refreshFiles} emrConnected={integration?.emr.state === 'connected'} />}
           <IntegrationSettings org={user.organization} status={integration} onRefresh={refreshIntegration} />
         </>)}

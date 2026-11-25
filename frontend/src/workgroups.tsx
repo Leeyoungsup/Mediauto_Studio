@@ -1,3 +1,4 @@
+import { ListFilter, Snowflake } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { api, jsonBody } from './session';
@@ -29,10 +30,11 @@ export function QueueNavigation({ queues, active, isAdmin, onSelect, onChanged }
     } catch (failure) { setError(errorText(failure)); }
     finally { setBusy(false); }
   }
+  const frozenQueue = queues.find((queue) => queue.priority === 'frozen');
   return <div className="queue-navigation">
     <div className="actions" role="group" aria-label="Work Queues">
       <details className="queue-menu">
-        <summary className="button secondary">Global Views</summary>
+        <summary className="button secondary"><ListFilter size={15} aria-hidden="true" /> Global Views</summary>
         <div className="panel queue-menu-items">
           {queues.map((queue) => <div className="queue-menu-row" key={queue.key}>
             <button className="button secondary" onClick={(event) => { onSelect(queue); event.currentTarget.closest('details')!.open = false; }}>{queue.name}</button>
@@ -45,7 +47,9 @@ export function QueueNavigation({ queues, active, isAdmin, onSelect, onChanged }
           {error && <p role="alert" className="form-error">{error}</p>}
         </div>
       </details>
-      {queues.filter((queue) => queue.subscribed || queue.key === active).map((queue) =>
+      {frozenQueue && <button type="button" className="button secondary queue-pin" aria-pressed={frozenQueue.key === active}
+        onClick={() => onSelect(frozenQueue)}><Snowflake size={15} aria-hidden="true" /> Frozen Cases</button>}
+      {queues.filter((queue) => queue.key !== frozenQueue?.key && (queue.subscribed || queue.key === active)).map((queue) =>
         <button key={queue.key} className="button secondary queue-pin" aria-pressed={queue.key === active} onClick={() => onSelect(queue)}>{queue.name}</button>)}
       {active && <button className="button secondary" onClick={() => onSelect()}>Clear Queue</button>}
     </div>

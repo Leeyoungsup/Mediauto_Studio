@@ -29,6 +29,14 @@ try {
   await button(page, 'Collapse Navigation').click();
   assert.ok((await table.boundingBox()).width > before.width + 100, 'The navigation rail should release workspace width');
   await button(page, 'Expand Navigation').click();
+  assert.equal(await page.getByRole('link', { name: 'Open Tumor Board and Collections', exact: true }).getAttribute('href'), '#collections');
+  assert.equal(await page.getByRole('link', { name: 'Open Operating Room Results', exact: true }).getAttribute('href'), '#or');
+  const previewTabs = preview.getByRole('tablist', { name: 'Case Preview Workspace' });
+  await previewTabs.getByRole('tab', { name: 'Case Summary', exact: true }).click();
+  await preview.getByRole('tabpanel', { name: 'Case Summary' }).getByText('Accessioned At', { exact: true }).waitFor();
+  await previewTabs.getByRole('tab', { name: 'Review', exact: true }).click();
+  await preview.getByRole('tabpanel', { name: 'Review' }).getByText('LIS Case Status', { exact: true }).waitFor();
+  await previewTabs.getByRole('tab', { name: 'Slides', exact: true }).click();
 
   await page.getByLabel('Search Cases').fill('IMS-DEMO-101');
   await button(page, 'IMS-DEMO-101 details').click();
@@ -49,6 +57,17 @@ try {
   assert.ok(await canvas.evaluate((node, original) => node === original, originalCanvas));
   await button(page, 'Show Slide Tray').click();
   await page.getByRole('heading', { name: 'Slide Tray', exact: true }).waitFor();
+  const viewerTabs = page.getByRole('tablist', { name: 'Viewer Workspace', exact: true });
+  await viewerTabs.getByRole('tab', { name: 'Slides', exact: true }).focus();
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Enter');
+  const history = page.getByRole('tabpanel', { name: 'History', exact: true });
+  await history.getByRole('region', { name: 'Patient History Records' }).waitFor();
+  assert.equal(await canvas.isVisible(), false);
+  await button(history, 'Return to Slides').click();
+  assert.ok(await canvas.evaluate((node, original) => node === original, originalCanvas));
+  assert.equal(await viewerTabs.getByRole('tab', { name: 'Slides', exact: true }).getAttribute('aria-selected'), 'true');
 
   await page.setViewportSize(compact);
   await page.goto('/');

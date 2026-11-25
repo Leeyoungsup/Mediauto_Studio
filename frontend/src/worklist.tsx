@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowRight, CheckCircle2, CircleDashed, Columns3, Files, FolderOpen, PanelRightClose, PanelRightOpen, Plus, ScanLine, Search, UserRoundCheck, X } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { ArrowRight, Activity, FileText, CheckCircle2, CircleDashed, Columns3, Files, FolderOpen, PanelRightClose, PanelRightOpen, Plus, ScanLine, Search, UserRoundCheck, X } from 'lucide-react';
 import { readyCount, statuses } from './demo';
 import type { CaseStatus, DemoCase, Slide } from './demo';
 import type { Assignee, Counts, WorklistQuery } from './worklist-api';
@@ -14,6 +15,7 @@ import { MoreFilters, normalizeFilters } from './worklist-filters';
 import type { AdvancedFilters } from './worklist-filters';
 
 import { ColumnPicker, StatusLabel, columnValue } from './worklist-columns';
+import { WorkspaceTabs } from './workspace-tabs';
 import { WorklistColumnPreview } from './worklist-column-preview';
 
 export { StatusLabel } from './worklist-columns';
@@ -34,7 +36,15 @@ export function SlidePreview({ slide }: { slide: Slide }) {
     : <ScanLine size={24} aria-hidden="true" />;
 }
 
+const previewTabs = [
+  { key: 'slides', label: 'Slides', icon: ScanLine },
+  { key: 'case', label: 'Case Summary', icon: FileText },
+  { key: 'review', label: 'Review', icon: Activity },
+] as const;
+type PreviewTab = typeof previewTabs[number]['key'];
+
 type Props = {
+  navigation?: ReactNode;
   cases: DemoCase[];
   loading: boolean;
   total: number;
@@ -57,7 +67,7 @@ type Props = {
   onReference?: (item: DemoCase) => void;
 };
 
-export function Worklist({ cases, loading, total, counts, filteredCounts, queues, workload, onQueueChanged, assignees, onQuery, scope, onScope, mayShare, current, onSelect, onOpen, onViewer, onRegister, canReportFrozen, onReference }: Props) {
+export function Worklist({ navigation, cases, loading, total, counts, filteredCounts, queues, workload, onQueueChanged, assignees, onQuery, scope, onScope, mayShare, current, onSelect, onOpen, onViewer, onRegister, canReportFrozen, onReference }: Props) {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<CaseStatus | ''>('');
   const [assignee, setAssignee] = useState('');
@@ -67,6 +77,7 @@ export function Worklist({ cases, loading, total, counts, filteredCounts, queues
   const [columnSettings, setColumnSettings] = useState(defaultColumns);
   const [showColumnPreview, setShowColumnPreview] = useState(false);
   const [columnSearch, setColumnSearch] = useState('');
+  const [previewTab, setPreviewTab] = useState<PreviewTab>('slides');
   const [previewVisible, setPreviewVisible] = useState(true);
   const edited = useRef(false);
   const shownColumns = columnSettings.filter(({ visible }) => visible).map(({ id }) => columns.find((column) => column.id === id)!);
@@ -116,7 +127,8 @@ export function Worklist({ cases, loading, total, counts, filteredCounts, queues
   }
 
   return <>
-    <div className="page-heading worklist-heading"><h1>Worklist</h1>
+    <section className="panel worklist-masthead">
+    <div className="page-heading worklist-heading"><div className="worklist-title"><span className="workspace-title-icon"><Files size={22} /></span><h1>Worklist</h1></div>
       <div className="actions">
         <button type="button" className="button secondary" onClick={() => setShowColumnPreview(true)}><Columns3 size={16} /> Column Preview</button>
         <button type="button" className="button secondary" aria-controls="worklist-preview" aria-expanded={previewVisible}
@@ -127,6 +139,8 @@ export function Worklist({ cases, loading, total, counts, filteredCounts, queues
         {onRegister && <button className="button primary" onClick={onRegister}><Plus size={17} /> Register Case</button>}
       </div>
     </div>
+    {navigation}
+    </section>
     {showColumnPreview && <WorklistColumnPreview currentColumns={columnSettings} onClose={() => setShowColumnPreview(false)}
       onApply={(settings) => { edited.current = true; setColumnSettings(settings); setShowColumnPreview(false); }} />}
     <QueueNavigation queues={queues} active={activeQueue} isAdmin={mayShare} onSelect={selectQueue} onChanged={onQueueChanged} />
@@ -177,16 +191,33 @@ export function Worklist({ cases, loading, total, counts, filteredCounts, queues
         <div className="panel-title"><h2>Case Preview</h2><ScanLine size={18} className="muted" /></div>
         {selected ? <div className="preview-content">
           <div className="preview-heading"><strong>{selected.id}</strong><StatusLabel status={selected.status} />{selected.worklist?.priority && columnValue(selected, 'priority')}</div>
-          <dl className="key-values"><div><dt>Specimen</dt><dd>{selected.specimen}</dd></div><div><dt>Assignee</dt><dd>{selected.assignee || 'Unassigned'}</dd></div><div><dt>Patient Information</dt><dd>{selected.patient?.number || (selected.patient ? 'Registered' : 'Not Entered')}</dd></div></dl>
-          <div className="preview-label"><h3>Slides</h3><span>{selected.source === 'files' ? `${selected.slides.length} files registered` : `${readyCount(selected)}/${selected.slides.length} Viewable`}</span></div>
-          {selected.slides.length ? <div className="preview-slides">{selected.slides.map((slide) => <button key={slide.id} className="slide-preview" data-scan-id={slide.wsi?.id} title={slide.state} disabled={!slide.wsi} onClick={() => onViewer(selected.id, slide.id)}>
-            <span className="slide-image"><SlidePreview slide={slide} /></span><strong>{slide.label ?? slide.id}</strong><span>{slide.stain} · {slide.wsi?.format ?? slide.state}<ScanReference scan={slide.wsi} /></span>
-          </button>)}</div> : <p className="empty-inline">No slides are linked to this case.</p>}
+          <WorkspaceTabs label="Case Preview Workspace" tabs={previewTabs} active={previewTab} onSelect={setPreviewTab} panelId="worklist-preview-panel" />
+          <div id="worklist-preview-panel" role="tabpanel" aria-labelledby={'worklist-preview-panel-tab-' + previewTab}>
+          {previewTab === 'slides' && <>
+            <div className="preview-label"><h3>Slides</h3><span>{selected.source === 'files' ? `${selected.slides.length} files registered` : `${readyCount(selected)}/${selected.slides.length} Viewable`}</span></div>
+            {selected.slides.length ? <div className="preview-slides">{selected.slides.map((slide) => <button key={slide.id} className="slide-preview" data-scan-id={slide.wsi?.id} title={slide.state} disabled={!slide.wsi} onClick={() => onViewer(selected.id, slide.id)}>
+              <span className="slide-image"><SlidePreview slide={slide} /></span><span className="preview-scan-meta"><strong>{slide.label ?? slide.id}</strong>
+              <span>{slide.stain} · {slide.wsi?.format ?? slide.state}</span><ScanReference scan={slide.wsi} /></span><ArrowRight size={14} className="preview-scan-arrow" />
+            </button>)}</div> : <p className="empty-inline">No slides are linked to this case.</p>}
+          </>}
+          {previewTab === 'case' && <dl className="key-values">
+            <div><dt>Specimen</dt><dd>{columnValue(selected, 'specimen')}</dd></div><div><dt>Assignee</dt><dd>{columnValue(selected, 'assignee')}</dd></div>
+            <div><dt>Patient Name</dt><dd>{columnValue(selected, 'patient')}</dd></div><div><dt>Patient ID</dt><dd>{columnValue(selected, 'mrn')}</dd></div>
+            <div><dt>Accessioned At</dt><dd>{columnValue(selected, 'received')}</dd></div><div><dt>Collection Date</dt><dd>{columnValue(selected, 'collected')}</dd></div>
+          </dl>}
+          {previewTab === 'review' && <dl className="key-values">
+            <div><dt>Slide Status</dt><dd>{columnValue(selected, 'slideState')}</dd></div><div><dt>LIS Case Status</dt><dd>{columnValue(selected, 'lis')}</dd></div>
+            <div><dt>Workgroup</dt><dd>{columnValue(selected, 'group')}</dd></div><div><dt>Requests</dt><dd>{columnValue(selected, 'requests')}</dd></div>
+            <div><dt>Last Opened</dt><dd>{columnValue(selected, 'lastOpened')}</dd></div><div><dt>Latest Review Note</dt><dd>{columnValue(selected, 'notes')}</dd></div>
+          </dl>}
+          </div>
+          <div className="preview-footer-actions">
           {canReportFrozen && selected.recordId && selected.worklist?.priority === 'frozen' &&
             <a className="button secondary full" href={`#case/${selected.recordId}/frozen`}>Frozen Report</a>}
           {onReference && selected.recordId && <button className="button secondary full" onClick={() => onReference(selected)}>Add to Collection or Board</button>}
           <button className="button primary full" onClick={() => onOpen(selected.id)}>Open Case Details <ArrowRight size={16} /></button>
           {readyCount(selected) > 0 && <button className="button secondary full" onClick={() => onViewer(selected.id)}><ScanLine size={16} /> Open Viewer</button>}
+          </div>
         </div> : <p className="empty-inline">Select a case from the list.</p>}
       </aside>
     </div>

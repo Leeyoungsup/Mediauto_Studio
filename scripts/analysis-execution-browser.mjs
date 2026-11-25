@@ -124,7 +124,7 @@ try {
   await button(doctor, 'Zoom In').click();
   const camera = () => image.evaluate((node) => [node.dataset.viewZoom, node.dataset.viewCenterX, node.dataset.viewCenterY]);
   const originalCamera = await camera();
-  await button(doctor, 'Analysis').click();
+  await doctor.getByRole('tab', { name: 'Analysis', exact: true }).click();
   const analysis = doctor.getByRole('complementary', { name: 'Slide Analysis', exact: true });
   await analysis.getByText('PD-L1 TPS Archive Replay · No matching archived result', { exact: true }).waitFor();
   const methods = analysis.getByRole('combobox', { name: 'Analysis Method' });
@@ -155,9 +155,9 @@ try {
   const panel = await analysis.boundingBox();
   assert.ok(panel && panel.x >= 0 && panel.x + panel.width <= narrow.width);
   await button(analysis, 'Close Slide Analysis').click();
-  await doctor.locator('.viewer-case-tools summary').click();
-  const menu = await doctor.locator('.viewer-case-menu').boundingBox();
-  assert.ok(menu && menu.x >= 0 && menu.x + menu.width <= narrow.width);
+  const workTabs = doctor.getByRole('tablist', { name: 'Viewer Workspace' });
+  const tabsWidth = await workTabs.boundingBox();
+  assert.ok(tabsWidth && tabsWidth.x >= 0 && tabsWidth.x + tabsWidth.width <= narrow.width);
 
   assert.deepEqual(errors, []);
   console.log('PASS: pinned replay and IHC evidence, Viewer launch on the active scan, unavailable options, camera retention, scan isolation, permission and mobile layout');

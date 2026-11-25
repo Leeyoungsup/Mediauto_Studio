@@ -70,7 +70,7 @@ try {
 
   await page.goto('/');
   await subscribe(page, 'Frozen Section');
-  await button(page, 'Frozen Section').click();
+  await button(page, 'Frozen Cases').click();
   const list = page.getByRole('region', { name: 'Case List' });
   await list.getByRole('button', { name: entry + ' details', exact: true }).waitFor();
   await list.locator('.priority-badge').filter({ hasText: /^Frozen$/ }).waitFor();
