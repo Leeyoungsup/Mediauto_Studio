@@ -1,4 +1,4 @@
-import brandLogo from '../assets/logo.png';
+import brandLogo from '../assets/logo_white.png';
 import brandIcon from '../assets/app_icon.ico';
 import { AddCaseReference, CollectionWorkspace } from './case-collections';
 import { AnalysisSettings } from './analysis-execution';
@@ -460,7 +460,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
     style={navigationWidth === undefined ? undefined : { '--sidebar-width': `${navigationWidth}px` } as CSSProperties}>
     <aside className="sidebar" id="main-navigation">
       <a className="brand" href="#worklist/all" aria-label="MeDIAuto Studio Home" title="MeDIAuto Studio Home">
-        <img className="brand-logo" src={brandLogo} alt="" width={3776} height={1120} />
+        <img className="brand-logo" src={brandLogo} alt="" width={2048} height={768} />
         <img className="brand-mark" src={brandIcon} alt="" width={32} height={32} />
       </a>
       <nav aria-label="Workspace Navigation" className="side-nav">

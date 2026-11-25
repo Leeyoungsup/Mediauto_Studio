@@ -1,4 +1,4 @@
-import brandLogo from '../assets/logo.png';
+import brandLogo from '../assets/logo_white.png';
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { ArrowLeft, ClipboardCopy, Clock3, LogIn, UserPlus } from 'lucide-react';
@@ -144,7 +144,7 @@ export function SessionGate({ children }: { children: (user: User, logout: () =>
   return <main className="login-page">
     <section className="login-panel panel" aria-labelledby="auth-heading">
       <div className="login-brand">
-        <h1><img src={brandLogo} alt="MeDIAuto Studio" width={3776} height={1120} /></h1>
+        <h1><img src={brandLogo} alt="MeDIAuto Studio" width={2048} height={768} /></h1>
         <p>Pathology Workspace</p>
       </div>
       <div className="login-content">
