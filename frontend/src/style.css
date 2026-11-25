@@ -39,8 +39,8 @@ svg { flex: 0 0 auto; }
 .sidebar-resize-handle::after { content: ''; position: absolute; width: 2px; height: 30px; right: 3px; top: calc(50% - 15px); border-radius: 2px; background: #716491; }
 .sidebar-resize-handle:hover, .sidebar-resize-handle:focus-visible { background: #ffffff13; }
 .sidebar-resize-handle:focus-visible { outline: 2px solid #c5b5ff; outline-offset: -2px; }
-.brand { display: flex; align-items: center; min-height: 39px; padding-inline: 5px; }
-.brand-logo { display: block; width: 100%; max-width: 154px; height: auto; }
+.brand { display: flex; flex: none; align-items: center; justify-content: center; min-height: 39px; padding-inline: 5px; }
+.brand-logo { display: block; width: 100%; height: auto; }
 .brand-mark { display: none; }
 .app-shell[data-navigation-collapsed=true] .brand-mark { display: block; }
 .side-nav { min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; }
@@ -331,6 +331,7 @@ dialog::backdrop { background: #21193575; }
   .sidebar { position: static; height: auto; flex-direction: row; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding: 6px var(--workspace-inset); }
   .app-shell[data-navigation-collapsed=true] .sidebar { align-items: center; }
   .brand { min-height: 34px; }
+  .app-shell[data-navigation-collapsed=false] .brand { margin-inline: auto; }
   .brand-logo { width: 118px; }
   .brand-mark { width: 28px; height: 28px; }
   .sidebar-resize-handle { display: none; }

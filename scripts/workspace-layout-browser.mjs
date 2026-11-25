@@ -32,6 +32,17 @@ try {
   assert.equal(await resize.count(), 0);
   await button(page, 'Expand Navigation').click();
   const sidebar = page.locator('#main-navigation');
+  const logo = sidebar.locator('.brand-logo');
+  const logoSize = async () => {
+    const rail = await sidebar.boundingBox();
+    const image = await logo.boundingBox();
+    const ratio = await logo.evaluate((element) => element.naturalWidth / element.naturalHeight);
+    assert.ok(Math.abs(rail.x + rail.width / 2 - image.x - image.width / 2) < 1, 'The logo is centered in the sidebar');
+    assert.ok(Math.abs(image.width / image.height - ratio) < 0.025, 'The logo uses its original aspect ratio');
+    return image;
+  };
+  await logo.evaluate((image) => image.decode());
+  const originalLogo = await logoSize();
   const originalWidth = (await sidebar.boundingBox()).width;
   const grip = await resize.boundingBox();
   await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
@@ -39,10 +50,14 @@ try {
   await page.mouse.move(grip.x + grip.width / 2 + 76, grip.y + grip.height / 2, { steps: 8 });
   await page.mouse.up();
   assert.equal((await sidebar.boundingBox()).width, originalWidth + 76);
+  const expandedLogo = await logoSize();
+  assert.ok(expandedLogo.width > originalLogo.width + 70 && expandedLogo.height > originalLogo.height,
+    'The logo grows with the sidebar width');
   await resize.press('Home');
   assert.equal((await sidebar.boundingBox()).width, 154);
   await resize.press('End');
   assert.equal((await sidebar.boundingBox()).width, 320);
+  await logoSize();
   await resize.press('ArrowLeft');
   assert.equal((await sidebar.boundingBox()).width, 308);
   await page.reload();
