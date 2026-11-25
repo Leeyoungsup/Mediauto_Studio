@@ -18,7 +18,7 @@ npm --prefix frontend run build
 ./start.sh
 ```
 
-기본 HTTP 개발 모드에서는 `http://서버IP:9920/`으로 접속합니다. Nginx 배포 모드에서는 `https://studio.mediauto-t.com:9920/`을 사용합니다. `/api/health`에서 FastAPI·PostgreSQL과 EMR 설정 상태를 확인할 수 있습니다.
+기본 HTTP 개발 모드에서는 `http://서버IP:9920/`으로 접속합니다. Nginx 배포 모드에서는 `https://studio.mediauto.dev:9920/` 또는 `https://studio.mediauto.dev/`을 사용합니다. `/api/health`에서 FastAPI·PostgreSQL과 EMR 설정 상태를 확인할 수 있습니다.
 
 ### 계정 가입 신청
 
@@ -298,7 +298,9 @@ systemctl --user stop mediauto-studio-dev.service
 
 ### Nginx HTTPS 배포
 
-[Nginx 설정](deployment/nginx/mediauto-ims.conf)은 `https://studio.mediauto-t.com:9920/`의 요청을 서버 내부 `127.0.0.1:9921`로 전달합니다. 서버에 해당 도메인의 인증서가 설치되어 있어야 합니다. 건물 공유기의 TCP 9920 포워딩은 그대로 사용합니다.
+[Nginx 설정](deployment/nginx/mediauto-ims.conf)은 `studio.mediauto.dev`의 HTTPS 9920과 443 요청을 서버 내부 `127.0.0.1:9921`로 전달합니다. 서버에 `studio.mediauto.dev`용 인증서가 설치되어 있어야 합니다. 기존 TCP 9920 포워딩으로 포트를 붙인 주소를 사용할 수 있습니다. 주소에서 포트를 생략하려면 외부 TCP 443도 이 서버의 443으로 전달해야 합니다.
+
+Cloudflare DNS 인증을 사용하려면 `mediauto.dev`의 TXT 레코드를 관리할 수 있는 Certbot 자격 증명을 서버에 설정합니다. HTTP 인증을 사용하려면 외부 TCP 80에서 Nginx의 ACME 챌린지 경로에 접근할 수 있어야 합니다.
 
 ```bash
 sudo install -m 0644 deployment/nginx/mediauto-ims.conf /etc/nginx/conf.d/mediauto-ims.conf
@@ -306,7 +308,7 @@ sudo nginx -t
 systemctl --user stop mediauto-studio-dev.service
 MEDIAUTO_HOST=127.0.0.1 MEDIAUTO_PORT=9921 MEDIAUTO_COOKIE_SECURE=1 ./start.sh --detach
 sudo systemctl reload nginx
-curl --resolve studio.mediauto-t.com:9920:127.0.0.1 https://studio.mediauto-t.com:9920/api/health
+curl --resolve studio.mediauto.dev:9920:127.0.0.1 https://studio.mediauto.dev:9920/api/health
 ```
 
 실행 중인 서비스는 `./start.sh`로 재시작하고 `./start.sh --logs`로 로그를 봅니다. 서비스를 완전히 중지한 뒤 처음 시작할 때는 위 환경 변수를 다시 지정합니다. 기존 HTTP 개발 모드로 되돌리려면 해당 Nginx 설정을 제거하고 `sudo nginx -t` 후 Nginx를 다시 로드한 다음, 사용자 서비스를 중지하고 `./start.sh`로 시작합니다.
