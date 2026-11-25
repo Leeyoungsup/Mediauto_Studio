@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { UserPlus, UsersRound } from 'lucide-react';
 import { accountRoleLabels, api, jsonBody } from './session';
 
@@ -24,6 +24,8 @@ export function RegistrationRequests() {
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const reload = () => setRevision((value) => value + 1);
+  const decisionForm = useRef<HTMLFormElement>(null);
+  useEffect(() => { if (selected) decisionForm.current?.focus(); }, [selected]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -78,9 +80,10 @@ export function RegistrationRequests() {
       <button className="button secondary" disabled={offset === 0 || busy} onClick={() => { setSelected(undefined); setOffset(offset - pageSize); }}>Previous</button>
       <button className="button secondary" disabled={!page.has_more || busy} onClick={() => { setSelected(undefined); setOffset(offset + pageSize); }}>Next</button>
     </div>}
-    {selected && <form className="registration-decision" aria-label="Review Registration" key={selected.id}
+    {selected && <form ref={decisionForm} tabIndex={-1} className="registration-decision" aria-label="Review Registration" key={selected.id}
       onSubmit={(event) => { event.preventDefault(); void decision('approve', new FormData(event.currentTarget)); }}>
       <div className="title-inline"><UserPlus size={18} aria-hidden="true" /><h3>{selected.display_name} · {selected.username}</h3></div>
+      <p className="muted">Verify the code shared by the applicant and choose their workspace role.</p>
       <label className="form-field">Account Role<select name="role" defaultValue="" required disabled={busy}>
         <option value="" disabled>Select a role</option>{staffRoles.map((role) => <option key={role} value={role}>{accountRoleLabels[role]}</option>)}
       </select></label>

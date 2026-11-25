@@ -3,7 +3,8 @@ import { AnalysisSettings } from './analysis-execution';
 import { RoiSearchPage } from './roi-search';
 import type { RoiLocation } from './roi-search';
 import { FrozenWorkflow, ORResults } from './frozen-workflow';
-import { AccountsSettings } from './accounts-settings';
+import { AccountsSettings, accountSettingsHref } from './accounts-settings';
+import type { AccountTab } from './accounts-settings';
 import { CaseReport } from './case-report';
 import { NotificationCenter, NotificationSettings } from './notifications';
 import { lazy, Suspense, StrictMode, useCallback, useEffect, useRef, useState } from 'react';
@@ -39,8 +40,24 @@ type Health = { status: 'ok' | 'degraded'; database: 'connected' | 'unavailable'
 const RelatedComparison = lazy(() => import('./related-comparison'));
 const PapPolicySettings = lazy(() => import('./pap-policy-settings'));
 
+const settingsSections = [
+  { key: '', label: 'Intake and Integration', icon: ScanLine, admin: true },
+  { key: 'groups', label: 'Manage Workgroups', icon: UsersRound, admin: true },
+  { key: 'analysis', label: 'Analysis Pre-run Rules', icon: FlaskConical, admin: true },
+  { key: 'accounts', label: 'Accounts', icon: UserRoundPlus, admin: true },
+  { key: 'pap', label: 'Pap Review Policy', icon: Microscope, admin: true },
+  { key: 'notifications', label: 'Notifications', icon: Bell, admin: false },
+] as const;
+type SettingsPage = { view: 'settings'; section?: Exclude<typeof settingsSections[number]['key'], ''>; accountTab?: AccountTab };
+
+const accountLinks = [
+  { tab: 'directory', label: 'Account Management', name: 'Accounts', icon: UsersRound },
+  { tab: 'requests', label: 'Account Approvals', name: 'Approvals', icon: UserRoundPlus },
+  { tab: 'audit', label: 'Account Audit Log', name: 'Account Audit', icon: ClipboardList },
+] as const;
+
 type Page = { view: 'related-comparison'; id: string; anchor?: string } | { view: 'worklist'; scope: Scope } | { view: 'case'; id: string; files: boolean; tab?: 'requests' | 'report' | 'editor' | 'notes' | 'frozen'; selectedScan?: string } | { view: 'request'; id: string } | { view: 'or'; id?: string }
-  | { view: 'viewer'; id: string; slide?: string; snapshot?: string; roi?: string; roiOrigin?: RoiLocation; files: boolean } | { view: 'roi-search'; location: RoiLocation } | { view: 'collections'; id?: string } | { view: 'scans' } | { view: 'settings'; section?: 'groups' | 'notifications' | 'analysis' | 'pap' | 'accounts' };
+  | { view: 'viewer'; id: string; slide?: string; snapshot?: string; roi?: string; roiOrigin?: RoiLocation; files: boolean } | { view: 'roi-search'; location: RoiLocation } | { view: 'collections'; id?: string } | { view: 'scans' } | SettingsPage;
 type WorkflowAction = 'assignment' | 'review' | 'confirm';
 type Modal = 'register' | 'system' | null;
 
@@ -65,7 +82,11 @@ function readPage(): Page {
   if (view === 'collections') return { view, id: isUuid(id) ? id : undefined };
   if (view === 'or') return { view, id: id ? decodeRoute(id) : undefined };
   if (view === 'scans') return { view };
-  if (view === 'settings') return { view, section: id === 'groups' || id === 'notifications' || id === 'analysis' || id === 'pap' || id === 'accounts' ? id : undefined };
+  if (view === 'settings') {
+    const section = settingsSections.find(({ key }) => key === id)?.key || undefined;
+    const accountTab = section === 'accounts' ? accountLinks.find(({ tab }) => tab === slide)?.tab ?? 'directory' : undefined;
+    return { view, section, accountTab };
+  }
   if (view === 'request' && id) return { view, id: decodeRoute(id) };
   if ((view === 'case' || view === 'file-case') && id) return { view: 'case', id: decodeRoute(id), files: view === 'file-case', tab: slide === 'requests' || slide === 'report' || slide === 'editor' || slide === 'notes' || slide === 'frozen' ? slide : undefined,
     selectedScan: slide === 'slides' && snapshot ? decodeRoute(snapshot) : undefined };
@@ -104,6 +125,10 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
   const [page, setPage] = useState(readPage);
   const [navigationCollapsed, setNavigationCollapsed] = useState<boolean>();
   const collapseNavigation = navigationCollapsed ?? page.view === 'viewer';
+  const settingsPage = page.view === 'settings' ? page : undefined;
+  const showsIntegrationSettings = settingsAllowed && !!settingsPage && !settingsPage.section;
+  const accountTab = settingsPage?.accountTab;
+  const accountLocation = accountLinks.find(({ tab }) => tab === accountTab);
   const [selected, setSelected] = useState('');
   const [referenceCase, setReferenceCase] = useState<{ id: string; title: string }>();
   const [modal, setModal] = useState<Modal>(null);
@@ -141,11 +166,11 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
     api<IntegrationStatus>(integrationPath(user.organization) + '/status').then(setIntegration).catch(() => {});
   }, [user.organization]);
   useEffect(() => {
-    if (page.view === 'settings') return;
+    if (showsIntegrationSettings) return;
     refreshIntegration();
     const interval = window.setInterval(refreshIntegration, 5000);
     return () => window.clearInterval(interval);
-  }, [refreshIntegration, page.view]);
+  }, [refreshIntegration, showsIntegrationSettings]);
 
   const refreshQueues = useCallback(async () => setQueues(await api<Queue[]>('/api/worklist/queues')), []);
   useEffect(() => { refreshQueues().catch(() => {}); }, [refreshQueues]);
@@ -372,10 +397,15 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
         </div>}
         {settingsAllowed && <div className="side-nav-group" role="group" aria-label="Administration">
           <p>Administration</p>
-          <a href="#settings/accounts" aria-label="Account Management" title="Account Management"
-            aria-current={page.view === 'settings' && page.section === 'accounts' ? 'page' : undefined}><UsersRound size={18} /> <span>Accounts</span></a>
-          <a href="#settings" aria-label="Settings" title="Settings" aria-current={page.view === 'settings' && page.section !== 'accounts' ? 'page' : undefined}><Settings2 size={18} /> <span>Settings</span></a>
+          {accountLinks.map(({ tab, label, name, icon: Icon }) => <a key={tab} href={accountSettingsHref(tab)} aria-label={label}
+            title={label} aria-current={accountTab === tab ? 'page' : undefined}><Icon size={18} aria-hidden="true" /><span>{name}</span></a>)}
+          <a href="#settings" aria-label="Settings" title="Settings" aria-current={settingsPage && !accountTab && settingsPage.section !== 'notifications' ? 'page' : undefined}><Settings2 size={18} aria-hidden="true" /><span>Settings</span></a>
         </div>}
+        <div className="side-nav-group" role="group" aria-label="Personal Settings">
+          <p>Personal</p>
+          <a href="#settings/notifications" aria-label="Notification Preferences" title="Notification Preferences"
+            aria-current={settingsPage?.section === 'notifications' ? 'page' : undefined}><Bell size={18} aria-hidden="true" /><span>Preferences</span></a>
+        </div>
       </nav>
       <div className="side-footer"><button aria-label="Service Status" title="Service Status" onClick={() => showModal('system')}><Activity size={18} /><span>Service Status</span><i className={health?.status === 'ok' ? 'online' : ''} /></button></div>
     </aside>
@@ -385,7 +415,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
           aria-expanded={!collapseNavigation} aria-label={collapseNavigation ? 'Expand Navigation' : 'Collapse Navigation'}
           title={collapseNavigation ? 'Expand Navigation' : 'Collapse Navigation'} onClick={() => setNavigationCollapsed(!collapseNavigation)}>
           {collapseNavigation ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
-        </button><span>Pathology Workspace</span><ChevronRight size={15} /><strong>{{ viewer: 'WSI Viewer', 'related-comparison': 'Pap and Biopsy Comparison', 'roi-search': 'ROI Similarity Search', case: 'Case Details', request: 'Analysis and Consultation Requests', or: 'OR Results', collections: 'Collections and Tumor Board', scans: 'Slide Registration', settings: 'Settings', worklist: 'Worklist' }[page.view]}</strong></div>
+        </button><span>Pathology Workspace</span><ChevronRight size={15} /><strong>{{ viewer: 'WSI Viewer', 'related-comparison': 'Pap and Biopsy Comparison', 'roi-search': 'ROI Similarity Search', case: 'Case Details', request: 'Analysis and Consultation Requests', or: 'OR Results', collections: 'Collections and Tumor Board', scans: 'Slide Registration', settings: (settingsAllowed ? accountLocation?.label : undefined) ?? 'Settings', worklist: 'Worklist' }[page.view]}</strong></div>
         <div className="header-actions"><NotificationCenter key={user.id} organization={user.organization} /><span className="demo-label"><FlaskConical size={15} /> Demo Environment</span><button className="emr-chip" onClick={() => showModal('system')}><span /> EMR {emr} · LIS {lis}</button><span className="identity"><UserRound size={17} />{user.display_name}<small className="identity-role">{accountRoleLabels[user.role]}</small></span><button className="button secondary" onClick={logout}>Sign Out</button></div>
       </header>
       <main className="workspace-main" data-view={page.view}>
@@ -400,20 +430,19 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
             onRegister={writable ? () => showModal('register') : undefined} />
         </div>
         {page.view === 'settings' && (settingsAllowed || page.section === 'notifications') && <section className="panel settings-masthead">
-          <div className="page-heading"><div className="worklist-title"><span className="workspace-title-icon"><Settings2 size={20} aria-hidden="true" /></span><h1>Settings</h1></div></div>
+          <div className="page-heading"><div className="worklist-title"><span className="workspace-title-icon"><Settings2 size={20} aria-hidden="true" /></span>
+            <h1>{accountTab ? 'Accounts' : page.section === 'notifications' ? 'Preferences' : 'Settings'}</h1></div>
+            {accountTab && <span className="settings-organization">{user.organization}</span>}
+          </div>
           <nav className="worklist-nav" aria-label="Settings Navigation">
-            {settingsAllowed && <>
-              <a href="#settings" aria-current={!page.section ? 'page' : undefined}><ScanLine size={16} aria-hidden="true" /> Intake and Integration</a>
-              <a href="#settings/groups" aria-current={page.section === 'groups' ? 'page' : undefined}><UsersRound size={16} aria-hidden="true" /> Manage Workgroups</a>
-              <a href="#settings/analysis" aria-current={page.section === 'analysis' ? 'page' : undefined}><FlaskConical size={16} aria-hidden="true" /> Analysis Pre-run Rules</a>
-              <a href="#settings/accounts" aria-current={page.section === 'accounts' ? 'page' : undefined}><UserRoundPlus size={16} aria-hidden="true" /> Accounts</a>
-              <a href="#settings/pap" aria-current={page.section === 'pap' ? 'page' : undefined}><Microscope size={16} aria-hidden="true" /> Pap Review Policy</a>
-            </>}
-            <a href="#settings/notifications" aria-current={page.section === 'notifications' ? 'page' : undefined}><Bell size={16} aria-hidden="true" /> Notifications</a>
+            {settingsSections.filter(({ admin }) => !admin || settingsAllowed).map(({ key, label, icon: Icon }) =>
+              <a key={key} href={key ? '#settings/' + key : '#settings'} aria-current={(page.section ?? '') === key ? 'page' : undefined}>
+                <Icon size={16} aria-hidden="true" /> {label}
+              </a>)}
           </nav>
         </section>}
         {page.view === 'settings' && page.section === 'notifications' && <NotificationSettings organization={user.organization} />}
-        {page.view === 'settings' && page.section !== 'notifications' && settingsAllowed && (page.section === 'accounts' ? <AccountsSettings /> : page.section === 'groups'
+        {page.view === 'settings' && page.section !== 'notifications' && settingsAllowed && (page.section === 'accounts' ? <AccountsSettings tab={accountTab ?? 'directory'} /> : page.section === 'groups'
           ? <WorkgroupSettings onChanged={refreshQueues} /> : page.section === 'analysis' ? <AnalysisSettings organization={user.organization} />
           : page.section === 'pap' ? <Suspense fallback={<p role="status">Loading Pap policy…</p>}>
             <PapPolicySettings organization={user.organization} /></Suspense> : <>

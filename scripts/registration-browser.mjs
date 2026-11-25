@@ -9,7 +9,7 @@ const username = 'qa-new-viewer';
 
 try {
   const applicant = await browser.newPage({ baseURL, viewport: { width: 390, height: 850 } });
-  const admin = await browser.newPage({ baseURL });
+  const admin = await browser.newPage({ baseURL, viewport: { width: 1440, height: 900 } });
   applicant.setDefaultTimeout(12000);
   admin.setDefaultTimeout(12000);
   await applicant.goto('/');
@@ -24,10 +24,16 @@ try {
   await form.getByLabel('Confirm Password', { exact: true }).fill(password);
   await button(form, 'Submit Registration Request').click();
   await applicant.getByRole('heading', { name: 'Registration Confirmation Code' }).waitFor();
+  await applicant.getByText('Pending Approval', { exact: true }).waitFor();
+  assert.equal(await applicant.evaluate(() => document.activeElement?.id), 'auth-heading');
   const code = await applicant.locator('.registration-code').innerText();
+  await button(applicant, 'Copy Code').click();
+  await applicant.getByRole('status').filter({ hasText: /Confirmation code copied|Copy the selected code/ }).waitFor();
+  assert.ok(await applicant.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
   assert.match(code, /^[A-F0-9]{20}$/);
   assert.equal((await applicant.request.get('/api/auth/me')).status(), 401);
   await button(applicant, 'Back to Sign In').click();
+  assert.equal(await applicant.getByLabel('Username', { exact: true }).inputValue(), username);
   async function signIn() {
     await applicant.getByLabel('Username', { exact: true }).fill(username);
     await applicant.getByLabel('Password', { exact: true }).fill(password);
@@ -41,7 +47,13 @@ try {
   assert.equal(login.status(), 200);
   await admin.goto('/#settings');
   await admin.getByRole('link', { name: 'Accounts', exact: true }).click();
-  await admin.getByRole('tab', { name: 'Registration Requests', exact: true }).click();
+  const sidebar = admin.getByRole('navigation', { name: 'Workspace Navigation' });
+  await sidebar.getByRole('link', { name: 'Account Approvals', exact: true }).click();
+  await admin.waitForURL('**/#settings/accounts/requests');
+  await admin.reload();
+  await admin.getByRole('tab', { name: 'Registration Requests', exact: true, selected: true }).waitFor();
+  await sidebar.locator('a[href="#settings/accounts/requests"][aria-current="page"]').waitFor();
+  await admin.getByRole('button', { name: /EMR .* · LIS (Not Configured|Disabled|Connected|Connection)/ }).waitFor();
   const queue = admin.getByRole('region', { name: 'Account Registration Requests', exact: true });
   await button(queue, 'Review ' + username).click();
   const review = queue.getByRole('form', { name: 'Review Registration', exact: true });
@@ -55,8 +67,17 @@ try {
   await applicant.getByRole('heading', { name: 'Worklist', exact: true }).waitFor();
   const current = await (await applicant.request.get('/api/auth/me')).json();
   assert.equal(current.role, 'viewer');
-  await applicant.goto('/#settings/accounts');
-  await applicant.getByText('You do not have permission to open this page.', { exact: true }).waitFor();
+  for (const path of ['', '/requests', '/audit']) {
+    await applicant.goto('/#settings/accounts' + path);
+    await applicant.getByText('You do not have permission to open this page.', { exact: true }).waitFor();
+  }
+  const personal = applicant.getByRole('navigation', { name: 'Workspace Navigation' });
+  assert.equal(await personal.getByRole('group', { name: 'Administration' }).count(), 0);
+  await personal.getByRole('link', { name: 'OR Results', exact: true }).waitFor();
+  assert.equal(await personal.getByRole('link', { name: 'Open Slide Intake', exact: true }).count(), 0);
+  await personal.getByRole('link', { name: 'Notification Preferences' }).click();
+  await applicant.getByRole('heading', { name: 'Preferences', exact: true }).waitFor();
+  await applicant.getByRole('link', { name: 'Notifications', exact: true }).waitFor();
   assert.ok(await applicant.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
   assert.equal(await applicant.getByRole('link', { name: 'Account Management', exact: true }).count(), 0);
   assert.equal(await admin.getByRole('link', { name: 'Account Management', exact: true }).getAttribute('href'), '#settings/accounts');
@@ -75,6 +96,9 @@ try {
   await signIn();
   await applicant.getByRole('heading', { name: 'Worklist', exact: true }).waitFor();
   assert.equal(await applicant.locator('.identity-role').textContent(), 'Slide Registration Staff');
+  await personal.getByRole('link', { name: 'Open Slide Intake', exact: true }).waitFor();
+  assert.equal(await personal.getByRole('link', { name: 'OR Results', exact: true }).count(), 0);
+  assert.equal(await personal.getByRole('link', { name: 'My Cases', exact: true }).count(), 0);
   await button(directory, 'Edit Access for ' + username).click();
   await access.getByLabel('Account Status').selectOption('disabled');
   await access.getByLabel('Reason for Change').fill('Synthetic access suspension');
@@ -82,6 +106,8 @@ try {
   await directory.getByRole('cell', { name: 'Disabled', exact: true }).waitFor();
   assert.equal((await applicant.request.get('/api/auth/me')).status(), 401);
   await button(directory, 'View Log for ' + username).click();
+  await admin.waitForURL('**/#settings/accounts/audit');
+  await sidebar.locator('a[href="#settings/accounts/audit"][aria-current="page"]').waitFor();
   const log = admin.getByRole('region', { name: 'Account Audit Log', exact: true });
   assert.equal(await log.getByRole('textbox', { name: 'Filter by Username' }).inputValue(), username);
   await log.getByRole('cell', { name: 'Registration Approved', exact: true }).waitFor();
@@ -90,7 +116,17 @@ try {
   await permission.getByRole('cell', { name: 'Slide Registration Staff · Active', exact: true }).waitFor();
   await permission.getByRole('cell', { name: 'integration-admin', exact: true }).waitFor();
   await log.getByRole('cell', { name: 'Slide Registration Staff · Disabled', exact: true }).waitFor();
-  console.log('PASS: registration, administrator account directory, role and status changes, session revocation, and account audit');
+  await admin.goBack();
+  await admin.getByRole('tab', { name: 'Directory and Access', exact: true, selected: true }).waitFor();
+  await admin.setViewportSize({ width: 390, height: 850 });
+  await sidebar.getByRole('link', { name: 'Account Audit Log', exact: true }).click();
+  await admin.reload();
+  await admin.getByRole('tab', { name: 'Audit Log', exact: true, selected: true }).waitFor();
+  assert.equal(await log.getByRole('textbox', { name: 'Filter by Username' }).inputValue(), '');
+  assert.ok(await admin.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+  await button(admin, 'Sign Out').click();
+  await admin.getByRole('heading', { name: 'Sign In', exact: true }).waitFor();
+  console.log('PASS: approval status, direct account routes, role navigation and preferences, responsive sign-in and account pages; registration, administrator account directory, role and status changes, session revocation, and account audit');
 } finally {
   await browser.close();
 }

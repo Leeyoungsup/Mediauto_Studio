@@ -278,6 +278,8 @@ dialog::backdrop { background: #21193575; }
   .side-nav a { width: auto; min-height: 34px; white-space: nowrap; padding: 4px 7px; gap: 4px; font-size: 12px; }
   .app-shell[data-navigation-collapsed=true] .side-nav a { min-width: 34px; }
   .side-nav small { padding-inline: 4px; }
+  .app-shell[data-navigation-collapsed=false] .side-nav { flex: 0 0 100%; flex-wrap: wrap; }
+  .app-shell[data-navigation-collapsed=false] .side-nav-group { flex-shrink: 1; min-width: 0; max-width: 100%; flex-wrap: wrap; }
   .side-nav svg { width: 15px; }
   .topbar { min-height: 44px; }
   .header-actions { gap: 5px; }
@@ -296,11 +298,23 @@ dialog::backdrop { background: #21193575; }
   .column-options { right: 10px; min-width: min(245px, 85vw); }
 }
 
-.login-page { min-height: 100dvh; display: grid; place-items: center; padding: 24px; }
-.login-panel { width: min(100%, 400px); padding: 28px; }
-.login-panel h1 { font-size: 22px; margin: 0; }
-.login-form { display: grid; margin-top: 24px; gap: 10px; }
-.login-form .button { justify-content: center; margin-top: 8px; }
+.login-page { min-height: 100dvh; display: grid; place-items: center; padding: clamp(12px, 4vw, 36px); background: #f4f0fa; }
+.login-panel { width: min(100%, 475px); overflow: hidden; box-shadow: 0 18px 55px #39265a1c; }
+.login-brand { display: flex; align-items: center; gap: 13px; padding: 19px clamp(16px, 5vw, 30px); background: #25203c; color: #fff; }
+.login-brand .brand-icon { height: 40px; flex-basis: 40px; }
+.login-brand h1 { font-size: 22px; color: inherit; margin: 0; letter-spacing: -.025em; }
+.login-brand p { color: #d8cfee; font-size: 12px; margin: 3px 0 0; }
+.login-content { padding: clamp(16px, 5vw, 30px); }
+.login-content h2 { font-size: 21px; margin: 0 0 12px; }
+.login-form { display: grid; gap: 11px; }
+.login-form p { margin: 0; }
+.login-content .button { justify-content: center; }
+.login-switch { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; color: var(--muted); }
+.login-pending { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 650; background: var(--accent-soft); color: var(--accent-dark); border-radius: 6px; padding: 4px 8px; margin-bottom: 10px; }
+.login-code-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.login-code-row output { flex: 1 1 auto; }
+.login-code-row .button { flex: 0 0 auto; }
+.login-copy-status { font-size: 13px; }
 .identity { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 
 .form-field textarea { min-width: 0; width: 100%; padding: 9px; border: 1px solid var(--line); border-radius: 6px; font: inherit; resize: vertical; }
@@ -839,6 +853,8 @@ dialog::backdrop { background: #21193575; }
 .viewer-annotations-toggle[aria-expanded=true] { border-color: var(--accent); background: var(--accent-soft); }
 .settings-masthead { margin-bottom: 12px; overflow: hidden; }
 .settings-masthead .page-heading { margin: 0; padding: 10px 14px; }
+.settings-organization { max-width: 100%; overflow-wrap: anywhere; color: var(--accent-dark); background: var(--accent-soft); border-radius: 6px; padding: 4px 9px; }
+.registration-decision p { margin: 0; }
 .settings-masthead .worklist-nav { justify-content: flex-start; border-top: 1px solid var(--line); border-bottom: 0; margin: 0; }
 .detail-tabs { flex-wrap: nowrap; overflow-x: auto; }
 .detail-tabs button { flex: 0 0 auto; white-space: nowrap; }
@@ -853,11 +869,12 @@ dialog::backdrop { background: #21193575; }
 
 .registration-panel, .registration-decision { display: grid; gap: 12px; }
 .registration-panel .actions [aria-pressed=true] { background: var(--accent-soft); color: var(--accent-dark); border-color: var(--accent); }
-.registration-decision { max-width: 510px; border: 1px solid var(--line); padding: 13px; border-radius: 8px; }
+.registration-decision { min-width: 0; overflow-wrap: anywhere; max-width: 510px; border: 1px solid var(--line); padding: 13px; border-radius: 8px; }
 .registration-code { padding: 10px; background: var(--accent-soft); color: var(--accent-dark); border-radius: 8px; font-family: monospace; font-size: 16px; overflow-wrap: anywhere; user-select: all; }
 
 .accounts-settings > .workspace-tabs { border-radius: 12px 12px 0 0; padding: 0 8px; }
 .accounts-settings .registration-panel.panel { border: 0; }
 .accounts-settings table .actions { flex-wrap: nowrap; }
+.accounts-settings :is(h2, .preview-label p) { margin: 0; }
 .accounts-settings [role=tabpanel] { min-width: 0; }
 .identity-role { color: var(--accent-dark); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; font-size: 11px; }

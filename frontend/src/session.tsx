@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import { Microscope, UserPlus } from 'lucide-react';
+import { ArrowLeft, ClipboardCopy, Clock3, LogIn, Microscope, UserPlus } from 'lucide-react';
 
 export type User = { id: string; organization: string; username: string; display_name: string; role: 'admin' | 'doctor' | 'labeler' | 'viewer' };
 export const accountRoleLabels: Record<User['role'], string> = {
@@ -39,7 +39,18 @@ export function SessionGate({ children }: { children: (user: User, logout: () =>
   const [registering, setRegistering] = useState(false);
   const [organization, setOrganization] = useState('local');
   const [confirmationCode, setConfirmationCode] = useState('');
+  const [submittedUsername, setSubmittedUsername] = useState('');
+  const [copyStatus, setCopyStatus] = useState('');
   const [error, setError] = useState('');
+  const formHeading = useRef<HTMLHeadingElement>(null);
+  const codeOutput = useRef<HTMLOutputElement>(null);
+  const focusHeading = useRef(false);
+
+  useEffect(() => {
+    if (!focusHeading.current) return;
+    formHeading.current?.focus();
+    focusHeading.current = false;
+  }, [registering, confirmationCode]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -58,6 +69,7 @@ export function SessionGate({ children }: { children: (user: User, logout: () =>
     const fields = new FormData(event.currentTarget);
     try {
       setUser(await api<User>('/api/auth/login', jsonBody('POST', Object.fromEntries(fields))));
+      setSubmittedUsername('');
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Unable to sign in.');
     } finally { setBusy(false); }
@@ -74,6 +86,8 @@ export function SessionGate({ children }: { children: (user: User, logout: () =>
     setBusy(true); setError('');
     try {
       const result = await api<{ code: string }>('/api/auth/register', jsonBody('POST', Object.fromEntries(fields)));
+      setSubmittedUsername(String(fields.get('username') ?? ''));
+      focusHeading.current = true;
       setConfirmationCode(result.code);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Unable to submit the registration request.');
@@ -81,9 +95,27 @@ export function SessionGate({ children }: { children: (user: User, logout: () =>
   }
 
   function changeMode(open: boolean) {
+    focusHeading.current = true;
     setRegistering(open);
     setConfirmationCode('');
+    setCopyStatus('');
     setError('');
+  }
+
+  async function copyCode() {
+    try {
+      await navigator.clipboard.writeText(confirmationCode);
+      setCopyStatus('Confirmation code copied.');
+    } catch {
+      const selection = window.getSelection();
+      if (selection && codeOutput.current) {
+        const range = document.createRange();
+        range.selectNodeContents(codeOutput.current);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+      setCopyStatus('Copy the selected code with your browser.');
+    }
   }
 
   async function logout() {
@@ -92,32 +124,51 @@ export function SessionGate({ children }: { children: (user: User, logout: () =>
   }
 
   if (user) return <>{error && <p className="notice" role="alert">{error}</p>}{children(user, () => void logout())}</>;
-  return <main className="login-page"><section className="panel login-panel">
-    <div className="title-inline"><span className="brand-icon"><Microscope size={23} /></span><h1>MeDIAuto Studio</h1></div>
-    {loading ? <p role="status">Checking sign-in status…</p> : <>
-    {confirmationCode ? <div className="login-form" role="status">
-      <h2>Registration Confirmation Code</h2>
-      <p>Give this code to your organization administrator. Sign in after they confirm approval.</p>
-      <output className="registration-code">{confirmationCode}</output>
-      <button type="button" className="button primary" onClick={() => changeMode(false)}>Back to Sign In</button>
-    </div> : registering ? <form className="login-form" aria-label="Request an Account" onSubmit={(event) => void register(event)}>
-      <h2>Request an Account</h2>
-      <label className="form-field">Organization Code<input name="organization" value={organization} onChange={(event) => setOrganization(event.target.value)} required maxLength={64} /></label>
-      <label className="form-field">Display Name<input name="display_name" autoComplete="name" required maxLength={120} /></label>
-      <label className="form-field">Username<input name="username" autoComplete="username" required minLength={3} maxLength={80} pattern="[a-zA-Z0-9][a-zA-Z0-9._\-]{2,79}" /></label>
-      <label className="form-field">Password<input name="password" type="password" autoComplete="new-password" required minLength={12} maxLength={256} /></label>
-      <label className="form-field">Confirm Password<input name="confirm_password" type="password" autoComplete="new-password" required minLength={12} maxLength={256} /></label>
-      <p className="muted">Use at least 12 characters. Your administrator assigns your role.</p>
-      {error && <p className="form-error" role="alert">{error}</p>}
-      <button className="button primary" type="submit" disabled={busy}>{busy ? 'Submitting…' : 'Submit Registration Request'}</button>
-      <button className="button secondary" type="button" disabled={busy} onClick={() => changeMode(false)}>Back to Sign In</button>
-    </form> : <form className="login-form" onSubmit={(event) => void login(event)}>
-      <label className="form-field">Organization Code<input name="organization" value={organization} onChange={(event) => setOrganization(event.target.value)} required maxLength={64} /></label>
-      <label className="form-field">Username<input name="username" autoComplete="username" required maxLength={80} /></label>
-      <label className="form-field">Password<input name="password" type="password" autoComplete="current-password" required maxLength={256} /></label>
-      {error && <p className="form-error" role="alert">{error}</p>}
-      <button className="button primary" type="submit" disabled={busy}>{busy ? 'Checking…' : 'Sign In'}</button>
-      <button className="button secondary" type="button" disabled={busy} onClick={() => changeMode(true)}><UserPlus size={16} aria-hidden="true" /> Request an Account</button>
-    </form>}</>}
-  </section></main>;
+  const organizationField = <label className="form-field">Organization Code
+    <input name="organization" value={organization} onChange={(event) => setOrganization(event.target.value)} required maxLength={64} />
+  </label>;
+  const heading = confirmationCode ? 'Registration Confirmation Code' : registering ? 'Request an Account' : 'Sign In';
+
+  return <main className="login-page">
+    <section className="login-panel panel" aria-labelledby="auth-heading">
+      <div className="login-brand">
+        <span className="brand-icon"><Microscope size={24} aria-hidden="true" /></span>
+        <div><h1>MeDIAuto Studio</h1><p>Pathology Workspace</p></div>
+      </div>
+      <div className="login-content">
+        {loading ? <p role="status">Checking sign-in status…</p> : <>
+          {confirmationCode && <span className="login-pending"><Clock3 size={15} aria-hidden="true" /> Pending Approval</span>}
+          <h2 id="auth-heading" ref={formHeading} tabIndex={-1}>{heading}</h2>
+          {confirmationCode ? <div className="login-form">
+            <p>Share this code with your organization administrator. You can sign in after they approve your request.</p>
+            <div className="login-code-row">
+              <output ref={codeOutput} className="registration-code">{confirmationCode}</output>
+              <button type="button" className="button secondary" onClick={() => void copyCode()}><ClipboardCopy size={16} aria-hidden="true" /> Copy Code</button>
+            </div>
+            <p className="muted login-copy-status" role="status">{copyStatus || 'Keep this code for your administrator.'}</p>
+            <button type="button" className="button primary" onClick={() => changeMode(false)}>Back to Sign In</button>
+          </div> : registering ? <form key="register" className="login-form" aria-labelledby="auth-heading" onSubmit={(event) => void register(event)}>
+            <p>Your organization administrator approves the request and assigns your role.</p>
+            {organizationField}
+            <label className="form-field">Display Name<input name="display_name" autoComplete="name" required maxLength={120} /></label>
+            <label className="form-field">Username<input name="username" autoComplete="username" required minLength={3} maxLength={80} pattern="[a-zA-Z0-9][a-zA-Z0-9._\-]{2,79}" /></label>
+            <label className="form-field">Password<input name="password" type="password" autoComplete="new-password" aria-describedby="registration-password-requirement" required minLength={12} maxLength={256} /></label>
+            <small className="muted" id="registration-password-requirement">Use at least 12 characters.</small>
+            <label className="form-field">Confirm Password<input name="confirm_password" type="password" autoComplete="new-password" required minLength={12} maxLength={256} /></label>
+            {error && <p className="form-error" role="alert">{error}</p>}
+            <button className="button primary" type="submit" disabled={busy}>{busy ? 'Submitting…' : 'Submit Registration Request'}</button>
+            <button className="button secondary" type="button" disabled={busy} onClick={() => changeMode(false)}><ArrowLeft size={16} aria-hidden="true" /> Back to Sign In</button>
+          </form> : <form key="login" className="login-form" aria-labelledby="auth-heading" onSubmit={(event) => void login(event)}>
+            {organizationField}
+            <label className="form-field">Username<input name="username" autoComplete="username" defaultValue={submittedUsername} required maxLength={80} /></label>
+            <label className="form-field">Password<input name="password" type="password" autoComplete="current-password" required maxLength={256} /></label>
+            {error && <p className="form-error" role="alert">{error}</p>}
+            <button className="button primary" type="submit" disabled={busy}><LogIn size={16} aria-hidden="true" /> {busy ? 'Checking…' : 'Sign In'}</button>
+            <div className="login-switch"><span>New to your workspace?</span>
+              <button className="button secondary" type="button" disabled={busy} onClick={() => changeMode(true)}><UserPlus size={16} aria-hidden="true" /> Request an Account</button></div>
+          </form>}
+        </>}
+      </div>
+    </section>
+  </main>;
 }
