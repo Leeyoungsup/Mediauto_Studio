@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowDownWideNarrow } from 'lucide-react';
+import { ArrowDown, ArrowDownWideNarrow, ArrowUp } from 'lucide-react';
 import { api, jsonBody } from './session';
 import { initialPreferences, sortFields } from './worklist-config';
 import type { ColumnSetting, Preferences, SavedView, Scope, SortField, SortTerm, ViewConfig } from './worklist-config';
@@ -99,6 +99,7 @@ export function useSavedViews(scope: Scope, apply: (configuration: ViewConfig | 
   }
 
   return { views, preferences, active, choose, save, remove, error, notice, busy, ready,
+    clearSelection: () => { setSelected(''); setNotice(''); },
     refresh: () => void perform(refresh),
     setDefault: () => changePreference(active?.id ?? null, preferences.columns),
     saveColumns: (value: ColumnSetting[]) => changePreference(preferences.default_view_id, value),
@@ -173,10 +174,16 @@ export function SortControls({ order, onChange, onReset, onSave, onClear, busy }
   function update(index: number, changes: Partial<SortTerm>) {
     onChange(order.map((term, row) => row === index ? { ...term, ...changes } : term));
   }
+  function move(index: number, offset: number) {
+    const next = [...order];
+    [next[index], next[index + offset]] = [next[index + offset], next[index]];
+    onChange(next);
+  }
   return <details className="column-menu sort-menu">
     <summary className="button secondary"><ArrowDownWideNarrow size={15} /> Multi-Level Sort</summary>
     <div className="column-options">
-      {order.map(({ field, direction }, index) => <div className="sort-row" key={index}>
+      {order.map(({ field, direction }, index) => <div className="sort-row" key={field}>
+        <span className="sort-rank" aria-hidden="true">{index + 1}</span>
         <select aria-label={`${index + 1}: Sort Field`} value={field} onChange={(event) => update(index, { field: event.target.value as SortField })}>
           {keys.filter((key) => key === field || !order.some((term) => term.field === key))
             .map((key) => <option key={key} value={key}>{sortFields[key]}</option>)}
@@ -185,6 +192,8 @@ export function SortControls({ order, onChange, onReset, onSave, onClear, busy }
           onChange={(event) => update(index, { direction: event.target.value === 'desc' ? 'desc' : 'asc' })}>
           <option value="asc">Ascending</option><option value="desc">Descending</option>
         </select>
+        <button className="icon-button" aria-label={`${index + 1}: Move Sort Level Up`} disabled={index === 0} onClick={() => move(index, -1)}><ArrowUp size={14} /></button>
+        <button className="icon-button" aria-label={`${index + 1}: Move Sort Level Down`} disabled={index === order.length - 1} onClick={() => move(index, 1)}><ArrowDown size={14} /></button>
         <button className="icon-button" aria-label={`${index + 1}: Remove Sort Level`} disabled={order.length === 1}
           onClick={() => onChange(order.filter((_, row) => index !== row))}>×</button>
       </div>)}

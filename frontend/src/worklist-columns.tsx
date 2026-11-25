@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Layers3, Search } from 'lucide-react';
+import { GripVertical, ArrowDown, ArrowUp, Layers3, Search } from 'lucide-react';
 import { readyCount, statuses } from './demo';
 import type { CaseStatus, DemoCase } from './demo';
 import { columns } from './worklist-config';
@@ -55,7 +55,8 @@ export function ColumnPicker({ settings, search, onSearch, onChange }: {
 }) {
   function move(index: number, offset: number) {
     const next = [...settings];
-    [next[index], next[index + offset]] = [next[index + offset], next[index]];
+    const [column] = next.splice(index, 1);
+    next.splice(index + offset, 0, column);
     onChange(next);
   }
 
@@ -65,7 +66,20 @@ export function ColumnPicker({ settings, search, onSearch, onChange }: {
     <div className="column-list">{settings.map(({ id, visible }, index) => {
       const label = columns.find((column) => column.id === id)!.label;
       if (!label.toLowerCase().includes(search.trim().toLowerCase())) return null;
-      return <div className="column-row" key={id}>
+      return <div className="column-row" key={id}
+        onDragOver={(event) => { if (event.dataTransfer.types.includes('application/x-mediauto-column')) event.preventDefault(); }}
+        onDrop={(event) => {
+          const source = event.dataTransfer.getData('application/x-mediauto-column');
+          const from = settings.findIndex((column) => column.id === source);
+          if (from < 0 || from === index) return;
+          event.preventDefault();
+          move(from, index - from);
+        }}>
+        <span className="column-drag-handle" title="Drag to reorder" aria-hidden="true" draggable
+          onDragStart={(event) => {
+            event.dataTransfer.setData('application/x-mediauto-column', id);
+            event.dataTransfer.effectAllowed = 'move';
+          }}><GripVertical size={14} /></span>
         <label><input type="checkbox" checked={visible} onChange={() => onChange(settings.map((column) =>
           column.id === id ? { id, visible: !visible } : column))} />{label}</label>
         <button className="icon-button" aria-label={`${label} up`} disabled={index === 0} onClick={() => move(index, -1)}><ArrowUp size={14} /></button>

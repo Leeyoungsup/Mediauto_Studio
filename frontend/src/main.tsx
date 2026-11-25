@@ -89,7 +89,7 @@ function readPage(): Page {
   }
   if (view === 'request' && id) return { view, id: decodeRoute(id) };
   if ((view === 'case' || view === 'file-case') && id) return { view: 'case', id: decodeRoute(id), files: view === 'file-case', tab: slide === 'requests' || slide === 'report' || slide === 'editor' || slide === 'notes' || slide === 'frozen' ? slide : undefined,
-    selectedScan: slide === 'slides' && snapshot ? decodeRoute(snapshot) : undefined };
+    selectedScan: (slide === 'slides' || slide === 'editor') && snapshot ? decodeRoute(snapshot) : undefined };
   if ((view === 'viewer' || view === 'file-viewer') && id) return { view: 'viewer', id: decodeRoute(id), slide: slide ? decodeRoute(slide) : undefined, snapshot: /^[a-f0-9]{64}$/.test(snapshot ?? '') ? snapshot : undefined, files: view === 'file-viewer' };
   return { view: 'worklist', scope: id === 'mine' || id === 'unassigned' ? id : 'all' };
 }
@@ -133,7 +133,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
   const [referenceCase, setReferenceCase] = useState<{ id: string; title: string }>();
   const [modal, setModal] = useState<Modal>(null);
   const [formError, setFormError] = useState('');
-  const [workflow, setWorkflow] = useState<{ item: DemoCase; action: WorkflowAction }>();
+  const [workflow, setWorkflow] = useState<{ item: DemoCase; action: WorkflowAction; loading?: boolean }>();
   const [workflowError, setWorkflowError] = useState('');
   const [intakePatient, setIntakePatient] = useState<PatientSelection>();
   const [health, setHealth] = useState<Health | null>(null);
@@ -213,7 +213,11 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
     if (!detailId || !detailKey) return;
     const controller = new AbortController();
     api<WorklistEntry>('/api/worklist/' + encodeURIComponent(detailId), { signal: controller.signal })
-      .then((data) => { if (!controller.signal.aborted) setDetail({ key: detailKey, item: caseView(data) }); })
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        setSelected(data.case_number);
+        setDetail({ key: detailKey, item: caseView(data) });
+      })
       .catch(() => { if (!controller.signal.aborted) setDetail({ key: detailKey, error: 'Unable to load the case.' }); });
     return () => controller.abort();
   }, [detailId, detailKey, revision]);
@@ -222,7 +226,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
     function sync() {
       const next = readPage();
       if (next.view === 'worklist') setLastScope(next.scope);
-      else if (next.view === 'case' || next.view === 'viewer') setSelected(next.id);
+      else if ((next.view === 'case' || next.view === 'viewer') && next.files) setSelected(next.id);
       if (next.view !== 'worklist') setReferenceCase(undefined);
       setPage(next);
     }
@@ -296,12 +300,54 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
     location.hash = `${item.source === 'files' ? 'file-viewer' : 'viewer'}/${encodeURIComponent(item.recordId ?? item.id)}${slide ? `/${encodeURIComponent(slide)}` : ''}`;
   }
   function goBack() { location.hash = `worklist/${lastScope}`; }
+  function openEditor(item: DemoCase, scan?: string) {
+    if (!item.recordId) return;
+    setSelected(item.id);
+    location.hash = `case/${item.recordId}/editor${scan ? '/' + encodeURIComponent(scan) : ''}`;
+  }
+
+  async function continueIntake(caseNumber: string, signal: AbortSignal) {
+    const params = new URLSearchParams({ q: caseNumber, scope: 'all', order: 'case_number:asc' });
+    for (let offset = 0; !signal.aborted;) {
+      params.set('offset', String(offset));
+      const listing = await api<Result>('/api/worklist?' + params, { signal });
+      if (signal.aborted) return;
+      const existing = listing.rows.find((row) => row.record_id && row.case_number === caseNumber);
+      if (existing) { openEditor(caseView(existing)); return; }
+      offset += listing.rows.length;
+      if (!listing.rows.length || offset >= listing.total) break;
+    }
+    if (signal.aborted) return;
+    const item = buildFileCases(files).find(({ id }) => id === caseNumber);
+    if (!item) throw new Error('Refresh the scan list and try again.');
+    openWorkflow(item, 'confirm');
+  }
 
   function openWorkflow(item: DemoCase, action: WorkflowAction) {
     setWorkflowError('');
     setIntakePatient(undefined);
     setWorkflow({ item, action });
   }
+
+  const pendingAssignment = workflow?.loading ? workflow.item.recordId : undefined;
+  useEffect(() => {
+    if (!pendingAssignment) return;
+    const controller = new AbortController();
+    api<WorklistEntry>('/api/worklist/' + encodeURIComponent(pendingAssignment), { signal: controller.signal })
+      .then((entry) => {
+        if (controller.signal.aborted) return;
+        const item = caseView(entry);
+        if (item.status === 'Review Complete') setWorkflowError('This case is already review complete.');
+        setWorkflow({ item, action: 'assignment' });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setWorkflowError('Unable to load the latest assignment. Reload to try again.');
+          setWorkflow((entry) => entry && { ...entry, item: { ...entry.item, candidates: undefined }, loading: false });
+        }
+      });
+    return () => controller.abort();
+  }, [pendingAssignment]);
 
   function refreshWorkflow() {
     setWorkflow(undefined);
@@ -311,7 +357,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
 
   async function saveWorkflow(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!workflow || saving) return;
+    if (!workflow || workflow.loading || saving || (workflow.action === 'assignment' && !workflow.item.candidates?.some(({ id }) => id !== workflow.item.assignedTo))) return;
     const { item, action } = workflow;
     const fields = new FormData(event.currentTarget);
     const prefix = `/api/clinical/${encodeURIComponent(user.organization)}`;
@@ -322,6 +368,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
         const { id } = await api<{ id: string }>(`${prefix}/files/${encodeURIComponent(item.id)}/case`,
           jsonBody('POST', { files: item.slides.map((slide) => ({ id: slide.id, version: slide.intakeVersion })),
             patient_id: intakePatient?.id ?? null, patient_version: intakePatient?.version ?? null, confirm_patient: Boolean(intakePatient) }));
+        setSelected(item.id);
         location.hash = `case/${id}/editor`;
       } else {
         const reason = String(fields.get('reason') ?? '').trim();
@@ -356,7 +403,8 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
       registration.current = null;
       setRevision((value) => value + 1);
       showModal(null);
-      location.hash = `case/${record.id}`;
+      setSelected(id);
+      location.hash = `case/${record.id}/editor`;
     } catch (failure) {
       setFormError(failure instanceof Error ? failure.message : 'Unable to register the case.');
     } finally { setSaving(false); }
@@ -426,6 +474,16 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
             total={result.total} counts={result.counts} filteredCounts={result.filtered_counts} queues={queues} workload={result.workload} onQueueChanged={refreshQueues} assignees={result.assignees} onQuery={setQuery}
             onOpen={(id) => { const item = worklistCases.find((row) => row.id === id); if (item) navigateCase(item); }}
             onViewer={(id, slide) => { const item = worklistCases.find((row) => row.id === id); if (item) navigateViewer(item, slide); }}
+            onAssign={settingsAllowed ? (item) => {
+              setWorkflowError('');
+              setWorkflow({ item, action: 'assignment', loading: true });
+            } : undefined}
+            onEdit={writable ? openEditor : undefined}
+            onConfirm={intakeAllowed ? (item) => {
+              const group = buildFileCases(files).find(({ id }) => id === item.id);
+              if (group) openWorkflow(group, 'confirm');
+              else navigateCase(item);
+            } : undefined}
             onReference={requestAllowed ? (item) => { if (item.recordId) setReferenceCase({ id: item.recordId, title: item.id }); } : undefined}
             onRegister={writable ? () => showModal('register') : undefined} />
         </div>
@@ -449,7 +507,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
           {intakeAllowed && <IntakeSettings refresh={refreshFiles} emrConnected={integration?.emr.state === 'connected'} />}
           <IntegrationSettings org={user.organization} status={integration} onRefresh={refreshIntegration} />
         </>)}
-        {page.view === 'scans' && intakeAllowed && <IntakePage files={files} loading={filesLoading} problem={fileProblem} refresh={refreshFiles} />}
+        {page.view === 'scans' && intakeAllowed && <IntakePage files={files} loading={filesLoading} problem={fileProblem} refresh={refreshFiles} onContinue={continueIntake} emr={emr} />}
         {((page.view === 'settings' && page.section !== 'notifications' && !settingsAllowed) || (page.view === 'scans' && !intakeAllowed)) && <div className="panel empty"><strong>You do not have permission to open this page.</strong><button className="button secondary" onClick={goBack}>Back to Worklist</button></div>}
         {page.view === 'or' && (orAllowed ? <ORResults organization={user.organization} caseId={page.id} />
           : <div className="panel empty"><strong>You do not have permission to open the OR view.</strong></div>)}
@@ -468,7 +526,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
           : casePage.view === 'case' ? <CaseDetail key={current.id + '/' + (casePage.tab ?? '')} item={current} relatedEndpoint={requestAllowed && clinicalCaseEndpoint ? clinicalCaseEndpoint + '/related-cases' : undefined} selectedScan={casePage.selectedScan} historyEndpoint={historyEndpoint} attachmentsEndpoint={attachmentsEndpoint} logsEndpoint={logsEndpoint} notesEndpoint={notesEndpoint}
             initialTab={current.recordId ? casePage.tab === 'editor' ? 'Case Editor' : casePage.tab === 'notes' ? 'Notes' : casePage.tab === 'frozen' && frozenEndpoint ? 'Frozen Section' : requestAllowed
               ? casePage.tab === 'requests' ? 'Requests' : casePage.tab === 'report' ? 'Report Draft' : undefined : undefined : undefined}
-            editor={current.recordId ? <CaseEditor item={current} organization={user.organization} editable={writable && current.status !== 'Review Complete'}
+            editor={current.recordId ? <CaseEditor key={casePage.selectedScan ?? ''} item={current} focusScan={casePage.tab === 'editor' ? casePage.selectedScan : undefined} organization={user.organization} editable={writable && current.status !== 'Review Complete'}
               canImport={user.role === 'admin'} onChanged={patientChanged}
               patient={<PatientIntegration item={current} org={user.organization} editable={writable} status={integration} onChanged={patientChanged} />} /> : undefined}
             frozen={frozenEndpoint && current.recordId ? <FrozenWorkflow caseId={current.recordId} endpoint={frozenEndpoint} /> : undefined}
@@ -506,14 +564,15 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
           <p>{workflow.item.id} has {workflow.item.slides.length} registered scans to link to this case.</p>
           <PatientMatch item={workflow.item} organization={user.organization} selected={intakePatient} onSelect={setIntakePatient} />
         </> : <>
+          {workflow.loading && <p role="status">Loading eligible pathologists…</p>}
           {workflow.action === 'assignment' && <label className="form-field">Assigned Pathologist
-            <select name="assignee" required defaultValue="">
+            <select name="assignee" required disabled={workflow.loading || !workflow.item.candidates?.length} defaultValue="">
               <option value="">Select the assigned pathologist</option>
               {workflow.item.candidates?.filter(({ id }) => id !== workflow.item.assignedTo)
                 .map(({ id, name, username }) => <option key={id} value={id}>{name} ({username})</option>)}
             </select>
           </label>}
-          {workflow.action === 'assignment' && !workflow.item.candidates?.some(({ id }) => id !== workflow.item.assignedTo) &&
+          {workflow.action === 'assignment' && !workflow.loading && !workflow.item.candidates?.some(({ id }) => id !== workflow.item.assignedTo) &&
             <p className="muted">No active pathologists are available.</p>}
           {workflow.action === 'assignment' && workflow.item.status === 'In Review' &&
             <p>Reassigning returns the case to Assigned so the new pathologist can start the review.</p>}
@@ -524,9 +583,14 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
         </>}
         {workflowError && <p className="form-error" role="alert">{workflowError}</p>}
         <div className="dialog-actions">
-          {workflowError && <button type="button" className="button secondary" onClick={refreshWorkflow}>Reload Latest Status</button>}
+          {workflowError && <button type="button" className="button secondary" onClick={() => {
+            if (workflow.action === 'assignment' && !casePage) {
+              setWorkflowError('');
+              setWorkflow({ ...workflow, loading: true });
+            } else refreshWorkflow();
+          }}>Reload Latest Status</button>}
           <button type="button" className="button secondary" disabled={saving} onClick={() => setWorkflow(undefined)}>Cancel</button>
-          <button className="button primary" type="submit" disabled={saving}>{workflow.action === 'confirm' ? 'Confirm' : 'Save'}</button>
+          <button className="button primary" type="submit" disabled={saving || workflow.loading || (workflow.action === 'assignment' && !workflow.item.candidates?.some(({ id }) => id !== workflow.item.assignedTo))}>{workflow.action === 'confirm' ? 'Confirm' : 'Save'}</button>
         </div>
       </form>
     </ModalWindow>}

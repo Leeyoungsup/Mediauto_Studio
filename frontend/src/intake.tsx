@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { ArrowDown, ArrowUp, FileImage, FolderOpen, Plus, RefreshCw, Settings2, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUp, FileImage, FolderOpen, Plus, RefreshCw, Settings2, Trash2 } from 'lucide-react';
 import { codipaiRule, emptyFields, fieldLabels, formatIntakeDate, requestIntake } from './intake-api';
 import type { Entry, FilenameRule, Match, RuleSet, SlideFields, SourceFile } from './intake-api';
 
@@ -8,8 +8,8 @@ function message(error: unknown) {
   return error instanceof Error ? error.message : 'Unable to process the request.';
 }
 
-export function IntakePage({ files, loading, problem, refresh }: {
-  files: SourceFile[]; loading: boolean; problem: string; refresh: () => Promise<void>;
+export function IntakePage({ files, loading, problem, refresh, onContinue, emr }: {
+  files: SourceFile[]; loading: boolean; problem: string; refresh: () => Promise<void>; onContinue: (caseNumber: string, signal: AbortSignal) => Promise<void>; emr: string;
 }) {
   const [filter, setFilter] = useState('pending');
   const [query, setQuery] = useState('');
@@ -18,16 +18,21 @@ export function IntakePage({ files, loading, problem, refresh }: {
   const [problemForm, setProblemForm] = useState('');
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
+  const [nextCase, setNextCase] = useState('');
+  const [opening, setOpening] = useState(false);
+  const [openError, setOpenError] = useState('');
   const caseField = useRef<HTMLInputElement>(null);
+  const continuation = useRef<AbortController>(null);
   const edited = files.find(({ id }) => id === opened?.id);
   const pending = files.filter(({ entry }) => !entry).length;
   const matching = files.filter((file) => (filter === 'all' || (filter === 'pending' ? !file.entry : file.entry))
     && `${file.filename} ${file.entry?.fields.case_id ?? ''}`.toLowerCase().includes(query.trim().toLowerCase()));
 
   useEffect(() => { if (opened) caseField.current?.focus(); }, [opened]);
+  useEffect(() => () => continuation.current?.abort(), []);
 
   function edit(file: SourceFile) {
-    setOpened({ id: file.id, version: file.entry?.version ?? 0 }); setDraft({ ...emptyFields, ...file.entry?.fields }); setNotice(''); setProblemForm('');
+    setOpened({ id: file.id, version: file.entry?.version ?? 0 }); setDraft({ ...emptyFields, ...file.entry?.fields }); setNotice(''); setProblemForm(''); setNextCase(''); setOpenError('');
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -39,17 +44,37 @@ export function IntakePage({ files, loading, problem, refresh }: {
       await refresh();
       setOpened(null);
       setNotice('Slide details saved.');
+      setNextCase(draft.case_id.trim());
     } catch (error) {
       setProblemForm(message(error));
     } finally { setSaving(false); }
   }
 
+  async function continueCase(caseNumber: string) {
+    if (continuation.current) return;
+    const controller = new AbortController();
+    continuation.current = controller;
+    setOpening(true); setOpenError('');
+    try { await onContinue(caseNumber, controller.signal); }
+    catch (error) { if (!controller.signal.aborted) setOpenError(message(error)); }
+    finally {
+      continuation.current = null;
+      if (!controller.signal.aborted) setOpening(false);
+    }
+  }
+
   return <>
-    <div className="page-heading"><div><h1>Slide Registration</h1><p>Review NDPI and SVS files in the data/ folder and link them to cases.</p></div>
+    <div className="page-heading"><div><h1>Slide Registration</h1><p>Register scan details, confirm the case, then review the patient and scan QC in Case Editor.</p></div>
       <div className="actions"><button className="button secondary" onClick={() => void refresh()} disabled={loading}><RefreshCw size={16} /> Refresh List</button><a className="button primary" href="#settings"><Settings2 size={16} /> Filename Rules</a></div>
     </div>
     {problem && <p className="notice" role="alert">{problem}</p>}
-    {notice && <p className="success-note" role="status">{notice}</p>}
+    {openError && <p className="notice" role="alert">{openError}</p>}
+    <p className="integration-note">EMR {emr} · Local slide registration is available.</p>
+    {notice && <div className="success-note intake-next-step"><span role="status">{notice}</span>
+      {nextCase && <button type="button" className="button primary" disabled={opening || loading} onClick={() => void continueCase(nextCase)}>
+        Continue to Case Editor <ArrowRight size={16} />
+      </button>}
+    </div>}
     <section className="panel">
       <div className="panel-title"><div className="title-inline"><h2>Scan Files</h2><span className="count">{files.length}</span></div></div>
       <div className="filters intake-filters">
@@ -64,7 +89,11 @@ export function IntakePage({ files, loading, problem, refresh }: {
           <td><strong className="file-name"><FileImage size={15} />{file.filename}</strong><small className="muted">{(file.size / 2 ** 20).toLocaleString('en-US', { maximumFractionDigits: 1 })} MB · {formatIntakeDate(file.modified)}</small></td>
           <td>{file.format}</td><td>{file.entry?.fields.case_id || '—'}</td><td>{file.entry?.fields.slide_id || '—'}</td>
           <td><span className={file.entry ? 'status-pill status-3' : 'status-pill status-0'}>{file.entry ? file.entry.source === 'rule' ? 'Filename Rules' : 'Enter Manually' : 'Not Entered'}</span></td>
-          <td><button className="button secondary" onClick={() => edit(file)} aria-label={`${file.filename} ${file.entry ? 'Edit Details' : 'Enter Manually'}`}>{file.entry ? 'Edit Details' : 'Enter Manually'}</button></td>
+          <td><div className="actions">
+            <button className="button secondary" disabled={opening || saving} onClick={() => edit(file)} aria-label={`${file.filename} ${file.entry ? 'Edit Details' : 'Enter Manually'}`}>{file.entry ? 'Edit Details' : 'Enter Manually'}</button>
+            {file.entry && <button type="button" className="button secondary" disabled={opening || loading || saving}
+              aria-label={`Continue ${file.filename} to Case Editor`} onClick={() => void continueCase(file.entry!.fields.case_id)}>Continue <ArrowRight size={15} /></button>}
+          </div></td>
         </tr>)}</tbody>
       </table></div>
       {!matching.length && <div className="empty" role="status"><FolderOpen size={24} /><p>{loading ? 'Loading files…' : 'No scan files match these filters.'}</p></div>}

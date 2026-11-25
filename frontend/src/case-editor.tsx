@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { api, jsonBody, request } from './session';
 import type { DemoCase } from './demo';
@@ -160,17 +160,19 @@ function RecordHistory({ title, events }: { title: string; events: Event[] }) {
   </ul></details> : null;
 }
 
-function ScanEntry(props: Parameters<typeof ScanQuality>[0]) {
-  const [open, setOpen] = useState(false);
+function ScanEntry({ focused, ...props }: Parameters<typeof ScanQuality>[0] & { focused: boolean }) {
+  const [open, setOpen] = useState(focused);
   const { scan } = props;
-  return <details className="editor-scan" onToggle={(event) => setOpen(event.currentTarget.open)}>
-    <summary>{scan.storage_key} · {scan.format} · {qualityLabels[scan.qc_status]}</summary>
+  const summary = useRef<HTMLElement>(null);
+  useEffect(() => { if (focused) summary.current?.focus(); }, [focused]);
+  return <details className="editor-scan" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <summary ref={summary} data-focused-scan={focused || undefined}>{scan.storage_key} · {scan.format} · {qualityLabels[scan.qc_status]}</summary>
     {open && <ScanQuality {...props} />}
   </details>;
 }
 
-function SlideEditor({ slide, scans, blocks, apiRoot, path, editable, canImport, onChanged }: {
-  slide: Slide; scans: Scan[]; blocks: Block[]; apiRoot: string; path: string; editable: boolean; canImport: boolean; onChanged: () => void;
+function SlideEditor({ slide, scans, blocks, apiRoot, path, editable, canImport, onChanged, focusScan }: {
+  slide: Slide; scans: Scan[]; blocks: Block[]; apiRoot: string; path: string; editable: boolean; canImport: boolean; onChanged: () => void; focusScan?: string;
 }) {
   const [ocr, setOcr] = useState<OCR>();
   const [confirmed, setConfirmed] = useState(false);
@@ -181,7 +183,7 @@ function SlideEditor({ slide, scans, blocks, apiRoot, path, editable, canImport,
       confirmed_ocr_scan: confirmed ? ocr?.scan_id : null, confirmed_ocr_version: confirmed ? ocr?.version : null }));
     setOcr(undefined); setConfirmed(false); onChanged();
   }
-  return <details className="editor-slide">
+  return <details className="editor-slide" open={scans.some(({ id }) => id === focusScan) || undefined}>
     <summary>{slide.slide_number} · {slide.stain || 'No Stain'} · {scans.length} scans</summary>
     {editable && <EditForm action="Save Slide Details" save={save} key={slide.version}>
       <Field label="Slide Number" name="slide_number" value={slide.slide_number} required maxLength={80} />
@@ -209,13 +211,13 @@ function SlideEditor({ slide, scans, blocks, apiRoot, path, editable, canImport,
     {editable && <button className="button secondary" onClick={() => setNewScan(!newScan)}>{newScan ? 'Close Scan Registration' : 'Add Scan'}</button>}
     {newScan && <CreateRecord action="Register Scan" endpoint={apiRoot + '/scans'} data={{ slide_id: slide.id }}
       onChanged={() => { setNewScan(false); onChanged(); }}><Field label="Scan Path Under data/" name="storage_key" required maxLength={512} /></CreateRecord>}
-    {scans.map((scan) => <ScanEntry key={scan.id} scan={scan} path={path + '/scans/' + scan.id} editable={editable}
+    {scans.map((scan) => <ScanEntry key={scan.id} scan={scan} focused={focusScan === scan.id} path={path + '/scans/' + scan.id} editable={editable}
       canImport={canImport} onChanged={onChanged} onCandidate={(candidate) => { setOcr(candidate); setConfirmed(false); }} />)}
   </details>;
 }
 
-export function CaseEditor({ item, organization, editable, canImport, patient, onChanged }: {
-  item: DemoCase; organization: string; editable: boolean; canImport: boolean; patient?: ReactNode; onChanged: () => void;
+export function CaseEditor({ item, organization, editable, canImport, patient, onChanged, focusScan }: {
+  item: DemoCase; organization: string; editable: boolean; canImport: boolean; patient?: ReactNode; onChanged: () => void; focusScan?: string;
 }) {
   const apiRoot = '/api/clinical/' + encodeURIComponent(organization);
   const path = apiRoot + '/editor';
@@ -235,11 +237,21 @@ export function CaseEditor({ item, organization, editable, canImport, patient, o
     return () => controller.abort();
   }, [path, item.recordId, refresh]);
 
+  const focusedScan = data?.scans.find(({ id }) => id === focusScan);
+  const focusedSpecimen = data?.slides.find(({ id }) => id === focusedScan?.slide_id)?.specimen_id;
+  const blockedScans = data?.scans.filter(({ qc_status }) => qc_status === 'hold' || qc_status === 'rescan_required').length ?? 0;
+
   return <div className="case-editor">
     <div className="preview-label"><h2>Case Editor</h2>
       <button type="button" className="button secondary" onClick={() => setRefresh((value) => value + 1)}>Reload Case Editor</button></div>
     {error && <p role="alert" className="form-error">{error}</p>}
-    <details className="editor-entry"><summary>Patient Reconciliation</summary>
+    {data && <div className="editor-context" aria-label="Intake Summary">
+      <span>{item.patient ? 'Patient Linked' : 'Patient Not Linked'}</span>
+      <span>{data.specimens.length} Specimens · {data.blocks.length} Blocks · {data.scans.length} Scans</span>
+      {blockedScans > 0 && <span className="status-pill status-0">{blockedScans} QC Blocked</span>}
+    </div>}
+    {data && focusScan && !focusedScan && <p role="status">The requested scan is unavailable. Review the current scan list below.</p>}
+    <details className="editor-entry" open={editable && !item.patient && !focusScan ? true : undefined}><summary>Patient Reconciliation</summary>
       {editable && <EditForm action="Link Existing Patient" save={async (fields) => {
         if (!selectedPatient) throw new Error('Find the local record and confirm the patient match.');
         await api(path + '/cases/' + item.recordId + '/patient-match',
@@ -259,15 +271,15 @@ export function CaseEditor({ item, organization, editable, canImport, patient, o
       <Field label="Description" name="description" maxLength={160} /><Field label="Collection Date" name="collection_date" type="date" />
     </CreateRecord>}
     {!data && !error && <p role="status">Loading case records…</p>}
-    {data?.specimens.map((specimen) => <details className="editor-entry" key={specimen.id}>
+    {data?.specimens.map((specimen) => <details className="editor-entry" key={specimen.id} open={specimen.id === focusedSpecimen || undefined}>
       <summary>Specimen {specimen.specimen_number}{specimen.description ? ` · ${specimen.description}` : ''}</summary>
-      <SpecimenEditor specimen={specimen} data={data} apiRoot={apiRoot} path={path} editable={editable} canImport={canImport} onChanged={update} />
+      <SpecimenEditor specimen={specimen} data={data} apiRoot={apiRoot} path={path} editable={editable} canImport={canImport} onChanged={update} focusScan={focusScan} />
     </details>)}
   </div>;
 }
 
-function SpecimenEditor({ specimen, data, apiRoot, path, editable, canImport, onChanged }: {
-  specimen: Specimen; data: EditorData; apiRoot: string; path: string; editable: boolean; canImport: boolean; onChanged: () => void;
+function SpecimenEditor({ specimen, data, apiRoot, path, editable, canImport, onChanged, focusScan }: {
+  specimen: Specimen; data: EditorData; apiRoot: string; path: string; editable: boolean; canImport: boolean; onChanged: () => void; focusScan?: string;
 }) {
   const [adding, setAdding] = useState<'block' | 'slide'>();
   const blocks = data.blocks.filter((block) => block.specimen_id === specimen.id);
@@ -300,6 +312,6 @@ function SpecimenEditor({ specimen, data, apiRoot, path, editable, canImport, on
     </details>)}
     {data.slides.filter((slide) => slide.specimen_id === specimen.id).map((slide) => <SlideEditor key={slide.id} slide={slide}
       blocks={blocks} scans={data.scans.filter((scan) => scan.slide_id === slide.id)} apiRoot={apiRoot} path={path}
-      editable={editable} canImport={canImport} onChanged={onChanged} />)}
+      editable={editable} canImport={canImport} onChanged={onChanged} focusScan={focusScan} />)}
   </>;
 }

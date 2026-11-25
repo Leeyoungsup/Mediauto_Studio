@@ -86,6 +86,11 @@ try {
   await rows(page, ['C', 'B', 'A']);
   await page.getByLabel('2: Sort Direction').selectOption('asc');
   await rows(page, ['B', 'C', 'A']);
+  await button(page, '2: Move Sort Level Up').click();
+  await rows(page, ['A', 'B', 'C']);
+  await page.getByRole('columnheader', { name: 'Case ID', exact: true }).and(page.locator('[aria-sort="ascending"]')).waitFor();
+  await button(page, '1: Move Sort Level Down').click();
+  await rows(page, ['B', 'C', 'A']);
   await page.getByText('Multi-Level Sort', { exact: true }).click();
   const params = new URLSearchParams({ q: prefix, status: 'registered', offset: '1', limit: '1' });
   params.append('order', 'slide_count:desc');
@@ -105,12 +110,22 @@ try {
   await columns.getByRole('checkbox', { name: 'Specimen', exact: true }).uncheck();
   await columns.getByRole('checkbox', { name: 'Registered At', exact: true }).check();
   await button(page, 'Review Status up').click();
+  const reviewColumn = columns.locator('.column-row').filter({ has: page.getByRole('checkbox', { name: 'Review Status', exact: true }) });
+  const assigneeColumn = columns.locator('.column-row').filter({ has: page.getByRole('checkbox', { name: 'Assignee', exact: true }) });
+  await reviewColumn.locator('[draggable=true]').dragTo(assigneeColumn);
+  assert.deepEqual((await table(page).getByRole('columnheader').allTextContents()).slice(1, 3), ['Assignee', 'Review Status']);
+  await button(page, 'Review Status up').click();
   await button(page, 'Save My Default Columns').click();
   await page.getByRole('status').filter({ hasText: 'Worklist defaults saved.' }).waitFor();
   await columns.locator('summary').click();
   const headerText = await table(page).getByRole('columnheader').allTextContents();
   assert.deepEqual(headerText, ['Case ID', 'Review Status', 'Assignee', 'Slides', 'Accessioned At', 'Registered At', 'Open']);
   await save(page, 'Personal Filters');
+  await page.locator('details.column-menu:not(.sort-menu) summary').click();
+  const savedColumns = page.getByRole('checkbox', { name: 'Show Columns Saved to View' });
+  await savedColumns.check();
+  assert.deepEqual(await table(page).getByRole('columnheader').allTextContents(), headerText);
+  await page.locator('details.column-menu:not(.sort-menu) summary').click();
   await button(page, 'Set as Startup View').click();
   await page.getByRole('status').filter({ hasText: 'Worklist defaults saved.' }).waitFor();
 

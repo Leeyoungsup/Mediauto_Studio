@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { ArrowRight, Activity, FileText, CheckCircle2, CircleDashed, Columns3, Files, FolderOpen, PanelRightClose, PanelRightOpen, Plus, ScanLine, Search, UserRoundCheck, X } from 'lucide-react';
+import { ArrowRight, Activity, FileText, CheckCircle2, CircleDashed, Columns3, Files, FolderOpen, PencilLine, PanelRightClose, PanelRightOpen, Plus, ScanLine, Search, UserRoundCheck, X } from 'lucide-react';
 import { readyCount, statuses } from './demo';
 import type { CaseStatus, DemoCase, Slide } from './demo';
 import type { Assignee, Counts, WorklistQuery } from './worklist-api';
 
 import { columns, defaultColumns, defaultOrder, loadLegacyColumns, normalizeColumns } from './worklist-config';
-import type { ColumnSetting, Preferences, Scope, ViewConfig } from './worklist-config';
+import type { ColumnId, ColumnSetting, Preferences, Scope, SortField, ViewConfig } from './worklist-config';
 import { SavedViewControls, SortControls, useSavedViews } from './worklist-preferences';
 import { stateLabel, states } from './worklist-api';
 import { QueueNavigation, Workload } from './workgroups';
@@ -36,6 +36,12 @@ export function SlidePreview({ slide }: { slide: Slide }) {
     : <ScanLine size={24} aria-hidden="true" />;
 }
 
+const columnSort: Partial<Record<ColumnId, SortField>> = {
+  specimen: 'specimen', assignee: 'assignee', status: 'status', slides: 'slide_count', received: 'accessioned_at',
+  patient: 'patient_name', age: 'age', priority: 'priority', group: 'group', lis: 'lis_status',
+  created: 'created_at', collected: 'collection_date', lastOpened: 'last_opened',
+};
+
 const previewTabs = [
   { key: 'slides', label: 'Slides', icon: ScanLine },
   { key: 'case', label: 'Case Summary', icon: FileText },
@@ -64,10 +70,13 @@ type Props = {
   canReportFrozen?: boolean;
   onViewer: (id: string, slide?: string) => void;
   onRegister?: () => void;
+  onAssign?: (item: DemoCase) => void;
+  onEdit?: (item: DemoCase, scan?: string) => void;
+  onConfirm?: (item: DemoCase) => void;
   onReference?: (item: DemoCase) => void;
 };
 
-export function Worklist({ navigation, cases, loading, total, counts, filteredCounts, queues, workload, onQueueChanged, assignees, onQuery, scope, onScope, mayShare, current, onSelect, onOpen, onViewer, onRegister, canReportFrozen, onReference }: Props) {
+export function Worklist({ navigation, cases, loading, total, counts, filteredCounts, queues, workload, onQueueChanged, assignees, onQuery, scope, onScope, mayShare, current, onSelect, onOpen, onViewer, onRegister, onAssign, onEdit, onConfirm, canReportFrozen, onReference }: Props) {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<CaseStatus | ''>('');
   const [assignee, setAssignee] = useState('');
@@ -77,6 +86,7 @@ export function Worklist({ navigation, cases, loading, total, counts, filteredCo
   const [columnSettings, setColumnSettings] = useState(defaultColumns);
   const [showColumnPreview, setShowColumnPreview] = useState(false);
   const [columnSearch, setColumnSearch] = useState('');
+  const [showSavedColumns, setShowSavedColumns] = useState(false);
   const [previewTab, setPreviewTab] = useState<PreviewTab>('slides');
   const [previewVisible, setPreviewVisible] = useState(true);
   const edited = useRef(false);
@@ -85,6 +95,7 @@ export function Worklist({ navigation, cases, loading, total, counts, filteredCo
     if (startup && edited.current) return;
     const columns = configuration?.columns ?? base.columns;
     setColumnSettings(columns ? normalizeColumns(columns) : defaultColumns);
+    setShowSavedColumns(Boolean(configuration?.columns));
     setOrder(configuration?.order ?? base.sort_order ?? defaultOrder);
     if (startup && !configuration) return;
     setSearch(configuration?.q ?? '');
@@ -115,9 +126,16 @@ export function Worklist({ navigation, cases, loading, total, counts, filteredCo
 
   function selectQueue(queue?: Queue) {
     edited.current = true;
-    clearFilters();
-    setFilters(normalizeFilters({ group_key: queue?.group_key, priority: queue?.priority }));
-    if (queue) onScope('all');
+    if (queue) {
+      clearFilters();
+      saved.clearSelection();
+      setShowSavedColumns(false);
+      setFilters(normalizeFilters({ group_key: queue.group_key, priority: queue.priority }));
+      onScope('all');
+    } else {
+      setOffset(0);
+      setFilters((current) => normalizeFilters({ ...current, group_key: undefined, priority: undefined }));
+    }
     setOrder(queue?.priority ? [{ field: 'priority', direction: 'asc' }, { field: 'created_at', direction: 'desc' }]
       : saved.preferences.sort_order ?? defaultOrder);
   }
@@ -125,6 +143,12 @@ export function Worklist({ navigation, cases, loading, total, counts, filteredCo
   function clearFilters() {
     setSearch(''); setStatus(''); setAssignee(''); setFilters({}); setOffset(0);
   }
+
+  const savedViewColumns = saved.active?.configuration.columns;
+  const filtered = Boolean(search || status || assignee || Object.keys(filters).length);
+  const primarySort = order[0];
+  const sortDirection = (field?: SortField) => field && primarySort?.field === field
+    ? primarySort.direction === 'asc' ? 'ascending' : 'descending' : undefined;
 
   return <>
     <section className="panel worklist-masthead">
@@ -140,11 +164,13 @@ export function Worklist({ navigation, cases, loading, total, counts, filteredCo
       </div>
     </div>
     {navigation}
+    <div className="worklist-view-bar" role="group" aria-label="Worklist Views">
+      <QueueNavigation queues={queues} active={activeQueue} isAdmin={mayShare} onSelect={selectQueue} onChanged={onQueueChanged} />
+      <SavedViewControls controller={saved} configuration={configuration} mayShare={mayShare} />
+    </div>
     </section>
     {showColumnPreview && <WorklistColumnPreview currentColumns={columnSettings} onClose={() => setShowColumnPreview(false)}
-      onApply={(settings) => { edited.current = true; setColumnSettings(settings); setShowColumnPreview(false); }} />}
-    <QueueNavigation queues={queues} active={activeQueue} isAdmin={mayShare} onSelect={selectQueue} onChanged={onQueueChanged} />
-    <SavedViewControls controller={saved} configuration={configuration} mayShare={mayShare} />
+      onApply={(settings) => { edited.current = true; setColumnSettings(settings); setShowSavedColumns(false); setShowColumnPreview(false); }} />}
     <div className="worklist-layout" data-preview={previewVisible}>
       <section className="panel worklist-panel" aria-label="Case List">
         <div className="panel-title worklist-panel-title">
@@ -156,7 +182,8 @@ export function Worklist({ navigation, cases, loading, total, counts, filteredCo
             </button>)}
           </div>
         </div>
-        <div className="filters" onChangeCapture={() => { edited.current = true; }} onClickCapture={() => { edited.current = true; }}>
+        <MoreFilters filters={filters} queues={queues} onApply={(value) => { edited.current = true; setFilters(value); setOffset(0); }}
+          clearAll={filtered ? clearFilters : undefined} toolbar={<div className="filters worklist-query-controls" onChangeCapture={() => { edited.current = true; }} onClickCapture={() => { edited.current = true; }}>
           <label className="search-field"><Search size={17} /><input value={search} onChange={(event) => { setSearch(event.target.value); setOffset(0); }} maxLength={80} placeholder="Search Case ID" aria-label="Search Cases" />{search && <button className="icon-button" aria-label="Clear Search" onClick={() => { setSearch(''); setOffset(0); }}><X size={15} /></button>}</label>
           <select aria-label="Filter by Review Status" value={status} onChange={(event) => { setStatus(event.target.value as CaseStatus | ''); setOffset(0); }}><option value="">All Statuses</option>{statuses.map((value) => <option key={value}>{value}</option>)}</select>
           <select aria-label="Filter by Assignee" value={assignee} onChange={(event) => { setAssignee(event.target.value); setOffset(0); }}><option value="">All Assignees</option>{assignee && !assignees.some(({ id }) => id === assignee) && <option value={assignee}>Saved Assignee</option>}{assignees.map(({ id, name }) => <option key={id} value={id}>{name}</option>)}</select>
@@ -165,15 +192,23 @@ export function Worklist({ navigation, cases, loading, total, counts, filteredCo
             onSave={() => saved.saveOrder(order)} busy={saved.busy || !saved.ready}
             onClear={saved.preferences.sort_order ? () => saved.saveOrder(null) : undefined} />
           <details className="column-menu"><summary className="button secondary"><Columns3 size={15} /> Columns</summary><div className="column-options">
-            <ColumnPicker settings={columnSettings} search={columnSearch} onSearch={setColumnSearch} onChange={setColumnSettings} />
-            <button className="button secondary" onClick={() => { setColumnSettings(defaultColumns); setColumnSearch(''); }}>Restore Default Columns</button>
-            <button className="button secondary" onClick={() => setColumnSettings(loadLegacyColumns())}>Import Previous Browser Columns</button>
+            {savedViewColumns && <label className="saved-columns-toggle">
+              <input type="checkbox" checked={showSavedColumns} onChange={(event) => {
+                setShowSavedColumns(event.target.checked);
+                setColumnSettings(normalizeColumns(event.target.checked ? savedViewColumns : saved.preferences.columns ?? defaultColumns));
+              }} /> Show Columns Saved to View
+            </label>}
+            <ColumnPicker settings={columnSettings} search={columnSearch} onSearch={setColumnSearch} onChange={(next) => {
+              setColumnSettings(next);
+              setShowSavedColumns(false);
+            }} />
+            <button className="button secondary" onClick={() => { setColumnSettings(defaultColumns); setShowSavedColumns(false); setColumnSearch(''); }}>Restore Default Columns</button>
+            <button className="button secondary" onClick={() => { setColumnSettings(loadLegacyColumns()); setShowSavedColumns(false); }}>Import Previous Browser Columns</button>
             <button className="button secondary" disabled={saved.busy || !saved.ready} onClick={() => saved.saveColumns(columnSettings)}>Save My Default Columns</button>
           </div></details>
-        </div>
+        </div>} />
         {workload && <Workload rows={workload} />}
-        <MoreFilters filters={filters} queues={queues} onApply={(value) => { edited.current = true; setFilters(value); setOffset(0); }} />
-        <div className="table-scroll"><table><thead><tr><th scope="col">Case ID</th>{shownColumns.map(({ id, label }) => <th scope="col" key={id}>{label}</th>)}<th scope="col"><span className="sr-only">Open</span></th></tr></thead>
+        <div className="table-scroll"><table><thead><tr><th scope="col" aria-sort={sortDirection('case_number')}>Case ID</th>{shownColumns.map(({ id, label }) => <th scope="col" aria-sort={sortDirection(columnSort[id])} key={id}>{label}</th>)}<th scope="col"><span className="sr-only">Open</span></th></tr></thead>
           <tbody>{cases.map((item) => <tr key={item.id} className={selected?.id === item.id ? 'selected-row' : undefined} onClick={() => onSelect(item.id)}>
             <td><button className="case-id" onClick={(event) => { event.stopPropagation(); onSelect(item.id); }} aria-pressed={selected?.id === item.id}>{item.id}</button>{item.worklist?.priority && !shownColumns.some(({ id }) => id === 'priority') && <span className="case-priority-inline">{columnValue(item, 'priority')}</span>}</td>
             {shownColumns.map(({ id }) => <td className="nowrap" key={id}>{columnValue(item, id)}</td>)}
@@ -181,7 +216,6 @@ export function Worklist({ navigation, cases, loading, total, counts, filteredCo
           </tr>)}</tbody></table></div>
         {!cases.length && <div className="empty"><FolderOpen size={28} />
           <strong>{loading ? 'Loading case…' : (search || status || assignee || Object.keys(filters).length) ? 'No cases match these filters.' : scope === 'mine' ? 'No cases are assigned to you.' : scope === 'unassigned' ? 'There are no unassigned cases.' : 'No cases are available.'}</strong>
-          {!loading && (search || status || assignee || Object.keys(filters).length) && <button className="button secondary" onClick={clearFilters}>Clear Filters</button>}
         </div>}
         <footer className="table-footer"><span>{total} total · Showing {cases.length ? offset + 1 : 0}–{offset + cases.length} cases</span>
           {(offset > 0 || total > 50) && <div className="actions"><button className="button secondary" disabled={loading || offset === 0} onClick={() => setOffset(offset - 50)}>Previous</button><button className="button secondary" disabled={loading || offset + 50 >= total} onClick={() => setOffset(offset + 50)}>Next</button></div>}
@@ -190,15 +224,22 @@ export function Worklist({ navigation, cases, loading, total, counts, filteredCo
       <aside className="panel case-preview" id="worklist-preview" aria-label="Selected Case Preview" hidden={!previewVisible}>
         <div className="panel-title"><h2>Case Preview</h2><ScanLine size={18} className="muted" /></div>
         {selected ? <div className="preview-content">
-          <div className="preview-heading"><strong>{selected.id}</strong><StatusLabel status={selected.status} />{selected.worklist?.priority && columnValue(selected, 'priority')}</div>
+          <div className="preview-heading"><strong>{selected.id}</strong>{selected.source === 'files' ? <span className="status-pill status-0">Pending Case Confirmation</span> : <StatusLabel status={selected.status} />}{selected.worklist?.priority && columnValue(selected, 'priority')}</div>
           <WorkspaceTabs label="Case Preview Workspace" tabs={previewTabs} active={previewTab} onSelect={setPreviewTab} panelId="worklist-preview-panel" />
           <div id="worklist-preview-panel" role="tabpanel" aria-labelledby={'worklist-preview-panel-tab-' + previewTab}>
           {previewTab === 'slides' && <>
             <div className="preview-label"><h3>Slides</h3><span>{selected.source === 'files' ? `${selected.slides.length} files registered` : `${readyCount(selected)}/${selected.slides.length} Viewable`}</span></div>
-            {selected.slides.length ? <div className="preview-slides">{selected.slides.map((slide) => <button key={slide.id} className="slide-preview" data-scan-id={slide.wsi?.id} title={slide.state} disabled={!slide.wsi} onClick={() => onViewer(selected.id, slide.id)}>
-              <span className="slide-image"><SlidePreview slide={slide} /></span><span className="preview-scan-meta"><strong>{slide.label ?? slide.id}</strong>
-              <span>{slide.stain} · {slide.wsi?.format ?? slide.state}</span><ScanReference scan={slide.wsi} /></span><ArrowRight size={14} className="preview-scan-arrow" />
-            </button>)}</div> : <p className="empty-inline">No slides are linked to this case.</p>}
+            {selected.slides.length ? <div className="preview-slides">{selected.slides.map((slide) => {
+              const qcBlocked = slide.state === 'QC Hold' || slide.state === 'Rescan Required';
+              return <div key={slide.id} className="preview-scan-item">
+                <button className="slide-preview" data-scan-id={slide.wsi?.id} title={slide.state} disabled={!slide.wsi} onClick={() => onViewer(selected.id, slide.id)}>
+                  <span className="slide-image"><SlidePreview slide={slide} /></span><span className="preview-scan-meta"><strong>{slide.label ?? slide.id}</strong>
+                  <span>{slide.stain} · {slide.wsi?.format ?? slide.state}</span><ScanReference scan={slide.wsi} /></span><ArrowRight size={14} className="preview-scan-arrow" />
+                </button>
+                {qcBlocked && onEdit && <button type="button" className="button secondary" onClick={() => onEdit(selected, slide.id)}
+                  aria-label={`Review Scan QC for ${slide.label ?? slide.id} (${slide.id.slice(0, 8)})`}>Review Scan QC</button>}
+              </div>;
+            })}</div> : <p className="empty-inline">No slides are linked to this case.</p>}
           </>}
           {previewTab === 'case' && <dl className="key-values">
             <div><dt>Specimen</dt><dd>{columnValue(selected, 'specimen')}</dd></div><div><dt>Assignee</dt><dd>{columnValue(selected, 'assignee')}</dd></div>
@@ -212,6 +253,16 @@ export function Worklist({ navigation, cases, loading, total, counts, filteredCo
           </dl>}
           </div>
           <div className="preview-footer-actions">
+          {selected.recordId && onAssign && selected.status !== 'Review Complete' &&
+            <button type="button" className="button secondary full" onClick={() => onAssign(selected)}>
+              <UserRoundCheck size={16} />{selected.assignedTo ? 'Reassign Case' : 'Assign Case'}
+            </button>}
+          {selected.recordId && onEdit && <button type="button" className="button secondary full" onClick={() => onEdit(selected)}>
+            <PencilLine size={16} /> Case Editor
+          </button>}
+          {selected.source === 'files' && onConfirm && <button type="button" className="button secondary full" onClick={() => onConfirm(selected)}>
+            Confirm Case from Registered Files
+          </button>}
           {canReportFrozen && selected.recordId && selected.worklist?.priority === 'frozen' &&
             <a className="button secondary full" href={`#case/${selected.recordId}/frozen`}>Frozen Report</a>}
           {onReference && selected.recordId && <button className="button secondary full" onClick={() => onReference(selected)}>Add to Collection or Board</button>}

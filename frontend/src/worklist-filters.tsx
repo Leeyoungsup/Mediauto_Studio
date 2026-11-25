@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { priorityLabels } from './workgroups';
 import type { Priority, Queue } from './workgroups';
 import { ListFilter, X } from 'lucide-react';
-import type { FormEvent } from 'react';
+import type { FormEvent, ReactNode } from 'react';
 
 export const dateFields = {
   accessioned_at: 'Accessioned At', created_at: 'Registered At',
@@ -48,7 +48,9 @@ function rangeLabel(from: number | string | undefined, to: number | string | und
   return from != null && to != null ? `${from}–${to}` : from != null ? `≥ ${from}` : `≤ ${to}`;
 }
 
-export function MoreFilters({ filters, queues, onApply }: { filters: AdvancedFilters; queues: Queue[]; onApply: (value: AdvancedFilters) => void }) {
+export function MoreFilters({ filters, queues, onApply, toolbar, clearAll }: {
+  filters: AdvancedFilters; queues: Queue[]; onApply: (value: AdvancedFilters) => void; toolbar: ReactNode; clearAll?: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<AdvancedFilters>(filters);
   const [error, setError] = useState('');
@@ -91,14 +93,18 @@ export function MoreFilters({ filters, queues, onApply }: { filters: AdvancedFil
   }
 
   return <>
-    <div className="advanced-filter-bar">
+    <div className="advanced-filter-bar" role="group" aria-label="Worklist Search and Filters">
+      {toolbar}
       <button type="button" className="button secondary" aria-expanded={open} aria-controls="worklist-advanced-filters"
         onClick={() => { setDraft(filters); setError(''); setOpen(!open); }}>
         <ListFilter size={16} /> More Filters{chips.length > 0 && <span className="count">{chips.length}</span>}
       </button>
+      {clearAll && <button type="button" className="button secondary" onClick={() => { clearAll(); setOpen(false); }}>Clear Filters</button>}
+    </div>
+    {chips.length > 0 && <div className="worklist-filter-chips" aria-label="Applied Advanced Filters">
       {chips.map(({ keys, label }) => <button type="button" key={keys[0]} className="filter-chip" aria-label={'Remove ' + label}
         onClick={() => onApply(Object.fromEntries(Object.entries(filters).filter(([key]) => !keys.includes(key))))}>{label}<X size={13} /></button>)}
-    </div>
+    </div>}
     <form hidden={!open} id="worklist-advanced-filters" className="advanced-filter-form" onSubmit={apply}>
       <div className="advanced-filter-fields">
         {textInputs.map(({ key, label }) => <label className="form-field" key={key}>{label}

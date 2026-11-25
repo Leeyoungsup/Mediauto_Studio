@@ -49,6 +49,17 @@ try {
   await preview.getByRole('tabpanel', { name: 'Review' }).getByText('LIS Case Status', { exact: true }).waitFor();
   await previewTabs.getByRole('tab', { name: 'Slides', exact: true }).click();
 
+  await page.getByLabel('Search Cases').fill('IMS-DEMO-NO-SCAN');
+  await preview.getByText('IMS-DEMO-NO-SCAN', { exact: true }).waitFor();
+  await preview.getByRole('button', { name: /^(Assign|Reassign) Case$/ }).click();
+  const assignment = page.getByRole('dialog');
+  await assignment.getByLabel('Assigned Pathologist').selectOption({ label: 'integration-other (integration-other)' });
+  await assignment.getByLabel('Reason for Change').fill('Synthetic Worklist assignment');
+  await button(assignment, 'Save').click();
+  await assignment.waitFor({ state: 'hidden' });
+  await previewTabs.getByRole('tab', { name: 'Case Summary', exact: true }).click();
+  await preview.getByText('integration-other', { exact: true }).waitFor();
+  await previewTabs.getByRole('tab', { name: 'Slides', exact: true }).click();
   await page.getByLabel('Search Cases').fill('IMS-DEMO-101');
   await button(page, 'IMS-DEMO-101 details').click();
   await page.getByRole('heading', { name: 'IMS-DEMO-101', exact: true }).waitFor();
