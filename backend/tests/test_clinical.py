@@ -2409,7 +2409,16 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         await expect(self.client.get("/api/wsi/clinical/" + scan["id"]), 409)
         await expect(self.client.get(wsi_label), 409)
         result = await expect(self.client.get("/api/worklist", params={"slide_state": "qc_blocked"}), 200)
-        self.assertEqual(result.json()["rows"][0]["slide_state"], ["missing_scan", "qc_blocked"])
+        row = result.json()["rows"][0]
+        self.assertEqual(row["slide_state"], ["missing_scan", "qc_blocked"])
+        self.assertEqual({(item["id"], item["number"], item["specimen"]) for item in row["blocks"]},
+                         {(block, "B1", "QA"), (wrong_block, "B1", "OTHER")})
+        blocked = next(item for item in row["slides"] if item["id"] == scan["id"])
+        self.assertEqual((blocked["block_id"], blocked["state"], blocked["qc_status"]),
+                         (block, "Rescan Required", "rescan_required"))
+        self.assertNotIn("wsi", blocked)
+        pending = next(item for item in row["slides"] if item["id"] == other_slide["id"])
+        self.assertEqual(pending["state"], "No scan registered")
 
         labeler = await create_account(self.org, "label-qa", "labeler")
         await login(self.client, self.org, labeler.username)

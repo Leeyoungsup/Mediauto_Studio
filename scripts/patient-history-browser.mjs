@@ -46,7 +46,7 @@ try {
   }));
   await button(history, 'Refresh History').click();
   await button(history, 'Add Clinical Record').click();
-  await history.getByLabel('Clinical Date').fill('2026-11-20');
+  await history.getByLabel('Clinical Date', { exact: true }).fill('2026-11-20');
   await history.getByLabel('Title', { exact: true }).fill('Local synthetic encounter');
   await history.getByLabel('Clinical Text').fill('Manual follow-up text.\nSecond line <b>rendered as text</b>.');
   await button(history, 'Save Clinical Record').click();

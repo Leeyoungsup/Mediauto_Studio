@@ -92,7 +92,7 @@ try {
   await scope.getByText('New Board Meeting', { exact: true }).click();
   const meetingForm = scope.getByRole('form', { name: 'Create Board Meeting' });
   await meetingForm.getByRole('textbox', { name: 'Meeting Title' }).fill('Board QA Session');
-  await meetingForm.getByLabel('Meeting Date').fill('2026-12-01');
+  await meetingForm.getByLabel('Meeting Date', { exact: true }).fill('2026-12-01');
   await button(meetingForm, 'Create Board Meeting').click();
   await scope.getByRole('heading', { name: 'Board QA Session', exact: true }).waitFor();
   const meeting = new URL(admin.url()).hash.split('/')[1];

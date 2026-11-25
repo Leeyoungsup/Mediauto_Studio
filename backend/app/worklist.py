@@ -12,7 +12,7 @@ from app.case_activity import attempt_id, record_activity
 from app.auth import CurrentUser, Session, WRITERS
 from app.clinical import case_visibility
 from app.intake import DATA_ROOT, scan_files, slide_entries
-from app.models import AuthUser, Case, ClinicalEvent, Patient, Slide, SlideScan, Specimen, Workgroup, WorklistOpen
+from app.models import AuthUser, Case, ClinicalEvent, Patient, Slide, SlideScan, Specimen, SpecimenBlock, Workgroup, WorklistOpen
 from app.workflow import eligible_assignees
 from app.scan_quality import BLOCKED_QC
 from app.workgroup_policy import get_groups
@@ -55,6 +55,7 @@ async def legacy_rows(session, user, case_numbers):
         group["slides"].append({
             "id": source.id, "label": fields["slide_id"], "stain": fields.get("stain") or "Not Entered",
             "specimen": fields.get("specimen") or "Not Entered", "state": "Viewable",
+            "block_number": fields.get("block_number") or None,
             "wsi": {"id": source.id, "source": "files", "format": source.format},
         })
     for case_number, group in groups.items():
@@ -91,7 +92,7 @@ async def clinical_details(session, organization, references):
         details[record.id] = {
             **reference_row(record), "source": "clinical", "assignee": staff.get(record.assigned_to),
             "patient": {"id": patient.id, "name": patient.display_name or "", "number": "", "birth": patient.birth_date or "", "localRef": patient.local_reference or "", "sex": patient.sex, "source": patient.source} if patient else None,
-            "specimen": "", "slides": [], "history": [], "specimens": [],
+            "specimen": "", "slides": [], "history": [], "specimens": [], "blocks": [],
         }
     specimen_map = {item.id: item for item in specimens}
     for specimen in specimens:
@@ -100,24 +101,34 @@ async def clinical_details(session, organization, references):
                                   "collection_date": specimen.collection_date, "version": specimen.version})
         description = specimen.description or specimen.specimen_number
         item["specimen"] = f"{item['specimen']}, {description}" if item["specimen"] else description
+    blocks = await session.scalars(select(SpecimenBlock).where(
+        SpecimenBlock.organization == organization, SpecimenBlock.specimen_id.in_(specimen_map),
+    ).order_by(SpecimenBlock.block_number, SpecimenBlock.id))
+    for block in blocks:
+        specimen = specimen_map[block.specimen_id]
+        details[specimen.case_id]["blocks"].append({
+            "id": block.id, "number": block.block_number, "specimen": specimen.specimen_number,
+        })
     scans_by_slide = {}
     scans = await session.scalars(select(SlideScan).where(
         SlideScan.organization == organization, SlideScan.slide_id.in_([slide.id for slide in slides]),
-        SlideScan.qc_status != "replaced",
+        SlideScan.status == "registered", SlideScan.qc_status != "replaced",
     ).order_by(SlideScan.created_at, SlideScan.id))
     for scan in scans:
         scans_by_slide.setdefault(scan.slide_id, []).append(scan)
     for slide in slides:
         specimen = specimen_map[slide.specimen_id]
-        base = {"label": slide.slide_number, "stain": slide.stain or "Not Entered", "specimen": specimen.specimen_number}
+        base = {"label": slide.slide_number, "stain": slide.stain or "Not Entered",
+                "specimen": specimen.specimen_number, "block_id": slide.block_id}
         tray = details[specimen.case_id]["slides"]
         if slide.id not in scans_by_slide:
             tray.append({**base, "id": slide.id, "state": "No scan registered"})
         for scan in scans_by_slide.get(slide.id, []):
             if scan.qc_status in BLOCKED_QC:
-                tray.append({**base, "id": scan.id, "state": "QC Hold" if scan.qc_status == "hold" else "Rescan Required"})
+                tray.append({**base, "id": scan.id, "qc_status": scan.qc_status,
+                             "state": "QC Hold" if scan.qc_status == "hold" else "Rescan Required"})
                 continue
-            tray.append({**base, "id": scan.id, "state": "Viewable",
+            tray.append({**base, "id": scan.id, "state": "Viewable", "qc_status": scan.qc_status,
                          "wsi": {"id": scan.id, "source": "clinical", "format": scan.format}})
     return details
 

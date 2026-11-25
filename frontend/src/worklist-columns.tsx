@@ -1,10 +1,10 @@
 import { GripVertical, ArrowDown, ArrowUp, Layers3, Search } from 'lucide-react';
 import { readyCount, statuses } from './demo';
-import type { CaseStatus, DemoCase } from './demo';
+import type { CaseStatus, DemoCase, Slide } from './demo';
 import { columns } from './worklist-config';
 import type { ColumnId, ColumnSetting } from './worklist-config';
 import { priorityLabels } from './workgroups';
-import { sexLabels, slideStates } from './worklist-filters';
+import { sexLabels } from './worklist-filters';
 
 export function StatusLabel({ status }: { status: CaseStatus }) {
   return <span className={`status-pill status-${statuses.indexOf(status)}`}><span />{status}</span>;
@@ -29,6 +29,53 @@ function listedStains(item: DemoCase) {
     stains.set(display.toLowerCase(), display);
   }
   return [...stains.values()].join(' · ');
+}
+
+const slideProgressLabels = {
+  empty: 'No Slides', missing: 'Scan Pending', available: 'Scan Available',
+  unassessed: 'QC Not Assessed', passed: 'QC Passed', hold: 'QC Hold', rescan: 'Rescan Required',
+} as const;
+
+function slideProgressState(slide: Slide): keyof typeof slideProgressLabels {
+  if (slide.state === 'No scan registered') return 'missing';
+  if (slide.state === 'QC Hold') return 'hold';
+  if (slide.state === 'Rescan Required') return 'rescan';
+  if (slide.qc_status === 'passed' || slide.qc_status === 'unassessed') return slide.qc_status;
+  return 'available';
+}
+
+export function SlideStatusLegend() {
+  return <div className="slide-status-legend" aria-label="Slide Status Legend">
+    {Object.entries(slideProgressLabels).map(([tone, label]) => <span key={tone}>
+      <i className="slide-status-mark" data-tone={tone} aria-hidden="true" />{label}
+    </span>)}
+  </div>;
+}
+
+function SlideStatus({ item }: { item: DemoCase }) {
+  const groups = new Map<string, { label: string; specimen: string; block: boolean; scans: Slide[] }>();
+  for (const block of item.worklist?.blocks ?? []) {
+    groups.set(block.id, { label: block.number, specimen: block.specimen, block: true, scans: [] });
+  }
+  for (const slide of item.slides) {
+    const label = slide.block_number ?? slide.label ?? slide.id;
+    const key = slide.block_id ?? JSON.stringify([slide.block_number ? 'block' : 'slide', slide.specimen, label]);
+    if (!groups.has(key)) groups.set(key, { label, specimen: slide.specimen, block: !!slide.block_number, scans: [] });
+    groups.get(key)!.scans.push(slide);
+  }
+  if (!groups.size) return <span className="muted">No Slides</span>;
+  return <div className="slide-status-groups">
+    {[...groups].map(([key, { label, specimen, block, scans }]) => (
+      <span className="slide-status-group" key={key} role="group" aria-label={`${block ? 'Block' : 'Slide'} ${label}, Specimen ${specimen}`}>
+        <span className="slide-status-label" title={`${block ? 'Block' : 'Slide'} ${label} · Specimen ${specimen}`}>{label}</span>
+        {scans.length ? scans.map((slide) => {
+          const tone = slideProgressState(slide);
+          const status = [slide.label, slide.wsi?.format, slideProgressLabels[tone]].filter(Boolean).join(' · ');
+          return <span className="slide-status-mark" data-tone={tone} key={slide.id} role="img" aria-label={status} title={status} />;
+        }) : <span className="slide-status-mark" data-tone="empty" role="img" aria-label="No Slides" title="No Slides" />}
+      </span>
+    ))}
+  </div>;
 }
 
 export function columnValue(item: DemoCase, id: ColumnId) {
@@ -61,7 +108,7 @@ export function columnValue(item: DemoCase, id: ColumnId) {
     case 'priority': return data?.priority
       ? <span className={`priority-badge priority-${data.priority}`} title={data.priority_source === 'manual' ? 'Manual Classification' : 'IMS Classification'}>{priorityLabels[data.priority]}</span>
       : blank;
-    case 'slideState': return value(data?.slide_state?.map((key) => slideStates[key]).join(' · '), provenance);
+    case 'slideState': return <SlideStatus item={item} />;
     case 'lis': return value(data?.lis_data === 'conflict' ? 'Conflicting Sources' : data?.lis_status,
       data?.lis_sources?.map(({ value, source, received_at }) => `${value} · ${source} · ${worklistDate.format(new Date(received_at))}`).join('; ') || 'No Linked LIS Status');
     case 'storage': return value(data?.has_storage ? 'Local WSI' : null, 'Registered Scan Location');

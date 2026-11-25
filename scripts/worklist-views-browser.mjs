@@ -119,7 +119,7 @@ try {
   await page.getByRole('status').filter({ hasText: 'Worklist defaults saved.' }).waitFor();
   await columns.locator('summary').click();
   const headerText = await table(page).getByRole('columnheader').allTextContents();
-  assert.deepEqual(headerText, ['Case ID', 'Review Status', 'Assignee', 'Slides', 'Accessioned At', 'Registered At', 'Open']);
+  assert.deepEqual(headerText, ['Case ID', 'Review Status', 'Assignee', 'Slides', 'Accessioned At', 'Stains', 'Slide Status', 'Registered At', 'Open']);
   await save(page, 'Personal Filters');
   await page.locator('details.column-menu:not(.sort-menu) summary').click();
   const savedColumns = page.getByRole('checkbox', { name: 'Show Columns Saved to View' });
@@ -176,7 +176,7 @@ try {
   await adminPage.getByLabel('Search Cases').fill(sampleName);
   await button(adminPage, sampleName + ' details').click();
   await adminPage.getByText('Case and Specimen Dates', { exact: true }).click();
-  await adminPage.getByLabel('COLLECTION-QA Collection Date').fill('2024-09-30');
+  await adminPage.getByLabel('COLLECTION-QA Collection Date', { exact: true }).fill('2024-09-30');
   const savedCollection = adminPage.waitForResponse((response) => response.url().endsWith('/collection-date') && response.ok());
   await button(adminPage, 'Save Collection Date').click();
   await savedCollection;
@@ -192,8 +192,8 @@ try {
   await adminPage.getByRole('textbox', { name: 'Specimen', exact: true }).fill('collection-qa');
   await adminPage.getByLabel('Slide ID').fill('scan-qa');
   await adminPage.getByLabel('Maximum Age at Collection').fill('17');
-  await adminPage.getByLabel('From Date').fill('2024-10-05');
-  await adminPage.getByLabel('Through Date').fill('2024-10-05');
+  await adminPage.getByLabel('From Date', { exact: true }).fill('2024-10-05');
+  await adminPage.getByLabel('Through Date', { exact: true }).fill('2024-10-05');
   await adminPage.getByLabel('Recent Activity').selectOption('today');
   await button(adminPage, 'Apply Filters').click();
   const resultRow = table(adminPage).getByRole('row').filter({ hasText: sampleName });
@@ -247,10 +247,16 @@ try {
   const preview = restored.getByRole('dialog', { name: 'Worklist Column Preview', exact: true });
   const sampleTable = preview.getByRole('table', { name: 'Sample Worklist', exact: true });
   const sampleHeadings = await sampleTable.getByRole('columnheader').allTextContents();
-  assert.equal(sampleHeadings.length, 25);
+  assert.equal(sampleHeadings.length, 26);
   const sampleRow = (id) => sampleTable.getByRole('row').filter({ hasText: id });
   await sampleRow('SAMPLE-001').getByRole('cell', { name: 'TEST-MRN-01', exact: true }).waitFor();
-  await sampleRow('SAMPLE-002').getByRole('cell', { name: 'QC Blocked · Missing Scan', exact: true }).waitFor();
+  const block = sampleRow('SAMPLE-001').getByRole('group', { name: 'Block A1, Specimen A', exact: true });
+  await block.getByRole('img', { name: 'A1-1 · NDPI · QC Passed', exact: true }).waitFor();
+  await block.getByRole('img', { name: 'A1-2 · SVS · QC Not Assessed', exact: true }).waitFor();
+  await sampleRow('SAMPLE-001').getByRole('group', { name: 'Block B1, Specimen B', exact: true })
+    .getByRole('img', { name: 'No Slides', exact: true }).waitFor();
+  await sampleRow('SAMPLE-002').getByRole('img', { name: 'F1 · QC Hold', exact: true }).waitFor();
+  await sampleRow('SAMPLE-002').getByRole('img', { name: 'F2 · Scan Pending', exact: true }).waitFor();
   await sampleRow('SAMPLE-002').getByRole('cell', { name: '0', exact: true }).waitFor();
   await sampleRow('SAMPLE-003').getByRole('cell', { name: 'Conflicting Sources', exact: true }).waitFor();
   await sampleRow('SAMPLE-004').getByRole('cell', { name: 'File Registration', exact: true }).waitFor();
@@ -264,14 +270,14 @@ try {
   assert.equal(await sampleTable.getByRole('columnheader', { name: 'Patient Name', exact: true }).count(), 0);
   await preview.getByRole('checkbox', { name: 'Patient Name', exact: true }).check();
   await button(preview, 'Patient Name up').click();
-  assert.equal((await sampleTable.getByRole('columnheader').allTextContents())[5], 'Patient Name');
+  assert.equal((await sampleTable.getByRole('columnheader').allTextContents())[sampleHeadings.indexOf('Patient Name') - 1], 'Patient Name');
   await button(preview, 'Close Preview').click();
   assert.deepEqual(await table(restored).getByRole('columnheader').allTextContents(), beforePreview);
   assert.equal(await table(restored).getByText('SAMPLE-001', { exact: true }).count(), 0);
 
   await button(restored, 'Column Preview').click();
   await button(preview, 'Restore Default Columns').click();
-  assert.equal(await sampleTable.getByRole('columnheader').count(), 6);
+  assert.equal(await sampleTable.getByRole('columnheader').count(), 8);
   await button(preview, 'Use Current Worklist Columns').click();
   assert.deepEqual(await sampleTable.getByRole('columnheader').allTextContents(), beforePreview.slice(0, -1));
   await button(preview, 'Show All Columns').click();

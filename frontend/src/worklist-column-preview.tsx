@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DemoCase } from './demo';
-import { ColumnPicker, columnValue } from './worklist-columns';
+import { ColumnPicker, SlideStatusLegend, columnValue } from './worklist-columns';
 import { columns, defaultColumns } from './worklist-config';
 import type { ColumnSetting } from './worklist-config';
 
@@ -10,15 +10,18 @@ const clinical: DemoCase = {
   status: 'In Review', received: '', history: [],
   patient: { name: 'Sample Patient A', number: 'TEST-MRN-01', localRef: 'TEST-LOCAL-01', birth: '1975-11-23', sex: 'female', source: 'manual' },
   slides: [
-    { id: 'sample-ndpi', label: 'A1', stain: 'H&E', specimen: 'A', state: 'Viewable',
+    { id: 'sample-ndpi', block_id: 'sample-block-a1', label: 'A1-1', stain: 'H&E', specimen: 'A', state: 'Viewable', qc_status: 'passed',
       wsi: { id: 'sample-ndpi', source: 'clinical', format: 'NDPI' } },
-    { id: 'sample-svs', label: 'A2', stain: 'PD-L1', specimen: 'A', state: 'Viewable',
+    { id: 'sample-svs', block_id: 'sample-block-a1', label: 'A1-2', stain: 'PD-L1', specimen: 'A', state: 'Viewable', qc_status: 'unassessed',
       wsi: { id: 'sample-svs', source: 'clinical', format: 'SVS' } },
+    { id: 'sample-rescan', block_id: 'sample-block-a2', label: 'A2-1', stain: 'H&E', specimen: 'A', state: 'Rescan Required' },
   ],
   worklist: {
+    blocks: [{ id: 'sample-block-a1', number: 'A1', specimen: 'A' }, { id: 'sample-block-a2', number: 'A2', specimen: 'A' },
+      { id: 'sample-block-b1', number: 'B1', specimen: 'B' }],
     accessioned_at: accession, created_at: '2026-11-24T00:35:00Z', collection_date: '2026-11-23',
     last_opened: '2026-11-24T03:15:00Z', age: 51, priority: 'routine', priority_source: 'manual',
-    group_name: 'Gastrointestinal', has_storage: true, slide_state: ['viewable'], request_count: 2,
+    group_name: 'Gastrointestinal', has_storage: true, slide_state: ['viewable', 'qc_blocked'], request_count: 2,
     review_note: 'Sample review note', mrns: [{ value: 'TEST-MRN-01', source: 'Sample EMR' }],
     lis_data: 'available', lis_status: 'In Process',
     lis_sources: [{ value: 'In Process', source: 'Sample LIS', received_at: accession }],
@@ -89,6 +92,7 @@ export function WorklistColumnPreview({ currentColumns, onApply, onClose }: {
         </tr>)}</tbody>
       </table>
     </div>
+    {shown.some(({ id }) => id === 'slideState') && <SlideStatusLegend />}
     <section className="column-preview-case" aria-labelledby="sample-case-title">
       <h3 id="sample-case-title">{selected.id} · Slide Metadata</h3>
       {selected.slides.length ? <ul className="column-preview-slides">{selected.slides.map((slide) => <li key={slide.id}>

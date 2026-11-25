@@ -14,7 +14,7 @@ import type { AssignmentLoad, Queue } from './workgroups';
 import { MoreFilters, normalizeFilters } from './worklist-filters';
 import type { AdvancedFilters } from './worklist-filters';
 
-import { ColumnPicker, StatusLabel, columnValue } from './worklist-columns';
+import { ColumnPicker, SlideStatusLegend, StatusLabel, columnValue } from './worklist-columns';
 import { WorkspaceTabs } from './workspace-tabs';
 import { WorklistColumnPreview } from './worklist-column-preview';
 
@@ -214,6 +214,7 @@ export function Worklist({ navigation, cases, loading, total, counts, filteredCo
             {shownColumns.map(({ id }) => <td className="nowrap" key={id}>{columnValue(item, id)}</td>)}
             <td><button className="icon-button" aria-label={`${item.id} details`} onClick={(event) => { event.stopPropagation(); onOpen(item.id); }}><ArrowRight size={16} /></button></td>
           </tr>)}</tbody></table></div>
+        {cases.length > 0 && shownColumns.some(({ id }) => id === 'slideState') && <SlideStatusLegend />}
         {!cases.length && <div className="empty"><FolderOpen size={28} />
           <strong>{loading ? 'Loading case…' : (search || status || assignee || Object.keys(filters).length) ? 'No cases match these filters.' : scope === 'mine' ? 'No cases are assigned to you.' : scope === 'unassigned' ? 'There are no unassigned cases.' : 'No cases are available.'}</strong>
         </div>}

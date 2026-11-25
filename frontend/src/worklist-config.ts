@@ -14,7 +14,9 @@ export const columns = [
 ] as const;
 export type ColumnId = typeof columns[number]['id'];
 export type ColumnSetting = { id: ColumnId; visible: boolean };
-export const defaultColumns: ColumnSetting[] = columns.map(({ id }, index) => ({ id, visible: index < 5 || id === 'stains' }));
+export const defaultColumns: ColumnSetting[] = columns.map(({ id }, index) => ({
+  id, visible: index < 5 || id === 'stains' || id === 'slideState',
+}));
 const preferenceKey = 'mediauto.worklist.columns.v1';
 
 export function loadLegacyColumns(): ColumnSetting[] {

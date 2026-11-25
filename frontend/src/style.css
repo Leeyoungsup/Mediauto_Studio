@@ -164,6 +164,19 @@ tbody tr:hover { background: #f9f7ff; cursor: pointer; }
 tbody tr.selected-row:hover { background: #efe9ff; }
 .case-id { font-weight: 700; color: #5341b3; white-space: nowrap; border: 0; background: none; padding: 4px 0; }
 .slide-count { display: inline-flex; align-items: center; gap: 4px; color: #57516b; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.slide-status-groups { display: flex; flex-wrap: wrap; gap: 4px; min-width: 108px; max-width: 260px; }
+.slide-status-group { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 3px; max-width: 100%; padding: 2px 5px; border: 1px solid var(--line); border-radius: 5px; }
+.slide-status-label { max-width: 140px; overflow: hidden; text-overflow: ellipsis; font-size: 11px; font-weight: 650; }
+.slide-status-mark { display: inline-block; flex: none; width: 6px; height: 11px; border: 1px solid transparent; border-radius: 2px; }
+.slide-status-mark[data-tone='empty'] { border-color: #88829a; }
+.slide-status-mark[data-tone='missing'] { background: #88829a; }
+.slide-status-mark[data-tone='available'] { background: #2964ad; }
+.slide-status-mark[data-tone='unassessed'] { background: #7859bc; }
+.slide-status-mark[data-tone='passed'] { background: #23845e; }
+.slide-status-mark[data-tone='hold'] { background: #b06418; }
+.slide-status-mark[data-tone='rescan'] { background: #b23854; }
+.slide-status-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 6px 8px; color: var(--muted); font-size: 11px; }
+.slide-status-legend span { display: inline-flex; align-items: center; gap: 4px; }
 .status-pill { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 12px; white-space: nowrap; font-size: 11px; font-weight: 700; }
 .status-pill > span { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .status-0 { color: #84530a; background: #fff1dc; }
