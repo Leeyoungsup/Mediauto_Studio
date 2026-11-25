@@ -208,11 +208,13 @@ export function Worklist({ navigation, cases, loading, total, counts, filteredCo
           </div></details>
         </div>} />
         {workload && <Workload rows={workload} />}
-        <div className="table-scroll"><table><thead><tr><th scope="col" aria-sort={sortDirection('case_number')}>Case ID</th>{shownColumns.map(({ id, label }) => <th scope="col" aria-sort={sortDirection(columnSort[id])} key={id}>{label}</th>)}<th scope="col"><span className="sr-only">Open</span></th></tr></thead>
-          <tbody>{cases.map((item) => <tr key={item.id} className={selected?.id === item.id ? 'selected-row' : undefined} onClick={() => onSelect(item.id)}>
-            <td><button className="case-id" onClick={(event) => { event.stopPropagation(); onSelect(item.id); }} aria-pressed={selected?.id === item.id}>{item.id}</button>{item.worklist?.priority && !shownColumns.some(({ id }) => id === 'priority') && <span className="case-priority-inline">{columnValue(item, 'priority')}</span>}</td>
+        <div className="table-scroll"><table className="worklist-case-table"><thead><tr><th className="case-id-cell" scope="col" aria-sort={sortDirection('case_number')}>Case ID</th>{shownColumns.map(({ id, label }) => <th scope="col" aria-sort={sortDirection(columnSort[id])} key={id}>{label}</th>)}<th scope="col"><span className="sr-only">Open</span></th></tr></thead>
+          <tbody>{cases.map((item) => <tr key={item.id} className={selected?.id === item.id ? 'selected-row' : undefined}
+            onClick={() => onSelect(item.id)} onDoubleClick={() => onOpen(item.id)}>
+            <td className="case-id-cell"><button className="case-id" onClick={(event) => { event.stopPropagation(); onSelect(item.id); }} aria-pressed={selected?.id === item.id}>{item.id}</button>{item.worklist?.priority && !shownColumns.some(({ id }) => id === 'priority') && <span className="case-priority-inline">{columnValue(item, 'priority')}</span>}</td>
             {shownColumns.map(({ id }) => <td className="nowrap" key={id}>{columnValue(item, id)}</td>)}
-            <td><button className="icon-button" aria-label={`${item.id} details`} onClick={(event) => { event.stopPropagation(); onOpen(item.id); }}><ArrowRight size={16} /></button></td>
+            <td><button className="icon-button" aria-label={`${item.id} details`} onClick={(event) => { event.stopPropagation(); onOpen(item.id); }}
+              onDoubleClick={(event) => event.stopPropagation()}><ArrowRight size={16} /></button></td>
           </tr>)}</tbody></table></div>
         {cases.length > 0 && shownColumns.some(({ id }) => id === 'slideState') && <SlideStatusLegend />}
         {!cases.length && <div className="empty"><FolderOpen size={28} />

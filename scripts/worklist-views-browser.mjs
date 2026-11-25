@@ -284,6 +284,31 @@ try {
   await button(preview, 'Apply Columns to Worklist').click();
   assert.deepEqual(await table(restored).getByRole('columnheader').allTextContents(), [...sampleHeadings, 'Open']);
 
+  await restored.getByLabel('Search Cases').fill(sampleName);
+  const caseRow = table(restored).getByRole('row').filter({ hasText: sampleName });
+  await caseRow.waitFor();
+  await restored.waitForFunction(() => document.querySelectorAll('.worklist-case-table tbody tr').length === 1);
+  const scroll = restored.locator('.worklist-panel > .table-scroll');
+  await scroll.evaluate((element) => { element.scrollLeft = 0; });
+  const measureColumns = (element) => [...element.querySelectorAll('thead th:first-child, tbody tr:first-child td:nth-child(-n+2)')]
+    .map((cell) => cell.getBoundingClientRect().left);
+  const atStart = await scroll.evaluate(measureColumns);
+  assert.ok(await scroll.evaluate((element) => {
+    element.scrollLeft = 320;
+    return element.scrollLeft >= 100;
+  }));
+  const afterScroll = await scroll.evaluate(measureColumns);
+  assert.ok(Math.abs(afterScroll[0] - atStart[0]) < 1, 'The Case ID heading stays fixed');
+  assert.ok(Math.abs(afterScroll[1] - atStart[1]) < 1, `The Case ID cell stays fixed (${atStart} → ${afterScroll})`);
+  assert.ok(atStart[2] - afterScroll[2] >= 100, 'Other columns scroll horizontally');
+  await scroll.evaluate((element) => { element.scrollLeft = 0; });
+  const specimenCell = caseRow.getByRole('cell', { name: 'COLLECTION-QA', exact: true });
+  await specimenCell.click();
+  assert.equal(await button(caseRow, sampleName).getAttribute('aria-pressed'), 'true');
+  assert.equal(await restored.getByRole('heading', { name: 'Worklist', exact: true }).isVisible(), true);
+  await specimenCell.dblclick();
+  await restored.getByRole('heading', { name: sampleName, exact: true }).waitFor();
+
   console.log('PASS: Worklist views, sorting, provenance, role scope, and isolated sample column preview and apply');
 } finally {
   await browser.close();

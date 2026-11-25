@@ -163,6 +163,12 @@ tr.selected-row { background: #f4f0ff; }
 tbody tr:hover { background: #f9f7ff; cursor: pointer; }
 tbody tr.selected-row:hover { background: #efe9ff; }
 .case-id { font-weight: 700; color: #5341b3; white-space: nowrap; border: 0; background: none; padding: 4px 0; }
+.worklist-case-table .case-id-cell { position: sticky; inset-inline-start: 0; box-shadow: 2px 0 0 var(--line); }
+.worklist-case-table th.case-id-cell { z-index: 3; }
+.worklist-case-table td.case-id-cell { z-index: 1; background: var(--surface); }
+.worklist-case-table tbody tr:hover .case-id-cell { background: #f9f7ff; }
+.worklist-case-table tr.selected-row .case-id-cell { background: #f4f0ff; }
+.worklist-case-table tr.selected-row:hover .case-id-cell { background: #efe9ff; }
 .slide-count { display: inline-flex; align-items: center; gap: 4px; color: #57516b; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .slide-status-groups { display: flex; flex-wrap: wrap; gap: 4px; min-width: 108px; max-width: 260px; }
 .slide-status-group { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 3px; max-width: 100%; padding: 2px 5px; border: 1px solid var(--line); border-radius: 5px; }
@@ -305,7 +311,7 @@ dialog::backdrop { background: #21193575; }
 
 @media (min-width: 1024px) and (min-height: 700px) {
   .worklist-panel > .table-scroll { max-height: calc(100dvh - 262px); overflow: auto; }
-  .worklist-panel th { position: sticky; top: 0; z-index: 1; }
+  .worklist-panel th { position: sticky; top: 0; z-index: 2; }
   .case-preview { position: sticky; top: 8px; max-height: calc(100dvh - 22px); overflow: auto; }
 }
 @media (max-width: 1080px) {
