@@ -38,23 +38,25 @@ export function columnValue(item: DemoCase, id: ColumnId) {
   const value = (text: string | number | null | undefined, source = provenance) =>
     text != null && text !== '' ? <span title={source}>{text}</span> : blank;
   const dateValue = (text: string | null | undefined, source: string) => value(text && worklistDate.format(new Date(text)), source);
-  const patientSource = item.patient?.source === 'manual' ? 'Manual Patient Record' : item.patient?.source ?? provenance;
+  const synthetic = item.patient?.source === 'synthetic_demo';
+  const patientSource = synthetic ? 'Synthetic Demo Metadata'
+    : item.patient?.source === 'manual' ? 'Manual Patient Record' : item.patient?.source ?? provenance;
   switch (id) {
     case 'specimen': return item.specimen === 'Not Entered' ? blank : value(item.specimen);
     case 'assignee': return value(item.assignee || 'Unassigned', 'IMS Case Assignment');
     case 'status': return <span title="IMS Review Workflow"><StatusLabel status={item.status} /></span>;
     case 'slides': return <span className="slide-count" title={provenance}><Layers3 size={14} />{item.source === 'files' ? `${item.slides.length} files` : `${readyCount(item)}/${item.slides.length}`}</span>;
     case 'stains': return value(listedStains(item), `${provenance} · Registered slide stains`);
-    case 'received': return dateValue(data?.accessioned_at, 'Locally Entered Accession Time');
+    case 'received': return dateValue(data?.accessioned_at, synthetic ? patientSource : 'Locally Entered Accession Time');
     case 'created': return dateValue(data?.created_at, item.source === 'files' ? 'File Registration Update' : 'IMS Registration Timestamp');
-    case 'collected': return value(data?.collection_date, 'Earliest Recorded Specimen Collection Date');
+    case 'collected': return value(data?.collection_date, synthetic ? patientSource : 'Earliest Recorded Specimen Collection Date');
     case 'lastOpened': return dateValue(data?.last_opened, 'Your Last Case or Viewer Open');
     case 'patient': return value(item.patient?.name, patientSource);
     case 'mrn': return value(item.patient?.number, data?.mrns?.map(({ value, source }) => `${value}: ${source}`).join(' · ') || 'Linked External MRN');
     case 'localPatientId': return value(item.patient?.localRef, patientSource);
     case 'birth': return value(item.patient?.birth, patientSource);
     case 'sex': return value(item.patient?.sex ? sexLabels[item.patient.sex] : null, patientSource);
-    case 'age': return value(data?.age, 'Completed Years at Earliest Recorded Collection Date');
+    case 'age': return value(data?.age, synthetic ? patientSource : 'Completed Years at Earliest Recorded Collection Date');
     case 'group': return value(data?.group_name, 'IMS Workgroup Classification');
     case 'priority': return data?.priority
       ? <span className={`priority-badge priority-${data.priority}`} title={data.priority_source === 'manual' ? 'Manual Classification' : 'IMS Classification'}>{priorityLabels[data.priority]}</span>
@@ -65,7 +67,7 @@ export function columnValue(item: DemoCase, id: ColumnId) {
     case 'storage': return value(data?.has_storage ? 'Local WSI' : null, 'Registered Scan Location');
     case 'requests': return value(data?.request_count, 'IMS Case Requests');
     case 'notes': return value(data?.review_note, 'Latest IMS Review Note');
-    case 'source': return value(provenance);
+    case 'source': return synthetic ? value('Original WSI · Synthetic Case Fields') : value(provenance);
     default: return <span className="muted" title="Workflow not yet available">—<span className="sr-only">Not yet available</span></span>;
   }
 }

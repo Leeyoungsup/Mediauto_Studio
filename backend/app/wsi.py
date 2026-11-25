@@ -103,16 +103,41 @@ def apply_color_profile(rgb, profile):
             pass
 
 
-def jpeg(region, output_size):
+def resized_region(region, output_size):
     # The base renderer composites OpenSlide's transparent padding onto white.
     with region.convert("RGBA") as rgba, Image.new("RGB", region.size, "white") as rgb:
         with rgba.getchannel("A") as alpha:
             rgb.paste(rgba, mask=alpha)
         apply_color_profile(rgb, region.info.get("icc_profile"))
-        with rgb.resize(output_size, Image.Resampling.LANCZOS) as output:
-            buffer = io.BytesIO()
-            output.save(buffer, "JPEG", quality=85)
-            return buffer.getvalue()
+        return rgb.resize(output_size, Image.Resampling.LANCZOS)
+
+
+def encode_jpeg(image):
+    with io.BytesIO() as buffer:
+        image.save(buffer, "JPEG", quality=85)
+        return buffer.getvalue()
+
+
+def full_scene_overview(slide, level, output_size, cancelled):
+    width, height = slide.level_dimensions[level]
+    if width * height > 64_000_000:
+        raise HTTPException(422, "This scan has no low-resolution preview available.")
+    downsample = slide.level_downsamples[level]
+    out_width, out_height = output_size
+    strip_height = max(1, 4_000_000 // width)
+    with Image.new("RGB", output_size, "white") as preview:
+        for top in range(0, height, strip_height):
+            if cancelled.is_set():
+                return None
+            bottom = min(top + strip_height, height)
+            output_top, output_bottom = round(top * out_height / height), round(bottom * out_height / height)
+            if output_bottom == output_top:
+                continue
+            origin = (0, round(top * downsample))
+            with slide.read_region(origin, level, (width, bottom - top)) as strip:
+                with resized_region(strip, (out_width, output_bottom - output_top)) as resized:
+                    preview.paste(resized, (0, output_top))
+        return None if cancelled.is_set() else encode_jpeg(preview)
 
 
 def capture_roi(slide, cancelled, kind, points, include_annotation, include_scale, max_edge=1600):
@@ -190,7 +215,7 @@ def read_scan(path, operation, cancelled, coords=None):
                 level = slide.level_count - 1
                 size = slide.level_dimensions[level]
             if math.prod(size) > 16_000_000:
-                raise HTTPException(422, "This scan has no low-resolution preview available.")
+                return full_scene_overview(slide, level, output_size, cancelled)
             origin = (0, 0)
         else:
             stage, x, y = coords
@@ -205,7 +230,10 @@ def read_scan(path, operation, cancelled, coords=None):
         if cancelled.is_set():
             return None
         with slide.read_region(origin, level, size) as region:
-            return None if cancelled.is_set() else jpeg(region, output_size)
+            if cancelled.is_set():
+                return None
+            with resized_region(region, output_size) as resized:
+                return encode_jpeg(resized)
 
 
 async def scan_response(request, path, operation, coords=None):

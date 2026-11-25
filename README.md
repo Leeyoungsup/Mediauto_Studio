@@ -334,4 +334,13 @@ PYTHONPATH="$PWD/backend" MEDIAUTO_DB_SOCKET="$PWD/.runtime/pgsocket" MEDIAUTO_D
   python -s scripts/seed-stain-demo.py
 ```
 
-향후 SaaS 원본을 가져올 때는 프로젝트명과 파일명의 염색 코드를 대조하고, 데이터셋·조직 분류·사이트·케이스 번호가 모두 일치한 파일을 같은 케이스 후보로 묶습니다. 동일 슬라이드의 여러 스캔은 스캔별로 관리합니다. 파일명과 크기가 같은 항목은 체크섬을 비교해 중복을 확인하고, 묶음이 불확실한 항목은 Slide Registration에서 검토합니다. 시연용 원본은 등록 전에 라벨·개요 이미지 및 메타데이터의 비식별 여부를 확인합니다.
+외부 시연 승인을 받은 기존 SaaS 영상은 Worklist의 **Saved View → SaaS Stain Demo**에서 확인합니다. Viewer는 복사한 WSI의 원본 영상에 연결되고, Worklist의 환자 이름·로컬 환자 ID·생년월일·성별·채취 및 접수 날짜는 합성값입니다. **Data Source**에 `Original WSI · Synthetic Case Fields`가 표시됩니다.
+
+등록 스크립트는 프로젝트명과 파일명의 염색 코드를 대조하고, 데이터셋·조직 분류·사이트·케이스 번호가 모두 일치한 파일을 한 케이스에 묶습니다. 동일 슬라이드의 NDPI·SVS와 내용이 다른 스캔은 각각 열 수 있습니다. 같은 포맷에서 전체 바이트가 일치한 사본은 Viewer에 하나만 표시합니다. 프로젝트별 사본은 `.runtime/saas-slide-import/projects/`에 보관합니다.
+
+승인된 자료의 전송과 등록을 재개하려면 아래 명령을 실행합니다. 옵션을 생략하면 전송 및 등록 상태만 확인합니다.
+
+```bash
+PYTHONPATH="$PWD/backend" MEDIAUTO_DB_SOCKET="$PWD/.runtime/pgsocket" MEDIAUTO_DB_USER="$(id -un)" \
+  python -s scripts/import-saas-stain-demo.py --watch-approved
+```
