@@ -5,7 +5,7 @@ import { ArrowLeft, ClipboardCopy, Clock3, LogIn, UserPlus } from 'lucide-react'
 
 export type User = { id: string; organization: string; username: string; display_name: string; role: 'admin' | 'doctor' | 'labeler' | 'viewer' };
 export const accountRoleLabels: Record<User['role'], string> = {
-  admin: 'Administrator', doctor: 'Pathologist', labeler: 'Slide Registration Staff', viewer: 'Viewer',
+  admin: 'Administrator', doctor: 'Pathologist', labeler: 'Medical Technologist', viewer: 'Viewer',
 };
 export const canWrite = (user: User) => user.role === 'admin' || user.role === 'labeler';
 const expired = 'mediauto-session-expired';

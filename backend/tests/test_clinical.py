@@ -133,7 +133,7 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
             self.assertEqual((await applicant.get(audit)).status_code, 403)
             access_url = f"{directory}/{account['id']}/access"
             change = {"role": "viewer", "active": True, "version": 0, "reason": "Synthetic access review"}
-            self.assertEqual((await applicant.patch(access_url, json=change)).status_code, 403)
+            self.assertEqual((await applicant.patch(access_url, json={**change, "role": "admin"})).status_code, 403)
             await login(self.client, other.organization, other.username)
             self.assertEqual((await self.client.patch(access_url, json=change)).status_code, 404)
             self.assertEqual((await self.client.get(audit)).json()["rows"], [])
@@ -162,6 +162,17 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
                              (self.user.username, "doctor", "viewer", "Synthetic access review"))
             self.assertEqual([row["action"] for row in (await self.client.get(audit, params={"username": "reject-me"})).json()["rows"]],
                              ["registration_rejected"])
+
+            promote = {**change, "role": "admin", "version": 2, "reason": "Synthetic administrator grant"}
+            self.assertEqual((await self.client.patch(access_url, json={**promote, "active": False})).status_code, 422)
+            promoted = await self.client.patch(access_url, json=promote)
+            self.assertEqual(promoted.status_code, 200, promoted.text)
+            self.assertEqual((promoted.json()["role"], promoted.json()["can_manage"]), ("admin", False))
+            self.assertEqual((await applicant.post("/api/auth/login", json=payload)).json()["role"], "admin")
+            self.assertEqual((await applicant.get(directory)).status_code, 200)
+            grant = (await self.client.get(audit, params={"username": "new.applicant"})).json()["rows"][0]
+            self.assertEqual((grant["previous_role"], grant["role"], grant["reason"]),
+                             ("viewer", "admin", "Synthetic administrator grant"))
 
     async def test_patient_case_specimen_slide_and_alternate_scans(self):
         case = await self.create("cases", {"case_number": "DEMO-001"})

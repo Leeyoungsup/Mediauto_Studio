@@ -1,6 +1,6 @@
 """Organization-scoped account administration and audit views."""
 
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Query
@@ -10,14 +10,14 @@ from sqlalchemy.orm import aliased
 
 from app.auth import CurrentUser, Session, require_roles, user_view
 from app.models import AccountRegistrationRequest, AuthSession, AuthUser, ClinicalEvent, Workgroup
-from app.registration import PAGE_SIZE, StaffRole
+from app.registration import PAGE_SIZE
 
 router = APIRouter(prefix="/api/auth", tags=["Account management"])
 
 
 class AccessChange(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    role: StaffRole
+    role: Literal["admin", "doctor", "labeler", "viewer"]
     active: bool
     version: Annotated[int, Field(ge=0)]
     reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=240)]
@@ -61,6 +61,8 @@ async def change_access(account_id: UUID, data: AccessChange, user: CurrentUser,
         version = await session.scalar(select(access_version()).select_from(AuthUser).where(AuthUser.id == account_id))
         if data.version != version:
             raise HTTPException(409, "This account changed. Refresh the directory and review the current access.")
+        if data.role == "admin" and not data.active:
+            raise HTTPException(422, "Set the account to Active to grant Administrator access.")
         before = {"role": account.role, "active": account.active}
         after = {"role": data.role, "active": data.active}
         if before == after:

@@ -99,7 +99,7 @@ function AccountDirectory({ openLog }: { openLog: (username: string) => void }) 
       <h3>Edit Access · {selected.display_name} ({selected.username})</h3>
       <p className="muted">Changing the role or status signs this account out of active sessions.</p>
       <label className="form-field">Account Role<select name="role" defaultValue={selected.role} required disabled={busy}>
-        {(['doctor', 'labeler', 'viewer'] as const).map((role) => <option key={role} value={role}>{accountRoleLabels[role]}</option>)}
+        {(['admin', 'doctor', 'labeler', 'viewer'] as const).map((role) => <option key={role} value={role}>{accountRoleLabels[role]}</option>)}
       </select></label>
       <label className="form-field">Account Status<select name="active" defaultValue={selected.active ? 'active' : 'disabled'} disabled={busy}>
         <option value="active">Active</option><option value="disabled">Disabled</option>

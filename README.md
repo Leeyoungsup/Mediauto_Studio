@@ -24,7 +24,7 @@ npm --prefix frontend run build
 
 로그인 화면의 **Request an Account**에서 기관 코드, 이름, 사용자명, 비밀번호를 제출합니다. 표시되는 확인 코드를 기관 관리자에게 전달합니다. 관리자는 **Accounts → Registration Requests**에서 신청을 열고 역할과 확인 코드를 입력해 승인합니다. 이후 신청에 사용한 사용자명과 비밀번호로 로그인할 수 있습니다. [가입 절차와 검증](work/account-registration.md)
 
-관리자 메뉴의 **Accounts → Directory and Access**에서 기존 계정의 역할·활성 상태를 바꿀 수 있습니다. **Audit Log**에서 가입 결정, 계정 권한, Workgroup 멤버십의 변경 이력을 확인합니다. [계정 관리와 감사 범위](work/account-registration.md)
+관리자 메뉴의 **Accounts → Directory and Access**에서 기존 계정의 역할·활성 상태를 바꾸고, 계정을 Active로 설정하여 Administrator 권한을 줄 수 있습니다. **Audit Log**에서 가입 결정, 계정 권한, Workgroup 멤버십의 변경 이력을 확인합니다. [계정 관리와 감사 범위](work/account-registration.md)
 
 Worklist에서 등록한 케이스는 개발 PostgreSQL에 저장됩니다.
 
