@@ -20,6 +20,10 @@ npm --prefix frontend run build
 
 브라우저에서 `http://서버IP:9920/`을 열면 로그인 화면이 표시됩니다. 서버 자체에서는 `http://127.0.0.1:9920/`으로 접속합니다. `/api/health`에서 FastAPI·PostgreSQL과 EMR 설정 상태를 확인할 수 있습니다.
 
+### 계정 가입 신청
+
+로그인 화면의 **Request an Account**에서 기관 코드, 이름, 사용자명, 비밀번호를 제출합니다. 표시되는 확인 코드를 기관 관리자에게 전달합니다. 관리자는 **Settings → Accounts**에서 신청을 열고 역할과 확인 코드를 입력해 승인합니다. 이후 신청에 사용한 사용자명과 비밀번호로 로그인할 수 있습니다. [가입 절차와 검증](work/account-registration.md)
+
 Worklist에서 등록한 케이스는 개발 PostgreSQL에 저장됩니다.
 
 Worklist에서는 **Hide Case Preview**로 목록을 넓힐 수 있습니다. WSI 뷰어는 탐색 메뉴를 기본으로 접고, **Hide Slide Tray**로 이미지 영역을 더 넓힐 수 있습니다. 탐색 메뉴는 상단 아이콘에서 다시 펼칩니다.

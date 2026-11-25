@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import { Microscope } from 'lucide-react';
+import { Microscope, UserPlus } from 'lucide-react';
 
 export type User = { id: string; organization: string; username: string; display_name: string; role: 'admin' | 'doctor' | 'labeler' | 'viewer' };
 export const canWrite = (user: User) => user.role === 'admin' || user.role === 'labeler';
@@ -33,6 +33,9 @@ export function SessionGate({ children }: { children: (user: User, logout: () =>
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [registering, setRegistering] = useState(false);
+  const [organization, setOrganization] = useState('local');
+  const [confirmationCode, setConfirmationCode] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -57,6 +60,29 @@ export function SessionGate({ children }: { children: (user: User, logout: () =>
     } finally { setBusy(false); }
   }
 
+  async function register(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const fields = new FormData(event.currentTarget);
+    if (fields.get('password') !== fields.get('confirm_password')) {
+      setError('The passwords do not match.');
+      return;
+    }
+    fields.delete('confirm_password');
+    setBusy(true); setError('');
+    try {
+      const result = await api<{ code: string }>('/api/auth/register', jsonBody('POST', Object.fromEntries(fields)));
+      setConfirmationCode(result.code);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Unable to submit the registration request.');
+    } finally { setBusy(false); }
+  }
+
+  function changeMode(open: boolean) {
+    setRegistering(open);
+    setConfirmationCode('');
+    setError('');
+  }
+
   async function logout() {
     try { await api('/api/auth/logout', { method: 'POST' }); setUser(null); }
     catch (failure) { setError(failure instanceof Error ? failure.message : 'Unable to sign out.'); }
@@ -65,12 +91,30 @@ export function SessionGate({ children }: { children: (user: User, logout: () =>
   if (user) return <>{error && <p className="notice" role="alert">{error}</p>}{children(user, () => void logout())}</>;
   return <main className="login-page"><section className="panel login-panel">
     <div className="title-inline"><span className="brand-icon"><Microscope size={23} /></span><h1>MeDIAuto Studio</h1></div>
-    {loading ? <p role="status">Checking sign-in status…</p> : <form className="login-form" onSubmit={(event) => void login(event)}>
-      <label className="form-field">Organization Code<input name="organization" defaultValue="local" required maxLength={64} /></label>
+    {loading ? <p role="status">Checking sign-in status…</p> : <>
+    {confirmationCode ? <div className="login-form" role="status">
+      <h2>Registration Confirmation Code</h2>
+      <p>Give this code to your organization administrator. Sign in after they confirm approval.</p>
+      <output className="registration-code">{confirmationCode}</output>
+      <button type="button" className="button primary" onClick={() => changeMode(false)}>Back to Sign In</button>
+    </div> : registering ? <form className="login-form" aria-label="Request an Account" onSubmit={(event) => void register(event)}>
+      <h2>Request an Account</h2>
+      <label className="form-field">Organization Code<input name="organization" value={organization} onChange={(event) => setOrganization(event.target.value)} required maxLength={64} /></label>
+      <label className="form-field">Display Name<input name="display_name" autoComplete="name" required maxLength={120} /></label>
+      <label className="form-field">Username<input name="username" autoComplete="username" required minLength={3} maxLength={80} pattern="[a-zA-Z0-9][a-zA-Z0-9._\-]{2,79}" /></label>
+      <label className="form-field">Password<input name="password" type="password" autoComplete="new-password" required minLength={12} maxLength={256} /></label>
+      <label className="form-field">Confirm Password<input name="confirm_password" type="password" autoComplete="new-password" required minLength={12} maxLength={256} /></label>
+      <p className="muted">Use at least 12 characters. Your administrator assigns your role.</p>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <button className="button primary" type="submit" disabled={busy}>{busy ? 'Submitting…' : 'Submit Registration Request'}</button>
+      <button className="button secondary" type="button" disabled={busy} onClick={() => changeMode(false)}>Back to Sign In</button>
+    </form> : <form className="login-form" onSubmit={(event) => void login(event)}>
+      <label className="form-field">Organization Code<input name="organization" value={organization} onChange={(event) => setOrganization(event.target.value)} required maxLength={64} /></label>
       <label className="form-field">Username<input name="username" autoComplete="username" required maxLength={80} /></label>
       <label className="form-field">Password<input name="password" type="password" autoComplete="current-password" required maxLength={256} /></label>
       {error && <p className="form-error" role="alert">{error}</p>}
       <button className="button primary" type="submit" disabled={busy}>{busy ? 'Checking…' : 'Sign In'}</button>
-    </form>}
+      <button className="button secondary" type="button" disabled={busy} onClick={() => changeMode(true)}><UserPlus size={16} aria-hidden="true" /> Request an Account</button>
+    </form>}</>}
   </section></main>;
 }

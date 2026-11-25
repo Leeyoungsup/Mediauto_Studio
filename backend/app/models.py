@@ -45,6 +45,33 @@ class AuthUser(Base):
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class AccountRegistrationRequest(Base):
+    __tablename__ = "registration_requests"
+    __table_args__ = (
+        ForeignKeyConstraint(("organization", "reviewer_id"), ("auth_users.organization", "auth_users.id")),
+        CheckConstraint("state IN ('pending', 'approved', 'rejected')", name="registration_request_state"),
+        CheckConstraint("(state = 'pending' AND password_hash IS NOT NULL AND reviewer_id IS NULL "
+                        "AND reviewed_at IS NULL AND role IS NULL) OR "
+                        "(state = 'approved' AND password_hash IS NULL AND reviewer_id IS NOT NULL "
+                        "AND reviewed_at IS NOT NULL AND role IN ('doctor', 'labeler', 'viewer') AND role IS NOT NULL) OR "
+                        "(state = 'rejected' AND password_hash IS NULL AND reviewer_id IS NOT NULL "
+                        "AND reviewed_at IS NOT NULL AND role IS NULL)", name="registration_request_review"),
+        Index("ix_registration_pending_username", "organization", "username", unique=True,
+              postgresql_where=text("state = 'pending'")),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    organization: Mapped[str] = mapped_column(String(64))
+    username: Mapped[str] = mapped_column(String(80))
+    display_name: Mapped[str] = mapped_column(String(120))
+    password_hash: Mapped[str | None] = mapped_column(String(120))
+    state: Mapped[str] = mapped_column(String(16), default="pending", server_default="pending")
+    role: Mapped[str | None] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reviewer_id: Mapped[UUID | None] = mapped_column(Uuid)
+
+
 class AuthSession(Base):
     __tablename__ = "auth_sessions"
 

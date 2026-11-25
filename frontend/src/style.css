@@ -805,3 +805,8 @@ dialog::backdrop { background: #21193575; }
 @media (max-width: 760px) {
   .viewer-tool-dock { position: static; max-width: none; border-radius: 0; border-inline: 0; box-shadow: none; }
 }
+
+.registration-panel, .registration-decision { display: grid; gap: 12px; }
+.registration-panel .actions [aria-pressed=true] { background: var(--accent-soft); color: var(--accent-dark); border-color: var(--accent); }
+.registration-decision { max-width: 510px; border: 1px solid var(--line); padding: 13px; border-radius: 8px; }
+.registration-code { padding: 10px; background: var(--accent-soft); color: var(--accent-dark); border-radius: 8px; font-family: monospace; font-size: 16px; overflow-wrap: anywhere; user-select: all; }

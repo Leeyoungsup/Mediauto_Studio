@@ -122,6 +122,7 @@ else
     run_browser viewer-records
     run_browser multi-view ihc pap
     run_browser worklist-views
+    if selected; then node scripts/registration-browser.mjs; fi
     if selected ihc; then
         (
             cd -- "$root/backend"

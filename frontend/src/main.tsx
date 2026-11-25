@@ -3,11 +3,12 @@ import { AnalysisSettings } from './analysis-execution';
 import { RoiSearchPage } from './roi-search';
 import type { RoiLocation } from './roi-search';
 import { FrozenWorkflow, ORResults } from './frozen-workflow';
+import { RegistrationRequests } from './registration-requests';
 import { CaseReport } from './case-report';
 import { NotificationCenter, NotificationSettings } from './notifications';
 import { lazy, Suspense, StrictMode, useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import { Activity, Bell, ChevronRight, CircleHelp, ClipboardList, FlaskConical, FolderKanban, LayoutList, Microscope, PanelLeftClose, PanelLeftOpen, RadioTower, ScanLine, Settings2, UserRound, UserRoundCheck, UsersRound, X } from 'lucide-react';
+import { Activity, Bell, ChevronRight, CircleHelp, ClipboardList, FlaskConical, FolderKanban, LayoutList, Microscope, PanelLeftClose, PanelLeftOpen, RadioTower, ScanLine, Settings2, UserRound, UserRoundCheck, UserRoundPlus, UsersRound, X } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
 import { CaseEditor } from './case-editor';
 import { PatientMatch } from './patient-match';
@@ -39,7 +40,7 @@ const RelatedComparison = lazy(() => import('./related-comparison'));
 const PapPolicySettings = lazy(() => import('./pap-policy-settings'));
 
 type Page = { view: 'related-comparison'; id: string; anchor?: string } | { view: 'worklist'; scope: Scope } | { view: 'case'; id: string; files: boolean; tab?: 'requests' | 'report' | 'editor' | 'notes' | 'frozen'; selectedScan?: string } | { view: 'request'; id: string } | { view: 'or'; id?: string }
-  | { view: 'viewer'; id: string; slide?: string; snapshot?: string; roi?: string; roiOrigin?: RoiLocation; files: boolean } | { view: 'roi-search'; location: RoiLocation } | { view: 'collections'; id?: string } | { view: 'scans' } | { view: 'settings'; section?: 'groups' | 'notifications' | 'analysis' | 'pap' };
+  | { view: 'viewer'; id: string; slide?: string; snapshot?: string; roi?: string; roiOrigin?: RoiLocation; files: boolean } | { view: 'roi-search'; location: RoiLocation } | { view: 'collections'; id?: string } | { view: 'scans' } | { view: 'settings'; section?: 'groups' | 'notifications' | 'analysis' | 'pap' | 'accounts' };
 type WorkflowAction = 'assignment' | 'review' | 'confirm';
 type Modal = 'register' | 'system' | null;
 
@@ -64,7 +65,7 @@ function readPage(): Page {
   if (view === 'collections') return { view, id: isUuid(id) ? id : undefined };
   if (view === 'or') return { view, id: id ? decodeRoute(id) : undefined };
   if (view === 'scans') return { view };
-  if (view === 'settings') return { view, section: id === 'groups' || id === 'notifications' || id === 'analysis' || id === 'pap' ? id : undefined };
+  if (view === 'settings') return { view, section: id === 'groups' || id === 'notifications' || id === 'analysis' || id === 'pap' || id === 'accounts' ? id : undefined };
   if (view === 'request' && id) return { view, id: decodeRoute(id) };
   if ((view === 'case' || view === 'file-case') && id) return { view: 'case', id: decodeRoute(id), files: view === 'file-case', tab: slide === 'requests' || slide === 'report' || slide === 'editor' || slide === 'notes' || slide === 'frozen' ? slide : undefined,
     selectedScan: slide === 'slides' && snapshot ? decodeRoute(snapshot) : undefined };
@@ -387,13 +388,14 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
               <a href="#settings" aria-current={!page.section ? 'page' : undefined}><ScanLine size={16} aria-hidden="true" /> Intake and Integration</a>
               <a href="#settings/groups" aria-current={page.section === 'groups' ? 'page' : undefined}><UsersRound size={16} aria-hidden="true" /> Manage Workgroups</a>
               <a href="#settings/analysis" aria-current={page.section === 'analysis' ? 'page' : undefined}><FlaskConical size={16} aria-hidden="true" /> Analysis Pre-run Rules</a>
+              <a href="#settings/accounts" aria-current={page.section === 'accounts' ? 'page' : undefined}><UserRoundPlus size={16} aria-hidden="true" /> Accounts</a>
               <a href="#settings/pap" aria-current={page.section === 'pap' ? 'page' : undefined}><Microscope size={16} aria-hidden="true" /> Pap Review Policy</a>
             </>}
             <a href="#settings/notifications" aria-current={page.section === 'notifications' ? 'page' : undefined}><Bell size={16} aria-hidden="true" /> Notifications</a>
           </nav>
         </section>}
         {page.view === 'settings' && page.section === 'notifications' && <NotificationSettings organization={user.organization} />}
-        {page.view === 'settings' && page.section !== 'notifications' && settingsAllowed && (page.section === 'groups'
+        {page.view === 'settings' && page.section !== 'notifications' && settingsAllowed && (page.section === 'accounts' ? <RegistrationRequests /> : page.section === 'groups'
           ? <WorkgroupSettings onChanged={refreshQueues} /> : page.section === 'analysis' ? <AnalysisSettings organization={user.organization} />
           : page.section === 'pap' ? <Suspense fallback={<p role="status">Loading Pap policy…</p>}>
             <PapPolicySettings organization={user.organization} /></Suspense> : <>

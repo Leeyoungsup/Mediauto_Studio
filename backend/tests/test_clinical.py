@@ -75,6 +75,55 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, expected, response.text)
         return response.json()
 
+    async def test_account_registration_approval_rejection_and_organization_scope(self):
+        payload = {"organization": self.org, "username": "New.Applicant", "display_name": "Synthetic Applicant",
+                   "password": "synthetic-signup-password"}
+        queue = "/api/auth/registration-requests"
+        register = "/api/auth/register"
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://localhost") as applicant:
+            self.assertEqual((await applicant.get(queue)).status_code, 401)
+            bad = await applicant.post(register, json={**payload, "role": "admin"})
+            self.assertEqual(bad.status_code, 422)
+            self.assertNotIn(payload["password"], bad.text)
+            self.assertEqual((await applicant.post(register, json=payload, headers={"Origin": "https://untrusted.example"})).status_code, 403)
+            first, duplicate = await asyncio.gather(applicant.post(register, json=payload), applicant.post(register, json=payload))
+            self.assertEqual((first.status_code, duplicate.status_code), (202, 202))
+            code = first.json()["code"]
+            self.assertEqual(code, duplicate.json()["code"])
+            duplicate_wrong_password = await applicant.post(register, json={**payload, "password": "different-synthetic-password"})
+            self.assertNotEqual(duplicate_wrong_password.json()["code"], code)
+            self.assertNotIn("set-cookie", first.headers)
+            self.assertEqual((await applicant.post("/api/auth/login", json=payload)).status_code, 401)
+            pending = (await self.client.get(queue)).json()["rows"]
+            self.assertEqual([row["username"] for row in pending], ["new.applicant"])
+            self.assertNotIn("password_hash", pending[0])
+            path = f"{queue}/{pending[0]['id']}/decision"
+            other = await create_account(self.org + "-other", "foreign-admin", "admin")
+            await login(self.client, other.organization, other.username)
+            self.assertEqual((await self.client.get(queue)).json()["rows"], [])
+            decision = {"action": "approve", "role": "doctor", "code": code.lower()}
+            self.assertEqual((await self.client.post(path, json=decision)).status_code, 404)
+            await login(self.client, self.org, self.user.username)
+            self.assertEqual((await self.client.post(path, json={**decision, "role": "admin"})).status_code, 422)
+            self.assertEqual((await self.client.post(path, json={**decision, "code": duplicate_wrong_password.json()["code"]})).status_code, 422)
+            result = await asyncio.gather(*(self.client.post(path, json=decision) for _ in range(2)))
+            self.assertEqual(sorted(item.status_code for item in result), [200, 409])
+            reviewed = (await self.client.get(queue, params={"state": "reviewed"})).json()["rows"]
+            self.assertEqual((reviewed[0]["state"], reviewed[0]["role"], reviewed[0]["reviewer_id"]),
+                             ("approved", "doctor", str(self.user.id)))
+            self.assertEqual((await applicant.post("/api/auth/login", json=payload)).json()["role"], "doctor")
+            self.assertEqual((await applicant.get(queue)).status_code, 403)
+            self.assertEqual((await applicant.post(path, json=decision)).status_code, 403)
+            rejected = {**payload, "username": "reject-me"}
+            result = await applicant.post(register, json=rejected)
+            self.assertEqual(result.status_code, 202)
+            pending = (await self.client.get(queue)).json()["rows"]
+            rejected_path = f"{queue}/{pending[0]['id']}/decision"
+            self.assertEqual((await self.client.post(rejected_path, json={"action": "reject"})).json()["state"], "rejected")
+            self.assertEqual((await applicant.post("/api/auth/login", json=rejected)).status_code, 401)
+            self.assertEqual((await applicant.post(register, json=rejected)).status_code, 202)
+            self.assertEqual([row["username"] for row in (await self.client.get(queue)).json()["rows"]], ["reject-me"])
+
     async def test_patient_case_specimen_slide_and_alternate_scans(self):
         case = await self.create("cases", {"case_number": "DEMO-001"})
         self.assertIsNone(case["patient_id"])

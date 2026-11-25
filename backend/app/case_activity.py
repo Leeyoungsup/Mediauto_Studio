@@ -4,6 +4,7 @@ import logging
 from uuid import UUID, uuid4
 
 from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
+from fastapi.responses import JSONResponse
 from sqlalchemy import literal, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -159,5 +160,8 @@ async def case_http_exception(request, exc):
 
 
 async def case_validation_exception(request, exc):
+    if request.url.path.startswith("/api/auth/"):
+        return JSONResponse({"detail": "Check the required fields and input format."},
+                            status_code=422, headers={"Cache-Control": "no-store"})
     await log_error(request, 422)
     return await request_validation_exception_handler(request, exc)
