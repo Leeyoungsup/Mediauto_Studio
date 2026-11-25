@@ -3,7 +3,7 @@ import { CollaborativeReview, useCollaborativeReview } from './collaborative-rev
 import { roiSearchHref, roiViewerHref } from './roi-search';
 import type { RoiLocation } from './roi-search';
 import { useEffect, useRef, useState } from 'react';
-import { ClipboardList, ArrowLeft, GalleryHorizontalEnd, PanelLeftClose, PanelLeftOpen, Maximize, Minimize, Settings2, ScanLine, History, FileText, Camera, List, MessageSquare, UsersRound, FlaskConical, PanelsTopLeft, SquarePen } from 'lucide-react';
+import { ClipboardList, ArrowLeft, GalleryHorizontalEnd, Images, PanelLeftClose, PanelLeftOpen, Maximize, Minimize, Settings2, ScanLine, History, FileText, Camera, List, MessageSquare, UsersRound, FlaskConical, PanelsTopLeft, SquarePen } from 'lucide-react';
 import type { DemoCase } from './demo';
 import { CaseNotes } from './case-notes';
 import { CaseLogs } from './case-logs';
@@ -36,10 +36,12 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
   }, [followingFrame?.scan_id]);
   useEffect(() => { if (inReview) setComparing(false); }, [inReview]);
   const root = useRef<HTMLElement>(null);
+  const trayList = useRef<HTMLDivElement>(null);
   const preferences = useViewerPreferences();
   const { settings, change } = preferences;
   const trayVisible = settings.tray_visible;
   const [showSettings, setShowSettings] = useState(false);
+  const settingsButton = useRef<HTMLButtonElement>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [fullscreenError, setFullscreenError] = useState('');
 
@@ -82,6 +84,20 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
     onSlide(id);
   }
 
+  const slideIndex = slide ? item.slides.indexOf(slide) : -1;
+  const previous = slideIndex >= 0 ? item.slides.slice(0, slideIndex).reverse().find((entry) => entry.wsi) : undefined;
+  const next = slideIndex >= 0 ? item.slides.slice(slideIndex + 1).find((entry) => entry.wsi) : undefined;
+
+  useEffect(() => {
+    const list = trayList.current;
+    const active = list?.querySelector('[aria-pressed=true]');
+    if (!list || !active || !trayVisible || comparing) return;
+    const bounds = list.getBoundingClientRect();
+    const item = active.getBoundingClientRect();
+    const delta = (start: number, end: number, min: number, max: number) => start < min ? start - min : Math.max(0, end - max);
+    list.scrollBy({ left: delta(item.left, item.right, bounds.left, bounds.right), top: delta(item.top, item.bottom, bounds.top, bounds.bottom) });
+  }, [slide?.id, trayVisible, comparing, settings.gallery, settings.tray_orientation]);
+
   const canAnalyze = Boolean(analysisEndpoint && slide?.wsi?.source === 'clinical' && !review.following && !comparing);
   const activeTab: ViewerTab = analysisOpen && canAnalyze ? 'analysis' : contextTab;
   const tabs = [
@@ -120,10 +136,10 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
         {trayVisible ? 'Hide Slide Tray' : 'Show Slide Tray'}
       </button>}
       {!comparing && <button type="button" className="button secondary" aria-pressed={trayVisible && settings.gallery}
-        onClick={toggleGallery} title="Scan Gallery"><GalleryHorizontalEnd size={16} /> Gallery</button>}
-      {!comparing && <div className="viewer-settings-anchor"><button type="button" className="icon-button" title="Viewer Settings"
+        onClick={toggleGallery} title="Scan Gallery"><Images size={16} /> Gallery</button>}
+      {!comparing && <div className="viewer-settings-anchor"><button ref={settingsButton} type="button" className="icon-button" title="Viewer Settings"
         aria-label="Viewer Settings" aria-expanded={showSettings} aria-controls="viewer-settings" onClick={() => setShowSettings(!showSettings)}><Settings2 size={18} /></button>
-        {showSettings && <ViewerSettingsPanel preferences={preferences} />}
+        {showSettings && <ViewerSettingsPanel preferences={preferences} onClose={() => { setShowSettings(false); settingsButton.current?.focus(); }} />}
       </div>}
       <button type="button" className="icon-button" title={fullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
         aria-label={fullscreen ? 'Exit Fullscreen' : 'Fullscreen'} onClick={() => void toggleFullscreen()}>
@@ -141,9 +157,9 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
       <div inert={isDocument} className="viewer-scan-stage">
     {comparing ? <MultiView slides={available} primary={slide?.id} onClose={() => setComparing(false)}
       onSingle={(id) => { selectSlide(id); setComparing(false); }} /> : <div className="viewer-layout" data-tray={trayVisible} data-orientation={settings.tray_orientation}>
-      <aside className="panel viewer-tray" id="viewer-slide-tray" hidden={!trayVisible}><div className="panel-title"><h2>Slide Tray</h2><span className="count">{item.slides.length}</span></div>
-        <div className="tray-items" data-gallery={settings.gallery}>{item.slides.map((entry) => <button className="tray-item" data-scan-id={entry.wsi?.id} key={entry.id} onClick={() => selectSlide(entry.id)} aria-pressed={slide?.id === entry.id} disabled={!entry.wsi || review.following}>
-          <span className="slide-image"><SlidePreview slide={entry} /></span><span><strong>{entry.label ?? entry.id}</strong><small>{entry.stain} · {entry.wsi?.format ?? entry.state}</small><ScanReference scan={entry.wsi} /></span>
+      <aside className="panel viewer-tray" id="viewer-slide-tray" hidden={!trayVisible}><div className="panel-title"><h2>Slide Tray</h2><span className="count" title="Viewable scans">{available.length}/{item.slides.length}</span></div>
+        <div ref={trayList} className="tray-items" data-gallery={settings.gallery}>{item.slides.map((entry) => <button className="tray-item" data-scan-id={entry.wsi?.id} key={entry.id} onClick={() => selectSlide(entry.id)} aria-pressed={slide?.id === entry.id} disabled={!entry.wsi || review.following}>
+          <span className="slide-image"><SlidePreview slide={entry} /></span><span className="tray-scan-label"><strong>{entry.label ?? entry.id}</strong><small>{entry.wsi?.format ?? entry.state} · {entry.stain}</small><ScanReference scan={entry.wsi} /></span>
         </button>)}</div>
       </aside>
       {slide?.wsi ? <ImageViewport key={slide.wsi.id + ':' + (initialSnapshot ?? initialRoi ?? '')} scan={slide.wsi} initialSnapshot={initialSnapshot}
@@ -157,12 +173,18 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
         } : undefined}
         extraAction={relatedEndpoint && item.recordId ? <RelatedCasesControl compact endpoint={relatedEndpoint}
           caseId={item.recordId} scanId={slide.wsi.id} /> : undefined}
-        options={{ settings, toggleFullscreen, toggleGallery, toggleMinimap: () => change('show_minimap', !settings.show_minimap) }} />
+        options={{ settings, active: !isDocument, position: { index: slideIndex + 1, total: item.slides.length }, toggleFullscreen, toggleGallery,
+          previous: previous && !review.following ? () => selectSlide(previous.id) : undefined,
+          next: next && !review.following ? () => selectSlide(next.id) : undefined,
+          toggleMinimap: () => change('show_minimap', !settings.show_minimap),
+          toggleLabel: () => change('show_label', !settings.show_label),
+          toggleOverview: () => change('show_overview', !settings.show_overview) }} />
         : <div className="panel empty"><ScanLine size={30} /><strong>{activeSlide && !slide ? 'The requested scan could not be found.' : slide?.state === 'QC Hold' || slide?.state === 'Rescan Required' ? 'This scan is blocked by QC.' : 'No scans are available for review.'}</strong><button className="button secondary" onClick={() => onBack(slide?.id)}>Go to Case Details</button></div>}
     </div>}
       </div>
       {isDocument && <section className="viewer-document panel" aria-label={activeLabel}>
-        <div className="panel-title"><h2>{activeLabel}</h2>
+        <div className="panel-title"><div><h2>{activeLabel}</h2>
+          {slide && <p className="viewer-document-context">{item.id} · {slide.label ?? slide.id}{slide.wsi && ` · ${slide.wsi.format} · Scan ${slide.wsi.id.slice(0, 8)}`}</p>}</div>
           <button type="button" className="button secondary" onClick={() => {
             selectTab('slides');
             document.getElementById('viewer-workspace-panel-tab-slides')?.focus();

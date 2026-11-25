@@ -92,6 +92,13 @@ try {
     Number(document.querySelector('.image-panel')?.dataset.viewZoom) > 0, svs);
   await compare(peer, await camera(owner));
   const switchMs = Math.round(performance.now() - changeAt);
+  const fittedDriver = await camera(owner);
+  await peer.setViewportSize({ width: 1280, height: 900 });
+  await settle(peer);
+  await compare(peer, fittedDriver);
+  await peer.setViewportSize({ width: 1520, height: 1050 });
+  await settle(peer);
+  await compare(peer, fittedDriver);
   for (let i = 0; i < 5; i++) await button(owner, 'Zoom In').click();
   await settle(owner);
   await compare(peer, await camera(owner));

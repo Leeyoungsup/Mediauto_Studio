@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
-import { AlertTriangle, List, LocateFixed, Map, Minus, Pause, Play, Plus, ScanLine } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, ChevronRight, Image, List, LocateFixed, Map, Minus, Pause, Play, Plus, ScanLine, Tag } from 'lucide-react';
 import type { WsiScan } from './demo';
 import { api, auditAttemptId, jsonBody, request } from './session';
 import { ViewerAnalysis } from './viewer-analysis';
@@ -68,10 +68,54 @@ export type PaneComparison = {
 
 type ViewerOptions = {
   settings: ViewerSettings;
+  active: boolean;
+  position: { index: number; total: number };
+  previous?: () => void;
+  next?: () => void;
+  toggleLabel: () => void;
+  toggleOverview: () => void;
   toggleFullscreen: () => Promise<void>;
   toggleGallery: () => void;
   toggleMinimap: () => void;
 };
+
+function useCanvasFit(enabled: boolean) {
+  const surface = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState<number>();
+
+  useEffect(() => {
+    if (!enabled || !surface.current) return;
+    const element = surface.current;
+    let frame = 0;
+    function fit() {
+      const fullscreen = document.fullscreenElement;
+      const fullscreenViewer = fullscreen instanceof HTMLElement && fullscreen.contains(element) ? fullscreen : undefined;
+      const top = element.getBoundingClientRect().top + (fullscreenViewer ? fullscreenViewer.scrollTop - fullscreenViewer.getBoundingClientRect().top : window.scrollY);
+      const viewportHeight = fullscreenViewer?.clientHeight ?? window.innerHeight;
+      setHeight(Math.max(300, Math.floor(viewportHeight - top - 8)));
+    }
+    const update = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(fit);
+    };
+    const observer = new ResizeObserver(update);
+    const viewer = element.closest('.viewer-workbench');
+    for (const layout of [viewer, element.closest('.viewer-layout'), element.closest('.image-panel'), document.querySelector('.topbar'), document.querySelector('.sidebar')]) {
+      if (layout) observer.observe(layout);
+    }
+    window.addEventListener('resize', update);
+    document.addEventListener('fullscreenchange', update);
+    update();
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener('resize', update);
+      document.removeEventListener('fullscreenchange', update);
+    };
+  }, [enabled]);
+
+  return { surface, height };
+}
 
 const autopanVectors = { right: [-1, 0], left: [1, 0], down: [0, -1], up: [0, 1] } as const;
 
@@ -82,6 +126,8 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   sharedReview?: { locked: boolean; camera?: Camera; onFrame: (camera: Camera) => void };
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
+  const fit = useCanvasFit(Boolean(options));
+  const slideVisible = options?.active ?? true;
   const analysisButton = useRef<HTMLButtonElement>(null);
   const focusedRoi = useRef<string>(undefined);
   const [roiUnavailable, setRoiUnavailable] = useState(false);
@@ -136,8 +182,8 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   }, [info, comparison?.camera]);
   const sharedCamera = sharedReview?.camera;
   useEffect(() => {
-    if (info && sharedCamera) renderer.current?.restoreCamera(sharedCamera);
-  }, [info, sharedCamera?.x, sharedCamera?.y, sharedCamera?.zoom]);
+    if (info) renderer.current?.followCamera(following ? sharedCamera : undefined);
+  }, [info, following, sharedCamera?.x, sharedCamera?.y, sharedCamera?.zoom]);
   const canOpenSlideReview = Boolean(info) && !readOnlyEndpoint && !compareMode && scan.source === 'clinical';
   const pap = usePapGallery(endpoint, canOpenSlideReview && showPap);
   const appliedPapFocus = useRef<typeof pap.focus>(undefined);
@@ -337,7 +383,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   }, [endpoint, info, labelAttempt, settings?.show_label]);
 
   useEffect(() => {
-    if (!autopan || !autopanSpeed || !autopanDirection) return;
+    if (!slideVisible || !autopan || !autopanSpeed || !autopanDirection) return;
     const [dx, dy] = autopanVectors[autopanDirection];
     let last = performance.now();
     let frame = 0;
@@ -365,17 +411,17 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       cancelAnimationFrame(frame);
       document.removeEventListener('visibilitychange', pause);
     };
-  }, [autopan, autopanDirection, autopanSpeed]);
+  }, [autopan, autopanDirection, autopanSpeed, slideVisible]);
 
   function toggleAutopan() {
-    if (!info || following || viewerRecords.tool !== 'pan' || tileStatus === 'unavailable') return;
+    if (!slideVisible || !info || following || viewerRecords.tool !== 'pan' || tileStatus === 'unavailable') return;
     setAutopanNotice('');
     setAutopan((running) => !running);
   }
 
   useEffect(() => {
-    if (following || viewerRecords.tool !== 'pan' || tileStatus === 'unavailable') setAutopan(false);
-  }, [following, viewerRecords.tool, tileStatus]);
+    if (!slideVisible || following || viewerRecords.tool !== 'pan' || tileStatus === 'unavailable') setAutopan(false);
+  }, [slideVisible, following, viewerRecords.tool, tileStatus]);
 
   const minimap = settings?.show_minimap ?? showNavigator;
   const toggleMinimap = options?.toggleMinimap ?? (() => setShowNavigator(!showNavigator));
@@ -390,11 +436,44 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     analysisButton.current?.focus({ preventScroll: true });
   }
 
+  const navigationControls = <>
+        <button className="icon-button" title="Zoom Out" aria-label="Zoom Out" disabled={!info || following} onClick={() => navigate((viewer) => viewer.magnify(0.7))}><Minus size={18} /></button>
+        <output aria-label="Zoom relative to scan" className="zoom-value">{view ? `${(view.zoom * 100).toFixed(view.zoom < 0.01 ? 2 : view.zoom < 0.1 ? 1 : 0)}%` : '—'}</output>
+        <button className="icon-button" title="Zoom In" aria-label="Zoom In" disabled={!info || following} onClick={() => navigate((viewer) => viewer.magnify(1.4))}><Plus size={18} /></button>
+        <button className="icon-button" title="Fit to Window" aria-label="Fit to Window" disabled={!info || following} onClick={() => navigate((viewer) => viewer.fitToWindow())}><LocateFixed size={17} /></button>
+        <button className="icon-button" title="Minimap" aria-label="Minimap" aria-keyshortcuts={settings?.shortcuts ? 'M' : undefined} aria-pressed={minimap} disabled={!overview && !options} onClick={toggleMinimap}><Map size={17} /></button>
+        {options && <>
+          <button type="button" className="icon-button" title="Scan Label" aria-label="Scan Label" aria-pressed={settings?.show_label}
+            disabled={!info} onClick={options.toggleLabel}><Tag size={17} /></button>
+          <button type="button" className="icon-button" title="Slide Overview" aria-label="Slide Overview" aria-pressed={settings?.show_overview}
+            disabled={!info} onClick={options.toggleOverview}><Image size={17} /></button>
+          <button type="button" className="icon-button" title={autopan ? 'Pause Autopan' : `Start Autopan · ${autopanDirection} · ${autopanSpeed} px/s`}
+          aria-label={autopan ? 'Pause Autopan' : 'Start Autopan'} aria-pressed={autopan}
+          disabled={!info || following || ihc.picking || skin.mode !== undefined || viewerRecords.tool !== 'pan' || tileStatus === 'unavailable'} onClick={toggleAutopan}>
+          {autopan ? <Pause size={17} /> : <Play size={17} />}
+        </button></>}
+  </>;
+
   return <section className="image-panel" aria-label="Slide Image" data-scan-id={scan.id} data-autopan={autopan}
     data-view-center-x={view && view.x + view.width / 2} data-view-center-y={view && view.y + view.height / 2}
     data-view-zoom={view?.zoom}>
-    <div className="image-toolbar"><span><ScanLine size={17} /> {label} <span className="image-stain">{stain} · {scan.format}</span>{options && <ScanReference scan={scan} />}</span>
-      <div className="image-actions">{analysis && <button type="button" ref={analysisButton} className="button primary"
+    <div className={options ? 'image-toolbar viewer-image-toolbar' : 'image-toolbar'}>
+      {options ? <div className="viewer-scan-row">
+        <div className="viewer-active-scan" role="group" aria-label="Active Scan">
+          <ScanLine size={17} aria-hidden="true" />
+          <span><strong>{label}</strong><small>{stain} · {scan.format}</small></span>
+          <ScanReference scan={scan} />
+        </div>
+        <div className="viewer-image-controls">
+          <div className="viewer-scan-step" role="group" aria-label="Navigate Scans">
+            <button type="button" className="icon-button" title="Previous Scan" aria-label="Previous Scan" disabled={!options.previous} onClick={options.previous}><ChevronLeft size={16} /></button>
+            <span aria-label="Scan position">{options.position.index}/{options.position.total}</span>
+            <button type="button" className="icon-button" title="Next Scan" aria-label="Next Scan" disabled={!options.next} onClick={options.next}><ChevronRight size={16} /></button>
+          </div>
+          <div className="viewer-image-navigation" role="group" aria-label="Slide Navigation">{navigationControls}</div>
+        </div>
+      </div> : <span><ScanLine size={17} /> {label} <span className="image-stain">{stain} · {scan.format}</span></span>}
+      <div className={options ? 'image-actions viewer-scan-actions' : 'image-actions'}>{analysis && <button type="button" ref={analysisButton} className="button primary"
         aria-expanded={analysis.open} aria-controls={analysis.open ? 'viewer-analysis-panel' : undefined}
         onClick={() => analysis.change(!analysis.open)}>Analysis</button>}{extraAction}
         {options && canReview && <button type="button" ref={annotationsButton} className="button secondary viewer-annotations-toggle"
@@ -411,22 +490,13 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
           disabled={skin.busy} onClick={() => { skin.setMode(undefined); setShowSkin((open) => !open); }}>Skin Review</button>}
         {canOpenSlideReview && <button type="button" className="button secondary" aria-expanded={showProstate}
           onClick={() => setShowProstate((open) => !open)}>Prostate AI</button>}
-        <button className="icon-button" title="Zoom Out" aria-label="Zoom Out" disabled={!info || following} onClick={() => navigate((viewer) => viewer.magnify(0.7))}><Minus size={18} /></button>
-        <output aria-label="Zoom relative to scan" className="zoom-value">{view ? `${(view.zoom * 100).toFixed(view.zoom < 0.1 ? 1 : 0)}%` : '—'}</output>
-        <button className="icon-button" title="Zoom In" aria-label="Zoom In" disabled={!info || following} onClick={() => navigate((viewer) => viewer.magnify(1.4))}><Plus size={18} /></button>
-        <button className="icon-button" title="Fit to Window" aria-label="Fit to Window" disabled={!info || following} onClick={() => navigate((viewer) => viewer.fitToWindow())}><LocateFixed size={17} /></button>
-        <button className="icon-button" title="Minimap" aria-label="Minimap" aria-pressed={minimap} disabled={!overview && !options} onClick={toggleMinimap}><Map size={17} /></button>
-        {options && <button type="button" className="icon-button" title={autopan ? 'Pause Autopan' : 'Start Autopan'}
-          aria-label={autopan ? 'Pause Autopan' : 'Start Autopan'} aria-pressed={autopan}
-          disabled={!info || following || ihc.picking || skin.mode !== undefined || viewerRecords.tool !== 'pan' || tileStatus === 'unavailable'} onClick={toggleAutopan}>
-          {autopan ? <Pause size={17} /> : <Play size={17} />}
-        </button>}
+        {!options && navigationControls}
       </div>
     </div>
     {!options && reviewTools}
     <div className={showPap ? 'analysis-workspace pap-workspace' : 'analysis-workspace'}>
-    {options && reviewTools && <div className="viewer-tool-dock">{reviewTools}</div>}
-    <div className="image-surface" data-review-dock={Boolean(options && reviewTools)}>
+    <div ref={fit.surface} className="image-surface" data-review-dock={Boolean(options && reviewTools)}
+      style={options && fit.height ? { height: fit.height } : undefined}>
       <canvas className={viewerRecords.tool === 'pan' && !ihc.picking && !skin.mode ? 'wsi-canvas' : 'wsi-canvas drawing-tool'} ref={canvas} tabIndex={0} aria-label="WSI Canvas"
         onPointerDown={(event) => {
           if (following || event.button !== 0 || !info || drag.current || drawing.current) return;
@@ -582,6 +652,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       </aside>}
       {info && <ScaleBar mpp={info.mpp_x} zoom={view?.zoom} />}
       {canReview && <DrawingControls state={viewerRecords} shortcuts={settings?.shortcuts !== false} />}
+      {options && reviewTools && <div className="viewer-tool-dock">{reviewTools}</div>}
     </div>
     {canOpenSlideReview && showPap && <Suspense fallback={<p role="status">Loading Pap Gallery…</p>}>
       <PapGallery state={pap} following={following} />

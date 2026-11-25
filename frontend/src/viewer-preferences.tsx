@@ -1,3 +1,4 @@
+import { X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api, jsonBody } from './session';
 
@@ -70,27 +71,33 @@ export function useViewerPreferences() {
   return { settings, change, reload, save, busy, problem, dirty, loaded: !!saved };
 }
 
-const toggles = [
-  ['tray_visible', 'Show slide tray'], ['gallery', 'Use gallery in slide tray'],
-  ['show_label', 'Show label image'], ['show_overview', 'Show overview image'],
-  ['show_minimap', 'Show minimap'], ['dynamic_minimap', 'Dynamic minimap size'],
-  ['shortcuts', 'Enable keyboard shortcuts'],
-] as const;
+const trayToggles = [['tray_visible', 'Show slide tray'], ['gallery', 'Use gallery in slide tray']] as const;
+const navigatorToggles = [['show_label', 'Show label image'], ['show_overview', 'Show overview image'],
+  ['show_minimap', 'Show minimap'], ['dynamic_minimap', 'Dynamic minimap size']] as const;
 
-export function ViewerSettingsPanel({ preferences }: { preferences: ReturnType<typeof useViewerPreferences> }) {
+export function ViewerSettingsPanel({ preferences, onClose }: { preferences: ReturnType<typeof useViewerPreferences>; onClose: () => void }) {
   const { settings, change, save, reload, busy, problem, dirty, loaded } = preferences;
+  const toggle = ([key, label]: (typeof trayToggles | typeof navigatorToggles)[number]) => <label key={key} className="viewer-setting-toggle">
+    <input type="checkbox" checked={settings[key]} onChange={(event) => change(key, event.target.checked)} />{label}
+  </label>;
   return <form className="panel viewer-settings" id="viewer-settings" aria-label="Viewer Settings"
-    onSubmit={(event) => { event.preventDefault(); void save(); }}>
-    <h2>Viewer Settings</h2>
-    <fieldset disabled={busy}>
-      {toggles.map(([key, label]) => <label key={key} className="viewer-setting-toggle">
-        <input type="checkbox" checked={settings[key]} onChange={(event) => change(key, event.target.checked)} />{label}
-      </label>)}
+    onSubmit={(event) => { event.preventDefault(); void save(); }}
+    onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onClose(); } }}>
+    <div className="preview-label"><h2>Viewer Settings</h2>
+      <button type="button" className="icon-button" aria-label="Close Viewer Settings" title="Close Viewer Settings" onClick={onClose}><X size={17} /></button>
+    </div>
+    <fieldset disabled={busy}><legend>Slide Tray</legend>
+      {trayToggles.map(toggle)}
       <label className="form-field">Slide Tray Orientation
         <select value={settings.tray_orientation} onChange={(event) => change('tray_orientation', event.target.value as ViewerSettings['tray_orientation'])}>
           <option value="vertical">Vertical</option><option value="horizontal">Horizontal</option>
         </select>
       </label>
+    </fieldset>
+    <fieldset disabled={busy}><legend>Navigator</legend>
+      {navigatorToggles.map(toggle)}
+    </fieldset>
+    <fieldset disabled={busy}><legend>Autopan</legend>
       <div className="viewer-autopan-settings">
         <label className="form-field">Autopan Direction
           <select value={settings.autopan_direction} onChange={(event) => change('autopan_direction', event.target.value as ViewerSettings['autopan_direction'])}>
@@ -104,7 +111,12 @@ export function ViewerSettingsPanel({ preferences }: { preferences: ReturnType<t
         </label>
       </div>
     </fieldset>
+    <fieldset disabled={busy}><legend>Shortcuts</legend>
+      <label className="viewer-setting-toggle">
+        <input type="checkbox" checked={settings.shortcuts} onChange={(event) => change('shortcuts', event.target.checked)} />Enable keyboard shortcuts
+      </label>
     {settings.shortcuts && <p>Focus the slide image to use shortcuts. <kbd>F</kbd> Fullscreen · <kbd>M</kbd> Minimap · <kbd>G</kbd> Gallery · <kbd>Space</kbd> Autopan · <kbd>←↑↓→</kbd> Pan · <kbd>+</kbd>/<kbd>−</kbd> Zoom · <kbd>0</kbd> Fit</p>}
+    </fieldset>
     {problem && <p role="alert" className="form-error">{problem}</p>}
     <div className="actions">
       {problem && <button type="button" className="button secondary" disabled={busy} onClick={reload}>Reload Saved Settings</button>}

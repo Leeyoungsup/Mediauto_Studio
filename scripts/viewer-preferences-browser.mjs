@@ -36,6 +36,19 @@ try {
   await button(page, 'Open Viewer').click();
   await minimap.waitFor();
   assert.equal(await panel.getAttribute('data-scan-id'), svsId);
+  const activeScan = page.getByRole('group', { name: 'Active Scan' });
+  await activeScan.getByText('Scan ' + svsId.slice(0, 8), { exact: true }).waitFor();
+  const slideNavigation = page.getByRole('group', { name: 'Slide Navigation' });
+  await button(slideNavigation, 'Slide Overview').click();
+  await button(page, 'Fit slide from overview').waitFor();
+  await button(slideNavigation, 'Slide Overview').click();
+  await button(page, 'Fit slide from overview').waitFor({ state: 'hidden' });
+  await button(page, 'Hide Slide Tray').click();
+  await button(page, 'Previous Scan').click();
+  await activeScan.getByText('Scan ' + ndpiId.slice(0, 8), { exact: true }).waitFor();
+  await button(page, 'Next Scan').click();
+  await activeScan.getByText('Scan ' + svsId.slice(0, 8), { exact: true }).waitFor();
+  await button(page, 'Show Slide Tray').click();
 
   let overviewAttempts = 0;
   let labelAttempts = 0;
@@ -64,7 +77,9 @@ try {
   const saved = page.waitForResponse((response) => response.url().endsWith('/api/viewer/preferences') && response.request().method() === 'PUT');
   await button(settings, 'Save as Default').click();
   assert.equal((await saved).status(), 200);
-  await button(page, 'Viewer Settings').click();
+  await button(settings, 'Close Viewer Settings').press('Escape');
+  await settings.waitFor({ state: 'hidden' });
+  assert.equal(await button(page, 'Viewer Settings').evaluate((node) => node === document.activeElement), true);
 
   await button(page, 'Retry Overview').click();
   await button(page, 'Fit slide from overview').waitFor();
@@ -96,6 +111,18 @@ try {
   await button(page, 'Pause Autopan').waitFor();
   await canvas.press('ArrowLeft');
   await button(page, 'Start Autopan').waitFor();
+  await canvas.press('Space');
+  await button(page, 'Pause Autopan').waitFor();
+  await page.getByRole('tab', { name: 'History', exact: true }).click();
+  await page.getByRole('region', { name: 'Patient History Records' }).waitFor();
+  await page.getByText(`IMS-DEMO-101 · SYNTH-01 · NDPI · Scan ${ndpiId.slice(0, 8)}`, { exact: true }).waitFor();
+  assert.equal(await canvas.isVisible(), false);
+  const image = page.locator('.image-panel[data-scan-id="' + ndpiId + '"]');
+  await image.and(page.locator('[data-autopan=false]')).waitFor({ state: 'attached' });
+  const hiddenCamera = await image.evaluate((node) => [node.dataset.viewCenterX, node.dataset.viewCenterY, node.dataset.viewZoom]);
+  await button(page, 'Return to Slides').click();
+  await button(page, 'Start Autopan').waitFor();
+  assert.deepEqual(await image.evaluate((node) => [node.dataset.viewCenterX, node.dataset.viewCenterY, node.dataset.viewZoom]), hiddenCamera);
   const zoomed = Number(await panel.getAttribute('data-view-zoom'));
   await button(page, 'Fit slide from overview').click();
   await page.waitForFunction((zoom) => Number(document.querySelector('.image-panel').dataset.viewZoom) < zoom, zoomed);
@@ -128,7 +155,15 @@ try {
   await reopenedCanvas.press('m');
   assert.equal(await button(reopened, 'Minimap').getAttribute('aria-pressed'), 'true');
   assert.equal(await reopened.getByRole('region', { name: 'Slide Image' }).getAttribute('data-autopan'), 'false');
-  console.log('PASS: exact scan selection and return, image retry, tray/gallery, dynamic minimap, keyboard/fullscreen, Autopan and session defaults');
+  await reopened.setViewportSize({ width: 390, height: 844 });
+  await reopened.getByRole('group', { name: 'Active Scan' }).waitFor();
+  await reopened.waitForFunction(() => {
+    const canvas = document.querySelector('.wsi-canvas');
+    return canvas && canvas.getBoundingClientRect().top + window.scrollY < 545
+      && canvas.getBoundingClientRect().bottom + window.scrollY <= window.innerHeight + 5;
+  });
+  assert.ok(await reopened.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+  console.log('PASS: active scan and compact canvas, document camera retention and Autopan pause; exact scan selection and return, image retry, tray/gallery, dynamic minimap, keyboard/fullscreen, Autopan and session defaults');
 } finally {
   await browser.close();
 }

@@ -29,6 +29,7 @@ export class TileViewer {
   private width = 1;
   private height = 1;
   private minZoom = 0;
+  private following = false;
   private zoom = 1;
   private centerX = 0;
   private centerY = 0;
@@ -70,7 +71,7 @@ export class TileViewer {
     this.canvas.width = Math.round(width * this.ratio);
     this.canvas.height = Math.round(height * this.ratio);
     this.minZoom = Math.min(width / this.slide.dimensions[0], height / this.slide.dimensions[1]);
-    if (wasFit) this.fitToWindow();
+    if (wasFit && !this.following) this.fitToWindow();
     else this.update();
   }
 
@@ -102,6 +103,14 @@ export class TileViewer {
     this.centerAt(camera.x, camera.y);
   }
 
+  followCamera(camera?: Pick<CameraFrame, 'x' | 'y' | 'zoom'>) {
+    this.following = Boolean(camera);
+    if (!camera) return;
+    // The tracked camera is shared in slide coordinates and can be below this pane's fit zoom.
+    this.zoom = Math.max(1e-9, Math.min(64, camera.zoom));
+    this.centerAt(camera.x, camera.y);
+  }
+
   centerAt(x: number, y: number) {
     this.centerX = x;
     this.centerY = y;
@@ -109,6 +118,7 @@ export class TileViewer {
   }
 
   private update() {
+    if (this.following) { this.schedule(); return; }
     const [width, height] = this.slide.dimensions;
     const halfX = this.width / this.zoom / 2;
     const halfY = this.height / this.zoom / 2;
