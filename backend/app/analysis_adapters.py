@@ -35,6 +35,11 @@ def marker_for(stain):
     return re.sub(r"[^a-z0-9]", "", (stain or "").lower())
 
 
+def matching_archive(result, profile, pinned_snapshot=None):
+    return (result["kind"] == "original" and result["score_type"] == profile.score
+            and result.get("model") == profile.checkpoint and (not pinned_snapshot or result["id"] == pinned_snapshot))
+
+
 async def execute(organization, model_key, model_version, source, pinned_snapshot, cancelled: Event):
     profile = PROFILES.get(model_key)
     if profile is None or profile.version != model_version:
@@ -43,9 +48,7 @@ async def execute(organization, model_key, model_version, source, pinned_snapsho
     if profile.checkpoint:
         folder = await snapshot_folder(path, organization)
         policy = await asyncio.to_thread(results_for_display, folder, "doctor")
-        eligible = [item for item in policy["results"] if item["kind"] == "original"
-                    and item["score_type"] == profile.score and item.get("model") == profile.checkpoint
-                    and (not pinned_snapshot or item["id"] == pinned_snapshot)]
+        eligible = [item for item in policy["results"] if matching_archive(item, profile, pinned_snapshot)]
         if not eligible:
             raise AnalysisFailure("archive_unavailable")
         result = max(eligible, key=lambda item: (item.get("saved_at") or "", item["id"]))

@@ -1645,6 +1645,16 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
             path = self.url + "/requests/" + request["id"]
             execution = path + "/execution"
             first = await wait_run(execution, 1, "running")
+            reused = await asyncio.gather(*(
+                creates(requests + "?reuse_active=true", payload, f"viewer-{index}") for index in range(2)
+            ))
+            self.assertEqual([row["id"] for row in reused], [request["id"]] * 2)
+            viewer_runs = await check(self.client.get(case_path + "/scans/" + pr["id"] + "/analysis?include_models=false"))
+            self.assertEqual([row["id"] for row in viewer_runs["runs"]], [first["id"]])
+            self.assertNotIn("models", viewer_runs)
+            other_runs = await check(self.client.get(case_path + "/scans/" + ki["id"] + "/analysis"))
+            self.assertEqual(other_runs["runs"], [])
+            self.assertEqual([(row["key"], row["available"]) for row in other_runs["models"]], [("ihc_preflight", True)])
             await creates(execution, {"run_id": first["id"], "action": "cancel"}, "cancel-first", 200)
             await asyncio.wait_for(observed_cancel.wait(), timeout=4)
             await wait_run(execution, 1, "cancelled")

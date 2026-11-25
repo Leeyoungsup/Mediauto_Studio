@@ -100,6 +100,7 @@ try {
   await button(doctor, 'Zoom In').click();
   await doctor.waitForFunction((fit) => Number(document.querySelector('.image-panel').dataset.viewZoom) > fit, fitZoom);
   const zoom = await slide.getAttribute('data-view-zoom');
+  await doctor.locator('.viewer-case-tools summary').click();
   await button(doctor, 'Patient History').click();
   const dialog = doctor.getByRole('dialog', { name: 'Patient History' });
   await dialog.getByText('External clinical text.', { exact: true }).waitFor();

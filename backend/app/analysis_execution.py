@@ -1,5 +1,6 @@
 """API scopes for manual jobs, administrator pre-runs, and human IHC interpretation."""
 
+import asyncio
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -9,13 +10,15 @@ from pydantic import Field
 from sqlalchemy import select
 
 from app.auth import require_roles
-from app.analysis_adapters import MARKERS, PROFILES, marker_for
+from app.analysis_adapters import MARKERS, PROFILES, marker_for, matching_archive
 from app.analysis_jobs import ACTIVE, event, jobs_for, queue_run, run_view, update_request
 from app.case_requests import ROLES, can_manage, case_scan, request_context
 from app.clinical import ClinicalInput, Organization, Reason, RegistrationKey, Session, add_event, find, require_version, write
 from app.integration_service import now
-from app.models import AnalysisRule, AnalysisRun, Case, IhcReview, Slide, SlideScan, Specimen, SpecimenBlock
+from app.models import AnalysisRule, AnalysisRun, Case, CaseRequest, IhcReview, Slide, SlideScan, Specimen, SpecimenBlock
+from app.pdl1 import results_for_display, snapshot_folder
 from app.scan_quality import BLOCKED_QC
+from app.wsi import verified_scan_path
 
 router = APIRouter(prefix="/api/clinical/{organization}", tags=["Analysis execution"])
 ModelKey = Literal["pdl1_cps_archive", "pdl1_tps_archive", "ihc_preflight"]
@@ -52,6 +55,38 @@ def model_catalog():
 async def analysis_models(organization: Organization, session: Session):
     require_roles(session.info["user"], ROLES)
     return {"models": model_catalog(), "markers": MARKERS}
+
+
+@router.get("/cases/{case_id}/scans/{scan_id}/analysis")
+async def scan_analysis(organization: Organization, case_id: UUID, scan_id: UUID, session: Session,
+                        include_models: bool = True):
+    user = session.info["user"]
+    require_roles(user, ROLES)
+    case = await find(session, Case, organization, case_id)
+    scan, _, stain = await case_scan(session, case, scan_id)
+    latest = (select(AnalysisRun.id)
+        .where(AnalysisRun.organization == organization, AnalysisRun.case_id == case_id, AnalysisRun.scan_id == scan_id)
+        .distinct(AnalysisRun.request_id).order_by(AnalysisRun.request_id, AnalysisRun.attempt.desc()))
+    runs = (await session.execute(select(AnalysisRun, CaseRequest)
+        .join(CaseRequest, AnalysisRun.request_id == CaseRequest.id)
+        .where(AnalysisRun.id.in_(latest))
+        .order_by(AnalysisRun.created_at.desc(), AnalysisRun.id.desc()).limit(25))).all()
+    response = {"runs": [{**run_view(run), "can_manage": can_manage(request, case, user)} for run, request in runs]}
+    if include_models:
+        marker = marker_for(stain)
+        models = [model for model in model_catalog() if marker in model["markers"]]
+        archives = []
+        if any(model["checkpoint"] for model in models):
+            path, _ = await verified_scan_path(scan.storage_key, (scan.size_bytes, scan.modified_ns))
+            folder = await snapshot_folder(path, organization)
+            policy = await asyncio.to_thread(results_for_display, folder, user.role)
+            archives = policy["results"]
+        response["models"] = [
+            {**model, "available": not model["checkpoint"] or
+             any(matching_archive(result, PROFILES[model["key"]]) for result in archives)}
+            for model in models
+        ]
+    return response
 
 
 def rule_view(row):

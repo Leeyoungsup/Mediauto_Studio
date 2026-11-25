@@ -114,8 +114,53 @@ try {
   await doctor.getByText('Report draft saved.', { exact: true }).waitFor();
   const audit = await check(admin.request.get(caseUrl + '/logs', { params: { action: 'ihc_review_recorded' } }));
   assert.ok(audit.rows.length);
+
+  const viewer = '/#viewer/' + caseId + '/' + svs;
+  await doctor.goto(viewer);
+  await button(doctor, 'Pan using minimap').waitFor();
+  const image = doctor.getByRole('region', { name: 'Slide Image', exact: true });
+  const tray = doctor.locator('#viewer-slide-tray');
+  if (!await tray.isVisible()) await button(doctor, 'Show Slide Tray').click();
+  await button(doctor, 'Zoom In').click();
+  const camera = () => image.evaluate((node) => [node.dataset.viewZoom, node.dataset.viewCenterX, node.dataset.viewCenterY]);
+  const originalCamera = await camera();
+  await button(doctor, 'Analysis').click();
+  const analysis = doctor.getByRole('complementary', { name: 'Slide Analysis', exact: true });
+  await analysis.getByText('PD-L1 TPS Archive Replay · No matching archived result', { exact: true }).waitFor();
+  const methods = analysis.getByRole('combobox', { name: 'Analysis Method' });
+  assert.deepEqual(await methods.locator('option').evaluateAll((items) => items.map((item) => item.value)),
+    ['', 'pdl1_cps_archive', 'ihc_preflight']);
+  assert.deepEqual(await camera(), originalCamera);
+  await methods.selectOption('pdl1_cps_archive');
+  assert.equal(await button(analysis, 'Run Analysis').isEnabled(), true);
+  await button(analysis, 'Run Analysis').click();
+  const completed = analysis.locator('li').filter({ hasText: /PD-L1 CPS Archive Replay.*Completed · Attempt 1/ });
+  await button(completed, 'Show Result on Slide').waitFor();
+  await button(completed, 'Show Result on Slide').click();
+  await analysis.waitFor({ state: 'hidden' });
+  await doctor.getByRole('complementary', { name: 'PD-L1 Score Card' }).waitFor();
+  assert.deepEqual(await camera(), originalCamera);
+  assert.equal(new URL(doctor.url()).hash, '#viewer/' + caseId + '/' + svs);
+
+  await button(doctor, 'Analysis').click();
+  await tray.locator('[data-scan-id="' + preflightScan + '"]').click();
+  await analysis.getByText('PD-L1 CPS Archive Replay · No matching archived result', { exact: true }).waitFor();
+  assert.equal(await analysis.getByRole('combobox', { name: 'Analysis Method' }).inputValue(), 'ihc_preflight');
+  await analysis.getByText(/Completed · Attempt 1 · preflight-v1/).waitFor();
+  assert.equal(await button(analysis, 'Show Result on Slide').count(), 0);
+  const outsider = await signIn('integration-other');
+  await check(outsider.request.get(caseUrl + '/scans/' + preflightScan + '/analysis'), 404);
+  const narrow = { width: 390, height: 900 };
+  await doctor.setViewportSize(narrow);
+  const panel = await analysis.boundingBox();
+  assert.ok(panel && panel.x >= 0 && panel.x + panel.width <= narrow.width);
+  await button(analysis, 'Close Slide Analysis').click();
+  await doctor.locator('.viewer-case-tools summary').click();
+  const menu = await doctor.locator('.viewer-case-menu').boundingBox();
+  assert.ok(menu && menu.x >= 0 && menu.x + menu.width <= narrow.width);
+
   assert.deepEqual(errors, []);
-  console.log('PASS: manual archive replay with pinned rerun, QC-passed IHC pre-run, physician best block and IHC result evidence');
+  console.log('PASS: pinned replay and IHC evidence, Viewer launch on the active scan, unavailable options, camera retention, scan isolation, permission and mobile layout');
 } finally {
   await browser.close();
 }

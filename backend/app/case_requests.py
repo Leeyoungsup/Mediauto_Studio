@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import Field, StringConstraints, model_validator
 from sqlalchemy import func, or_, select, true
 
-from app.analysis_jobs import jobs_for, queue_run
+from app.analysis_jobs import ACTIVE as ACTIVE_RUNS, jobs_for, queue_run
 from app.auth import CurrentUser, require_roles
 from app.case_activity import record_activity
 from app.clinical import (ClinicalInput, Organization, RegistrationKey, Session,
@@ -176,7 +176,7 @@ async def list_requests(organization: Organization, case_id: UUID, user: Current
 
 @router.post("/cases/{case_id}/requests", status_code=201)
 async def create_request(organization: Organization, case_id: UUID, data: CreateRequest,
-                         key: RegistrationKey, user: CurrentUser, session: Session):
+                         key: RegistrationKey, user: CurrentUser, session: Session, reuse_active: bool = False):
     payload = {**data.model_dump(mode="json"), "case_id": str(case_id)}
     if data.execution_model is None:
         payload.pop("execution_model")
@@ -190,6 +190,14 @@ async def create_request(organization: Organization, case_id: UUID, data: Create
                 raise HTTPException(409, "This request key was already used with different details.")
             return (await show_requests(session, [existing], user))[0]
         scan = await case_scan(session, case, data.scan_id)
+        if reuse_active and data.execution_model and not data.assignee_id:
+            active_request = await session.scalar(select(CaseRequest).join(AnalysisRun, AnalysisRun.request_id == CaseRequest.id)
+                .where(AnalysisRun.organization == organization, AnalysisRun.case_id == case_id,
+                       AnalysisRun.scan_id == data.scan_id, AnalysisRun.model_key == data.execution_model,
+                       AnalysisRun.status.in_(ACTIVE_RUNS))
+                .order_by(AnalysisRun.created_at.desc()).limit(1))
+            if active_request is not None:
+                return (await show_requests(session, [active_request], user))[0]
         if data.assignee_id:
             await eligible(session, user, data.kind, data.assignee_id)
         row = CaseRequest(organization=organization, case_id=case_id, scan_id=data.scan_id, kind=data.kind,

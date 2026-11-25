@@ -56,6 +56,7 @@ try {
   const scanId = record.slides.find((item) => item.wsi).id;
   await doctor.goto('/#viewer/' + caseId + '/' + scanId);
   await button(doctor, 'Pan using minimap').waitFor();
+  await doctor.locator('.viewer-case-tools summary').click();
   await button(doctor, 'Notes').click();
   const dialog = doctor.getByRole('dialog', { name: 'Case Notes', exact: true });
   await button(dialog, 'Add Comment').click();

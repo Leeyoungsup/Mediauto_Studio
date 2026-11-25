@@ -4,7 +4,7 @@ import { api, auditAttemptId, jsonBody } from './session';
 export type Model = { key: string; name: string; version: string; markers: string[]; checkpoint: string | null };
 export type Catalog = { models: Model[]; markers: Record<string, string> };
 type Status = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
-type Run = { id: string; model: string; model_version: string; attempt: number; status: Status; origin: 'manual' | 'rule';
+export type Run = { id: string; model: string; model_version: string; attempt: number; status: Status; origin: 'manual' | 'rule';
   scan_id: string; request_id: string; result: { kind: string; dimensions?: number[]; calibrated?: boolean;
     snapshot?: { id: string; kind: string; model: string; model_version: string; score_type: string; analysis_version: string } } | null;
   error: string | null; created_at: string; started_at?: string; finished_at?: string };
@@ -22,7 +22,7 @@ export const interpretations = { positive: 'Positive', negative: 'Negative', ind
 export const modelNames: Record<string, string> = { pdl1_cps_archive: 'PD-L1 CPS Archive Replay',
   pdl1_tps_archive: 'PD-L1 TPS Archive Replay', ihc_preflight: 'IHC Image Preflight' };
 export const markerNames: Record<string, string> = { pdl1: 'PD-L1', er: 'ER', pr: 'PR', her2: 'HER2', ki67: 'Ki-67' };
-const errors: Record<string, string> = { archive_unavailable: 'No matching archived original is available for this model and scan.',
+export const runErrors: Record<string, string> = { archive_unavailable: 'No matching archived original is available for this model and scan.',
   model_unavailable: 'The pinned model version is unavailable.', scan_changed: 'The registered scan, stain, or QC status changed.',
   scan_unavailable: 'The scan could not be read.', timeout: 'The operation timed out.', worker_interrupted: 'The worker was interrupted.',
   adapter_error: 'The local adapter failed.' };
@@ -91,7 +91,7 @@ export function ModelRuns({ endpoint, caseId, onChanged }: { endpoint: string; c
     {resource.data && <ul className="timeline">{resource.data.runs.map((run) => <li key={run.id}>
       <h3>{modelNames[run.model] ?? run.model} · {run.model_version}</h3>
       <p>Attempt {run.attempt} · {runStatuses[run.status]} · {run.origin === 'rule' ? 'Pre-run Rule' : 'Requested'} · {timestamp(run.created_at)}</p>
-      {run.error && <p className="muted">{errors[run.error] ?? 'The model run failed.'}</p>}
+      {run.error && <p className="muted">{runErrors[run.error] ?? 'The model run failed.'}</p>}
       {run.result?.kind === 'image_preflight' && <p>Image preflight complete · {run.result.dimensions?.join(' × ')} px · {run.result.calibrated ? 'Calibrated' : 'Pixel size unavailable'}</p>}
       {run.result?.snapshot && <p>Archived original · {run.result.snapshot.model} · {run.result.snapshot.model_version ?? 'Model Version Unavailable'} · {run.result.snapshot.analysis_version ?? 'Analysis Version Unavailable'}</p>}
       {caseId && run.result?.snapshot && <a className="button secondary" href={`#viewer/${caseId}/${run.scan_id}/${run.result.snapshot.id}`}>Open Pinned Result in WSI</a>}

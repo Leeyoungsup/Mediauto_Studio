@@ -15,14 +15,16 @@ import { MultiView } from './multi-view';
 import { ViewerSettingsPanel, useViewerPreferences } from './viewer-preferences';
 import { ScanReference, SlidePreview, StatusLabel } from './worklist';
 
-export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsHref, initialSnapshot, initialRoi, roiOrigin, editorHref, historyEndpoint, attachmentsEndpoint, logsEndpoint, notesEndpoint, reviewEndpoint, viewerAccount, relatedEndpoint }: {
+export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsHref, initialSnapshot, initialRoi, roiOrigin, editorHref, historyEndpoint, attachmentsEndpoint, logsEndpoint, notesEndpoint, reviewEndpoint, viewerAccount, relatedEndpoint, analysisEndpoint }: {
   item: DemoCase; activeSlide?: string; onSlide: (id: string) => void; onBack: (scan?: string) => void; onReview?: () => void; requestsHref?: string; initialSnapshot?: string; initialRoi?: string; roiOrigin?: RoiLocation; editorHref?: string; historyEndpoint?: string; attachmentsEndpoint?: string; logsEndpoint?: string; notesEndpoint?: string; reviewEndpoint?: string; relatedEndpoint?: string; viewerAccount: string;
+  analysisEndpoint?: string;
 }) {
   const [showNotes, setShowNotes] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [attachmentKind, setAttachmentKind] = useState<AttachmentKind>();
   const [showHistory, setShowHistory] = useState(false);
   const [comparing, setComparing] = useState(false);
+  const [analysisOpen, setAnalysisOpen] = useState(false);
   const [reviewSelection, setReviewSelection] = useState<string>();
   const review = useCollaborativeReview(reviewEndpoint, viewerAccount);
   const followingFrame = review.following ? review.room?.frame : undefined;
@@ -111,16 +113,24 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
         {fullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
       </button>
       {!comparing && <button className="button secondary" disabled={available.length < 2 || inReview} onClick={() => setComparing(true)}><GalleryHorizontalEnd size={16} /> Multi View</button>}
-      {historyEndpoint && <button type="button" className="button secondary" onClick={() => setShowHistory(true)}>
-        <History size={16} /> Patient History
-      </button>}
-      {attachmentsEndpoint && <><button type="button" className="button secondary" onClick={() => setAttachmentKind('pdf')}><FileText size={16} /> Media</button>
-        <button type="button" className="button secondary" onClick={() => setAttachmentKind('gross')}><Camera size={16} /> Gross Images</button></>}
-      {notesEndpoint && <button type="button" className="button secondary" onClick={() => setShowNotes(true)}><MessageSquare size={16} /> Notes</button>}
-      {logsEndpoint && <button type="button" className="button secondary" onClick={() => setShowLogs(true)}><List size={16} /> Case Logs</button>}
-      {editorHref && <a className="button secondary" href={editorHref}>Case Editor</a>}
+      {(historyEndpoint || attachmentsEndpoint || notesEndpoint || logsEndpoint || editorHref) &&
+        <details className="viewer-case-tools" onClick={(event) => {
+          if ((event.target as HTMLElement).closest('button, a')) event.currentTarget.open = false;
+        }}>
+          <summary className="button secondary">Case Tools</summary>
+          <div className="viewer-case-menu">
+            {historyEndpoint && <button type="button" className="button secondary" onClick={() => setShowHistory(true)}>
+              <History size={16} /> Patient History
+            </button>}
+            {attachmentsEndpoint && <><button type="button" className="button secondary" onClick={() => setAttachmentKind('pdf')}><FileText size={16} /> Media</button>
+              <button type="button" className="button secondary" onClick={() => setAttachmentKind('gross')}><Camera size={16} /> Gross Images</button></>}
+            {notesEndpoint && <button type="button" className="button secondary" onClick={() => setShowNotes(true)}><MessageSquare size={16} /> Notes</button>}
+            {logsEndpoint && <button type="button" className="button secondary" onClick={() => setShowLogs(true)}><List size={16} /> Case Logs</button>}
+            {editorHref && <a className="button secondary" href={editorHref}>Case Editor</a>}
+          </div>
+        </details>}
       {requestsHref && <a className="button secondary" href={requestsHref.replace(/\/requests$/, '/report')}><ClipboardList size={16} /> Report Draft</a>}
-      {requestsHref && <a className="button secondary" href={requestsHref}>Analysis and Consultation Requests</a>}
+      {requestsHref && <a className="button secondary" href={requestsHref} aria-label="Analysis and Consultation Requests">Requests</a>}
       {!comparing && onReview && <button className="button secondary" disabled={!slide?.wsi} onClick={onReview}>{item.status === 'In Review' ? 'Review Complete' : 'Start Review'}</button>}</div></div>
     {fullscreenError && <p className="notice" role="alert">{fullscreenError}</p>}
     {review.open && reviewEndpoint && <CollaborativeReview review={review} />}
@@ -133,6 +143,8 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
       </aside>
       {slide?.wsi ? <ImageViewport key={slide.wsi.id + ':' + (initialSnapshot ?? initialRoi ?? '')} scan={slide.wsi} initialSnapshot={initialSnapshot}
         initialRoi={initialRoi} roiCaseId={requestsHref && item.recordId ? item.recordId : undefined} label={slide.label ?? slide.id} stain={slide.stain}
+        analysis={analysisEndpoint && slide.wsi.source === 'clinical' && !review.following ?
+          { caseEndpoint: analysisEndpoint, open: analysisOpen, change: setAnalysisOpen } : undefined}
         sharedReview={reviewEndpoint ? {
           locked: review.following,
           camera: followingFrame?.scan_id === slide.wsi.id ? followingFrame : undefined,

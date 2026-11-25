@@ -65,6 +65,7 @@ try {
   await button(updated, 'Delete').click();
   await updated.waitFor({ state: 'detached' });
 
+  await doctor.locator('.viewer-case-tools summary').click();
   await button(doctor, 'Case Logs').click();
   const dialog = doctor.getByRole('dialog', { name: 'Case Logs' });
   await dialog.getByLabel('User').selectOption({ label: 'integration-doctor' });

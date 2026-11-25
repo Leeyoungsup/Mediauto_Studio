@@ -3,6 +3,7 @@ import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { AlertTriangle, LocateFixed, Map, Minus, Pause, Play, Plus, ScanLine } from 'lucide-react';
 import type { WsiScan } from './demo';
 import { api, auditAttemptId, jsonBody, request } from './session';
+import { ViewerAnalysis } from './viewer-analysis';
 import { IhcOverlay, IhcPanel, useIhcResults } from './ihc-results';
 import { usePapGallery } from './pap-gallery-state';
 import { useSkinReview } from './skin-review-state';
@@ -74,12 +75,14 @@ type ViewerOptions = {
 
 const autopanVectors = { right: [-1, 0], left: [1, 0], down: [0, -1], up: [0, 1] } as const;
 
-export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint, initialSnapshot, initialRoi, roiCaseId, options, sharedReview, extraAction }: {
+export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint, initialSnapshot, initialRoi, roiCaseId, options, sharedReview, extraAction, analysis }: {
   scan: WsiScan; label: string; stain: string; comparison?: PaneComparison; readOnlyEndpoint?: string; initialSnapshot?: string; initialRoi?: string; roiCaseId?: string; options?: ViewerOptions;
   extraAction?: ReactNode;
+  analysis?: { caseEndpoint: string; open: boolean; change: (open: boolean) => void };
   sharedReview?: { locked: boolean; camera?: Camera; onFrame: (camera: Camera) => void };
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
+  const analysisButton = useRef<HTMLButtonElement>(null);
   const focusedRoi = useRef<string>(undefined);
   const [roiUnavailable, setRoiUnavailable] = useState(false);
   const renderer = useRef<TileViewer | null>(null);
@@ -342,12 +345,18 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
 
   const minimap = settings?.show_minimap ?? showNavigator;
   const toggleMinimap = options?.toggleMinimap ?? (() => setShowNavigator(!showNavigator));
+  function closeAnalysis() {
+    analysis?.change(false);
+    analysisButton.current?.focus({ preventScroll: true });
+  }
 
   return <section className="image-panel" aria-label="Slide Image" data-scan-id={scan.id} data-autopan={autopan}
     data-view-center-x={view && view.x + view.width / 2} data-view-center-y={view && view.y + view.height / 2}
     data-view-zoom={view?.zoom}>
     <div className="image-toolbar"><span><ScanLine size={17} /> {label} <span className="image-stain">{stain} · {scan.format}</span>{options && <ScanReference scan={scan} />}</span>
-      <div className="image-actions">{extraAction}
+      <div className="image-actions">{analysis && <button type="button" ref={analysisButton} className="button primary"
+        aria-expanded={analysis.open} aria-controls={analysis.open ? 'viewer-analysis-panel' : undefined}
+        onClick={() => analysis.change(!analysis.open)}>Analysis</button>}{extraAction}
         {canOpenSlideReview && <button type="button" className="button secondary" aria-expanded={showPapReview}
           onClick={() => setShowPapReview((open) => !open)}>Pap Review</button>}
         {canOpenSlideReview && <button type="button" className="button secondary" aria-expanded={showPap}
@@ -369,7 +378,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       </div>
     </div>
     {info && !compareMode && !readOnlyEndpoint && !following && <ViewerToolsBar state={viewerRecords} view={view} info={info} />}
-    <div className={showPap ? "pap-workspace" : undefined}>
+    <div className={showPap ? 'analysis-workspace pap-workspace' : 'analysis-workspace'}>
     <div className="image-surface">
       <canvas className={viewerRecords.tool === 'pan' && !ihc.picking && !skin.mode ? 'wsi-canvas' : 'wsi-canvas drawing-tool'} ref={canvas} tabIndex={0} aria-label="WSI Canvas"
         onPointerDown={(event) => {
@@ -522,6 +531,13 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     {canOpenSlideReview && showPap && <Suspense fallback={<p role="status">Loading Pap Gallery…</p>}>
       <PapGallery state={pap} following={following} />
     </Suspense>}
+    {analysis?.open && <ViewerAnalysis caseEndpoint={analysis.caseEndpoint} scanId={scan.id} label={label} stain={stain}
+      onClose={closeAnalysis} onResult={(id) => {
+        pdl1.setSelected(id);
+        pdl1.setEnabled(true);
+        pdl1.retry();
+        closeAnalysis();
+      }} />}
     </div>
     <footer className="image-footer">
       <span>{info ? `${info.dimensions[0].toLocaleString()} × ${info.dimensions[1].toLocaleString()} px` : scan.format}</span>
