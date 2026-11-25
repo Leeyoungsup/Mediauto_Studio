@@ -18,7 +18,7 @@ npm --prefix frontend run build
 ./start.sh
 ```
 
-브라우저에서 `http://서버IP:9920/`을 열면 로그인 화면이 표시됩니다. 서버 자체에서는 `http://127.0.0.1:9920/`으로 접속합니다. `/api/health`에서 FastAPI·PostgreSQL과 EMR 설정 상태를 확인할 수 있습니다.
+기본 HTTP 개발 모드에서는 `http://서버IP:9920/`으로 접속합니다. Nginx 배포 모드에서는 `https://studio.mediauto-t.com:9920/`을 사용합니다. `/api/health`에서 FastAPI·PostgreSQL과 EMR 설정 상태를 확인할 수 있습니다.
 
 ### 계정 가입 신청
 
@@ -287,7 +287,7 @@ curl -b "$MEDIAUTO_COOKIE_JAR" 'http://127.0.0.1:9920/api/clinical/local/cases?u
 
 ### 실행 상태와 중지
 
-`./start.sh`는 `mediauto-studio` Conda 환경으로 서비스를 시작하거나 재시작합니다. 헬스 체크가 통과하면 9920 접속 주소를 출력하고 터미널에 서버 로그를 이어 표시합니다. 사용자 systemd로 실행 중이면 `Ctrl+C`는 로그 보기를 종료하며 서버는 계속 실행됩니다. 사용자 systemd가 없는 환경에서는 같은 터미널에서 서버가 실행되고 `Ctrl+C`로 중지합니다.
+`./start.sh`는 `mediauto-studio` Conda 환경으로 서비스를 시작하거나 재시작합니다. 헬스 체크가 통과하면 내부 접속 주소를 출력하고 터미널에 서버 로그를 이어 표시합니다. 사용자 systemd로 실행 중이면 `Ctrl+C`는 로그 보기를 종료하며 서버는 계속 실행됩니다. 사용자 systemd가 없는 환경에서는 같은 터미널에서 서버가 실행되고 `Ctrl+C`로 중지합니다.
 
 ```bash
 ./start.sh --detach  # 서비스 시작 후 터미널 프롬프트로 복귀
@@ -296,6 +296,21 @@ systemctl --user status mediauto-studio-dev.service
 systemctl --user stop mediauto-studio-dev.service
 ```
 
+### Nginx HTTPS 배포
+
+[Nginx 설정](deployment/nginx/mediauto-ims.conf)은 `https://studio.mediauto-t.com:9920/`의 요청을 서버 내부 `127.0.0.1:9921`로 전달합니다. 서버에 해당 도메인의 인증서가 설치되어 있어야 합니다. 건물 공유기의 TCP 9920 포워딩은 그대로 사용합니다.
+
+```bash
+sudo install -m 0644 deployment/nginx/mediauto-ims.conf /etc/nginx/conf.d/mediauto-ims.conf
+sudo nginx -t
+systemctl --user stop mediauto-studio-dev.service
+MEDIAUTO_HOST=127.0.0.1 MEDIAUTO_PORT=9921 MEDIAUTO_COOKIE_SECURE=1 ./start.sh --detach
+sudo systemctl reload nginx
+curl --resolve studio.mediauto-t.com:9920:127.0.0.1 https://studio.mediauto-t.com:9920/api/health
+```
+
+실행 중인 서비스는 `./start.sh`로 재시작하고 `./start.sh --logs`로 로그를 봅니다. 서비스를 완전히 중지한 뒤 처음 시작할 때는 위 환경 변수를 다시 지정합니다. 기존 HTTP 개발 모드로 되돌리려면 해당 Nginx 설정을 제거하고 `sudo nginx -t` 후 Nginx를 다시 로드한 다음, 사용자 서비스를 중지하고 `./start.sh`로 시작합니다.
+
 ### 프런트엔드 수정
 
-9920의 API를 실행한 상태에서 `npm --prefix frontend run dev`를 실행합니다. 로컬 Vite 주소 `http://127.0.0.1:5173/`에서 코드 수정이 반영되며, `/api` 요청은 9920으로 전달됩니다. 9920의 화면을 갱신하려면 `npm --prefix frontend run build`로 다시 빌드합니다.
+API를 실행한 상태에서 `npm --prefix frontend run dev`를 실행합니다. 로컬 Vite 주소 `http://127.0.0.1:5173/`에서 코드 수정이 반영되며, `/api` 요청은 기본적으로 9920으로 전달됩니다. Nginx 배포 모드에서는 `MEDIAUTO_PORT=9921 npm --prefix frontend run dev`로 내부 API에 연결합니다. 배포 화면을 갱신하려면 `npm --prefix frontend run build`로 다시 빌드합니다.

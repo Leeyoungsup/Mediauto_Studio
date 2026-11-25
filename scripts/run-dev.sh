@@ -70,6 +70,8 @@ if [[ -z ${MEDIAUTO_TESSERACT:-} ]]; then
     if [[ -x "$ocr_binary" ]]; then export MEDIAUTO_TESSERACT="$ocr_binary"; fi
 fi
 
-"$python" -s -m uvicorn app.main:app --no-access-log --host "${MEDIAUTO_HOST:-0.0.0.0}" --port 9920 &
+"$python" -s -m uvicorn app.main:app --no-access-log \
+    --host "${MEDIAUTO_HOST:-0.0.0.0}" --port "${MEDIAUTO_PORT:-9920}" \
+    --proxy-headers --forwarded-allow-ips 127.0.0.1 &
 server_pid=$!
 wait "$server_pid"

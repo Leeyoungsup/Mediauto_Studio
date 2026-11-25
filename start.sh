@@ -9,17 +9,22 @@ case "$#:$mode" in
     *) printf 'Usage: %s [--detach | --logs]\n' "$0" >&2; exit 2 ;;
 esac
 export PATH="$HOME/.local/bin:$PATH"
-export MEDIAUTO_HOST="${MEDIAUTO_HOST:-0.0.0.0}"
+
+set_bind_defaults() {
+    export MEDIAUTO_HOST="${MEDIAUTO_HOST:-0.0.0.0}"
+    export MEDIAUTO_PORT="${MEDIAUTO_PORT:-9920}"
+    export MEDIAUTO_COOKIE_SECURE="${MEDIAUTO_COOKIE_SECURE:-0}"
+}
 
 wait_for_server() {
     for ((attempt = 0; attempt < 60; attempt++)); do
         if ! systemctl --user is-active --quiet "$unit.service"; then break; fi
         if curl --noproxy '*' --fail --silent --max-time 2 \
-            "http://127.0.0.1:9920/api/health" >/dev/null; then
-            echo 'Mediauto Studio: http://127.0.0.1:9920/'
+            "http://127.0.0.1:$MEDIAUTO_PORT/api/health" >/dev/null; then
+            printf 'Mediauto Studio backend: http://127.0.0.1:%s/\n' "$MEDIAUTO_PORT"
             if [[ "$MEDIAUTO_HOST" != 127.0.0.1 ]]; then
                 read -r lan_ip _ <<< "$(hostname -I 2>/dev/null || true)"
-                if [[ -n "$lan_ip" ]]; then echo "LAN: http://$lan_ip:9920/"; fi
+                if [[ -n "$lan_ip" ]]; then printf 'LAN: http://%s:%s/\n' "$lan_ip" "$MEDIAUTO_PORT"; fi
             fi
             return 0
         fi
@@ -51,11 +56,24 @@ if systemctl --user is-active --quiet "$unit.service"; then
         echo 'The service is running from a different workspace.' >&2
         exit 1
     fi
+    unit_environment=$(systemctl --user show -p Environment --value "$unit.service")
+    unset MEDIAUTO_HOST MEDIAUTO_PORT MEDIAUTO_COOKIE_SECURE
+    set_bind_defaults
+    for name in MEDIAUTO_HOST MEDIAUTO_PORT MEDIAUTO_COOKIE_SECURE; do
+        if [[ " $unit_environment " =~ [[:space:]]${name}=([^[:space:]]+)[[:space:]] ]]; then
+            printf -v "$name" '%s' "${BASH_REMATCH[1]}"
+        fi
+    done
     systemctl --user restart "$unit.service"
     finish_start
     exit
 fi
 
+set_bind_defaults
+if [[ ! "$MEDIAUTO_PORT" =~ ^[1-9][0-9]{0,4}$ ]] || (( MEDIAUTO_PORT > 65535 )); then
+    echo 'MEDIAUTO_PORT must be a valid TCP port.' >&2
+    exit 2
+fi
 conda_bin=${CONDA_EXE:-$(type -P conda || true)}
 conda_bin=${conda_bin:-"$HOME/anaconda3/bin/conda"}
 if [[ ! -x "$conda_bin" ]]; then
@@ -92,7 +110,8 @@ if ! systemctl --user show --property=Version --value >/dev/null 2>&1; then
     exec /bin/bash "$root/scripts/run-dev.sh"
 fi
 
-options=(--setenv="CONDA_PREFIX=$CONDA_PREFIX" --setenv="MEDIAUTO_HOST=$MEDIAUTO_HOST")
+options=(--setenv="CONDA_PREFIX=$CONDA_PREFIX" --setenv="MEDIAUTO_HOST=$MEDIAUTO_HOST"
+    --setenv="MEDIAUTO_PORT=$MEDIAUTO_PORT" --setenv="MEDIAUTO_COOKIE_SECURE=$MEDIAUTO_COOKIE_SECURE")
 if [[ -n ${MEDIAUTO_PG_BIN:-} ]]; then options+=(--setenv="MEDIAUTO_PG_BIN=$MEDIAUTO_PG_BIN"); fi
 systemd-run --user --quiet --collect --unit="$unit" --working-directory="$root" \
     --property=Type=exec --property=KillMode=mixed "${options[@]}" \
