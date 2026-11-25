@@ -10,6 +10,7 @@ export const accountRoleLabels: Record<User['role'], string> = {
 export const canWrite = (user: User) => user.role === 'admin' || user.role === 'labeler';
 const expired = 'mediauto-session-expired';
 const defaultDemoAccount = 'admin1';
+const demoPassword: string = import.meta.env.VITE_DEMO_PASSWORD ?? '';
 const demoAccounts = [
   { username: defaultDemoAccount, label: 'Administrator 1' },
   { username: 'admin2', label: 'Administrator 2' },
@@ -184,7 +185,9 @@ export function SessionGate({ children }: { children: (user: User, logout: () =>
             </label>}
             <label className="form-field">Username<input ref={usernameField} name="username" autoComplete="username"
               value={loginUsername} onChange={(event) => setLoginUsername(event.target.value)} required maxLength={80} /></label>
-            <label className="form-field">Password<input name="password" type="password" autoComplete="current-password" required maxLength={256} /></label>
+            <label className="form-field">Password<input key={`${organization}:${selectedAccount?.username ?? ''}`}
+              name="password" type="password" autoComplete="current-password" required maxLength={256}
+              defaultValue={organization === 'local' && selectedAccount ? demoPassword : ''} /></label>
             {error && <p className="form-error" role="alert">{error}</p>}
             <button className="button primary" type="submit" disabled={busy}><LogIn size={16} aria-hidden="true" /> {busy ? 'Checking…' : 'Sign In'}</button>
             <div className="login-switch"><span>New to your workspace?</span>

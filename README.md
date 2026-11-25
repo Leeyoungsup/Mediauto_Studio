@@ -315,7 +315,9 @@ curl --resolve studio.mediauto.dev:9920:127.0.0.1 https://studio.mediauto.dev:99
 
 ### 템플릿 로그인
 
-로컬 기관의 로그인 폼은 **Demo Account**에서 여섯 시연 계정을 선택할 수 있으며 기본값은 `admin1`입니다. **Other Account**를 선택하면 사용자명을 직접 입력할 수 있습니다. 비밀번호 자동 입력에는 브라우저의 저장된 자격 증명을 사용합니다.
+로컬 기관의 로그인 폼은 **Demo Account**에서 여섯 시연 계정을 선택할 수 있으며 기본값은 `admin1`입니다. **Other Account**를 선택하면 사용자명을 직접 입력할 수 있습니다.
+
+공개 시연 환경에서는 Git에 포함되지 않는 `frontend/.env.local`에 `VITE_DEMO_PASSWORD`를 설정하고 `npm --prefix frontend run build`를 실행하면 여섯 시연 계정에 공통 비밀번호가 채워집니다. 이 빌드에서는 방문자가 관리자 계정을 포함한 시연 계정으로 로그인할 수 있습니다. 자동 입력을 끄려면 설정을 제거한 뒤 다시 빌드합니다.
 
 HTTPS 템플릿 배포에서 세션 만료를 끄려면 사용자 서비스를 중지한 뒤 Nginx 배포용 실행 명령에 `MEDIAUTO_DEMO_SESSION_NO_EXPIRY=1`을 추가합니다. 이후 HTTPS로 새로 로그인하면 15분 만료가 없는 브라우저 세션 쿠키를 발급합니다. 로그아웃하면 세션이 폐기됩니다. 15분 만료를 복원하려면 서비스를 중지한 뒤 이 옵션 없이 다시 시작합니다.
 
