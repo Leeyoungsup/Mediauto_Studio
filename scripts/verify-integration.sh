@@ -11,8 +11,8 @@ port=${MEDIAUTO_DEMO_PORT:-19920}
 mode=${1:-}
 demo=${2:-}
 case "$mode:$#:$demo" in
-    :0:|--manual:1:|--demo:2:*) ;;
-    *) printf 'Usage: %s [--manual | --demo general|frozen|tumor-board|ihc|pap|collaboration]\n' "$0" >&2; exit 2 ;;
+    :0:|--manual:1:|--probe:1:|--demo:2:*) ;;
+    *) printf 'Usage: %s [--manual | --probe | --demo general|frozen|tumor-board|ihc|pap|collaboration]\n' "$0" >&2; exit 2 ;;
 esac
 if [[ "$mode" == --demo ]]; then
     case "$demo" in
@@ -111,6 +111,9 @@ if [[ "$mode" == --manual ]]; then
     node scripts/integration-browser.mjs --seed-only
     printf 'Manual session at %s. Press Enter to stop.\n' "$MEDIAUTO_DEMO_URL"
     read -r _
+elif [[ "$mode" == --probe ]]; then
+    node scripts/integration-browser.mjs --seed-only
+    node scripts/frontend-workflow-probe.mjs
 else
     if selected general; then
         node scripts/integration-browser.mjs

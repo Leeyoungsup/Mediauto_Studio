@@ -1,5 +1,7 @@
 # 43. PDF 전체 워크플로우와 현재 프런트 비교
 
+최종 프런트 기준은 [51번 최종 대조 및 검증](pdf-frontend-review-51.md)에서 확인한다.
+
 2026-11-25 기준 앱 `36fbecf`의 React·FastAPI 화면을 비교했다. 기존 WSI·도구·업무 API를 유지한 상태에서 각 경로의 발견 가능성, 역할별 가시성, 현재 케이스/스캔 유지와 오류 복구를 봤다. 원본 베이스 `d3741bc`는 별도 SaaS 저장소에서 확인했다. 42번은 구현과 합성 E2E의 기준선이며 이 문서는 같은 기능이 현재 화면에서 어떻게 제공되는지 기록한다. [참조 PDF](../reference/Techcyte_IMS_Demo_Screen_Analysis.pdf) · [42번 검증](workflow-verification-42.md) · [96개 기능별 대조](pdf-frontend-feature-matrix-43.md)
 
 ## PDF 2–13쪽 대조
