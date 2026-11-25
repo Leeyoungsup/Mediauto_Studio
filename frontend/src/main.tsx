@@ -1,3 +1,5 @@
+import brandLogo from '../assets/logo.png';
+import brandIcon from '../assets/app_icon.ico';
 import { AddCaseReference, CollectionWorkspace } from './case-collections';
 import { AnalysisSettings } from './analysis-execution';
 import { RoiSearchPage } from './roi-search';
@@ -454,7 +456,10 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
 
   return <div className="app-shell" data-view={page.view} data-navigation-collapsed={collapseNavigation}>
     <aside className="sidebar" id="main-navigation">
-      <a className="brand" href="#worklist/all" aria-label="MeDIAuto Studio Home" title="MeDIAuto Studio Home"><span className="brand-icon"><Microscope size={23} /></span><span className="brand-name">MeDIAuto<strong>Studio</strong></span></a>
+      <a className="brand" href="#worklist/all" aria-label="MeDIAuto Studio Home" title="MeDIAuto Studio Home">
+        <img className="brand-logo" src={brandLogo} alt="" width={3776} height={1120} />
+        <img className="brand-mark" src={brandIcon} alt="" width={32} height={32} />
+      </a>
       <nav aria-label="Workspace Navigation" className="side-nav">
         <p className="side-nav-title">Workspace</p>
         <div className="side-nav-group" role="group" aria-label="Case Worklists">

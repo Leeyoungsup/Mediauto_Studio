@@ -1,6 +1,7 @@
+import brandLogo from '../assets/logo.png';
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import { ArrowLeft, ClipboardCopy, Clock3, LogIn, Microscope, UserPlus } from 'lucide-react';
+import { ArrowLeft, ClipboardCopy, Clock3, LogIn, UserPlus } from 'lucide-react';
 
 export type User = { id: string; organization: string; username: string; display_name: string; role: 'admin' | 'doctor' | 'labeler' | 'viewer' };
 export const accountRoleLabels: Record<User['role'], string> = {
@@ -132,8 +133,8 @@ export function SessionGate({ children }: { children: (user: User, logout: () =>
   return <main className="login-page">
     <section className="login-panel panel" aria-labelledby="auth-heading">
       <div className="login-brand">
-        <span className="brand-icon"><Microscope size={24} aria-hidden="true" /></span>
-        <div><h1>MeDIAuto Studio</h1><p>Pathology Workspace</p></div>
+        <h1><img src={brandLogo} alt="MeDIAuto Studio" width={3776} height={1120} /></h1>
+        <p>Pathology Workspace</p>
       </div>
       <div className="login-content">
         {loading ? <p role="status">Checking sign-in status…</p> : <>

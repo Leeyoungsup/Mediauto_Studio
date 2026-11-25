@@ -30,14 +30,15 @@ svg { flex: 0 0 auto; }
 .app-shell[data-navigation-collapsed=true] .sidebar { align-items: stretch; padding-inline: 8px; }
 .app-shell[data-navigation-collapsed=true] .brand,
 .app-shell[data-navigation-collapsed=true] :is(.side-nav a, .side-footer button) { justify-content: center; padding-inline: 0; }
-.app-shell[data-navigation-collapsed=true] :is(.brand-name, .side-nav p, .side-nav span, .side-nav small, .side-footer span, .side-footer i) { display: none; }
+.app-shell[data-navigation-collapsed=true] :is(.brand-logo, .side-nav p, .side-nav span, .side-nav small, .side-footer span, .side-footer i) { display: none; }
 .sidebar {
   position: sticky; top: 0; height: 100dvh; display: flex; flex-direction: column;
   gap: 24px; padding: 16px 12px; color: #e6e0fb; background: #25203c;
 }
-.brand { display: flex; align-items: center; gap: 10px; padding: 0 5px; color: #fff; font-weight: 720; letter-spacing: -.025em; font-size: 16px; }
-.brand strong { display: block; color: #c0b2ff; font-size: 11px; font-weight: 650; letter-spacing: .055em; line-height: 1.15; }
-.brand-icon { display: grid; place-items: center; flex: 0 0 39px; height: 39px; border-radius: 11px; background: #705be5; color: #fff; }
+.brand { display: flex; align-items: center; min-height: 39px; padding-inline: 5px; }
+.brand-logo { display: block; width: 100%; max-width: 154px; height: auto; }
+.brand-mark { display: none; }
+.app-shell[data-navigation-collapsed=true] .brand-mark { display: block; }
 .side-nav { min-height: 0; overflow: auto; scrollbar-width: thin; }
 .side-nav .side-nav-title { color: #f2ecff; font-size: 13px; }
 .side-nav-group + .side-nav-group { margin-top: 12px; padding-top: 8px; border-top: 1px solid #ffffff1c; }
@@ -294,7 +295,9 @@ dialog::backdrop { background: #21193575; }
   .app-shell, .app-shell[data-navigation-collapsed=true] { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
   .sidebar { position: static; height: auto; flex-direction: row; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding: 6px var(--workspace-inset); }
   .app-shell[data-navigation-collapsed=true] .sidebar { align-items: center; }
-  .brand-icon { flex-basis: 30px; height: 30px; }
+  .brand { min-height: 34px; }
+  .brand-logo { width: 118px; }
+  .brand-mark { width: 28px; height: 28px; }
   .side-nav { display: flex; gap: 6px; flex-wrap: nowrap; max-width: 100%; }
   .side-nav-group { display: flex; gap: 3px; flex: 0 0 auto; }
   .side-nav-group + .side-nav-group { margin-top: 0; padding: 0 0 0 6px; border-top: 0; border-left: 1px solid #ffffff1c; }
@@ -325,10 +328,10 @@ dialog::backdrop { background: #21193575; }
 
 .login-page { min-height: 100dvh; display: grid; place-items: center; padding: clamp(12px, 4vw, 36px); background: #f4f0fa; }
 .login-panel { width: min(100%, 475px); overflow: hidden; box-shadow: 0 18px 55px #39265a1c; }
-.login-brand { display: flex; align-items: center; gap: 13px; padding: 19px clamp(16px, 5vw, 30px); background: #25203c; color: #fff; }
-.login-brand .brand-icon { height: 40px; flex-basis: 40px; }
-.login-brand h1 { font-size: 22px; color: inherit; margin: 0; letter-spacing: -.025em; }
-.login-brand p { color: #d8cfee; font-size: 12px; margin: 3px 0 0; }
+.login-brand { display: grid; justify-items: start; padding: 10px clamp(16px, 5vw, 30px) 14px; background: #25203c; color: #fff; }
+.login-brand h1 { width: min(100%, 248px); }
+.login-brand img { display: block; width: 100%; height: 58px; object-fit: cover; }
+.login-brand p { color: #d8cfee; font-size: 12px; margin-inline-start: 12px; }
 .login-content { padding: clamp(16px, 5vw, 30px); }
 .login-content h2 { font-size: 21px; margin: 0 0 12px; }
 .login-form { display: grid; gap: 11px; }
