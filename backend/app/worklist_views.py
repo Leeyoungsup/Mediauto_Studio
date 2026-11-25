@@ -1,7 +1,7 @@
 """Institution-scoped saved views and user-specific Worklist startup settings."""
 
 from datetime import date
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query
@@ -21,7 +21,7 @@ SortField = Literal["created_at", "case_number", "status", "assignee", "slide_co
                     "accessioned_at", "collection_date", "last_opened", "age", "patient_name", "specimen", "lis_status", "priority", "group"]
 Column = Literal["specimen", "assignee", "status", "slides", "received", "patient", "mrn", "sex", "birth", "age",
                  "slideState", "group", "lis", "storage", "tags", "created", "comments", "requests", "notes",
-                 "collected", "lastOpened", "localPatientId", "source", "priority"]
+                 "collected", "lastOpened", "localPatientId", "source", "priority", "stains"]
 Visibility = Literal["private", "shared"]
 Version = Annotated[int, Field(ge=1)]
 Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
@@ -37,7 +37,7 @@ class ColumnSetting(ClinicalInput):
     visible: bool
 
 
-Columns = Annotated[list[ColumnSetting], Field(max_length=24)]
+Columns = Annotated[list[ColumnSetting], Field(max_length=len(get_args(Column)))]
 SortOrder = Annotated[list[SortTerm], Field(min_length=1, max_length=3)]
 
 

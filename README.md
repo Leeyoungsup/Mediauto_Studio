@@ -322,3 +322,16 @@ HTTPS 템플릿 배포에서 세션 만료를 끄려면 사용자 서비스를 �
 ### 프런트엔드 수정
 
 API를 실행한 상태에서 `npm --prefix frontend run dev`를 실행합니다. 로컬 Vite 주소 `http://127.0.0.1:5173/`에서 코드 수정이 반영되며, `/api` 요청은 기본적으로 9920으로 전달됩니다. Nginx 배포 모드에서는 `MEDIAUTO_PORT=9921 npm --prefix frontend run dev`로 내부 API에 연결합니다. 배포 화면을 갱신하려면 `npm --prefix frontend run build`로 다시 빌드합니다.
+
+### 염색별 슬라이드 시연
+
+Worklist의 **Stains**는 케이스에 등록된 염색 이름을 중복 없이 표시합니다. **Columns**에서 표시 여부를 조정할 수 있습니다. 미배정 업무함에서 `DEMO-BREAST-001`과 `DEMO-GASTRIC-001`을 검색하면 케이스 상세와 WSI에서 합성 슬라이드를 전환할 수 있습니다. 합성 영상에는 **SYNTHETIC DEMO** 표시가 있습니다.
+
+서버의 `mediauto-studio` 환경에서 합성 시연 케이스를 다시 만들 수 있습니다. 스크립트는 `tifffile` 및 NumPy를 사용합니다.
+
+```bash
+PYTHONPATH="$PWD/backend" MEDIAUTO_DB_SOCKET="$PWD/.runtime/pgsocket" MEDIAUTO_DB_USER="$(id -un)" \
+  python -s scripts/seed-stain-demo.py
+```
+
+향후 SaaS 원본을 가져올 때는 프로젝트명과 파일명의 염색 코드를 대조하고, 데이터셋·조직 분류·사이트·케이스 번호가 모두 일치한 파일을 같은 케이스 후보로 묶습니다. 동일 슬라이드의 여러 스캔은 스캔별로 관리합니다. 파일명과 크기가 같은 항목은 체크섬을 비교해 중복을 확인하고, 묶음이 불확실한 항목은 Slide Registration에서 검토합니다. 시연용 원본은 등록 전에 라벨·개요 이미지 및 메타데이터의 비식별 여부를 확인합니다.

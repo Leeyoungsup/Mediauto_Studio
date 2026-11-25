@@ -35,8 +35,11 @@ const samples: DemoCase[] = [
     ],
     worklist: { priority: 'frozen', priority_source: 'manual', slide_state: ['qc_blocked', 'missing_scan'], request_count: 0, has_storage: true } },
   { id: 'SAMPLE-003', source: 'clinical', specimen: 'Breast core biopsy', assignee: 'Sample Pathologist',
-    status: 'Review Complete', received: '', history: [], patient: null, slides: [],
-    worklist: { group_name: 'Breast', priority: 'urgent', slide_state: ['no_slides'], lis_data: 'conflict',
+    status: 'Review Complete', received: '', history: [], patient: null,
+    slides: ['H&E', 'HER2', 'ER', 'PR', 'Ki-67'].map((stain, index) => ({
+      id: `sample-breast-${index}`, label: `B${index + 1}`, stain, specimen: 'B', state: 'No scan registered',
+    })),
+    worklist: { group_name: 'Breast', priority: 'urgent', slide_state: ['missing_scan'], lis_data: 'conflict',
       lis_sources: [{ value: 'Released', source: 'Sample LIS A', received_at: accession },
         { value: 'Pending', source: 'Sample LIS B', received_at: accession }] } },
   { id: 'SAMPLE-004', source: 'files', specimen: 'Not Entered', assignee: '', status: 'Awaiting Assignment',

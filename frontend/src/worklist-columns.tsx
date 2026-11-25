@@ -12,6 +12,25 @@ export function StatusLabel({ status }: { status: CaseStatus }) {
 
 const worklistDate = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', dateStyle: 'medium', timeStyle: 'short' });
 
+const stainLabels: Record<string, string> = {
+  he: 'H&E', hne: 'H&E', her2: 'HER2', er: 'ER', pr: 'PR',
+  erpr: 'ER / PR', prer: 'ER / PR', ki67: 'Ki-67', pdl1: 'PD-L1',
+};
+const codipaiSampleStains: Record<string, string> = { eb01: 'H&E', pd22: 'PD-L1' };
+
+function listedStains(item: DemoCase) {
+  const stains = new Map<string, string>();
+  for (const slide of item.slides) {
+    const label = slide.stain.trim();
+    if (!label || label.toLowerCase() === 'not entered') continue;
+    const key = label.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const labels = item.id.startsWith('CODIPAI-') && Object.hasOwn(codipaiSampleStains, key) ? codipaiSampleStains : stainLabels;
+    const display = Object.hasOwn(labels, key) ? labels[key] : label;
+    stains.set(display.toLowerCase(), display);
+  }
+  return [...stains.values()].join(' · ');
+}
+
 export function columnValue(item: DemoCase, id: ColumnId) {
   const data = item.worklist;
   const provenance = item.source === 'files' ? 'File Registration' : 'IMS Clinical Record';
@@ -25,6 +44,7 @@ export function columnValue(item: DemoCase, id: ColumnId) {
     case 'assignee': return value(item.assignee || 'Unassigned', 'IMS Case Assignment');
     case 'status': return <span title="IMS Review Workflow"><StatusLabel status={item.status} /></span>;
     case 'slides': return <span className="slide-count" title={provenance}><Layers3 size={14} />{item.source === 'files' ? `${item.slides.length} files` : `${readyCount(item)}/${item.slides.length}`}</span>;
+    case 'stains': return value(listedStains(item), `${provenance} · Registered slide stains`);
     case 'received': return dateValue(data?.accessioned_at, 'Locally Entered Accession Time');
     case 'created': return dateValue(data?.created_at, item.source === 'files' ? 'File Registration Update' : 'IMS Registration Timestamp');
     case 'collected': return value(data?.collection_date, 'Earliest Recorded Specimen Collection Date');

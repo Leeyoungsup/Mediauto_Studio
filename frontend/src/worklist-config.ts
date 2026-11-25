@@ -3,6 +3,7 @@ import type { AdvancedFilters } from './worklist-filters';
 export const columns = [
   { id: 'specimen', label: 'Specimen' }, { id: 'assignee', label: 'Assignee' },
   { id: 'status', label: 'Review Status' }, { id: 'slides', label: 'Slides' }, { id: 'received', label: 'Accessioned At' },
+  { id: 'stains', label: 'Stains' },
   { id: 'patient', label: 'Patient Name' }, { id: 'mrn', label: 'Medical Record Number (MRN)' },
   { id: 'sex', label: 'Sex' }, { id: 'birth', label: 'Date of Birth' }, { id: 'age', label: 'Age at Collection' },
   { id: 'priority', label: 'Priority' }, { id: 'slideState', label: 'Slide Status' }, { id: 'group', label: 'Group' }, { id: 'lis', label: 'LIS Case Status' },
@@ -13,7 +14,7 @@ export const columns = [
 ] as const;
 export type ColumnId = typeof columns[number]['id'];
 export type ColumnSetting = { id: ColumnId; visible: boolean };
-export const defaultColumns: ColumnSetting[] = columns.map(({ id }, index) => ({ id, visible: index < 5 }));
+export const defaultColumns: ColumnSetting[] = columns.map(({ id }, index) => ({ id, visible: index < 5 || id === 'stains' }));
 const preferenceKey = 'mediauto.worklist.columns.v1';
 
 export function loadLegacyColumns(): ColumnSetting[] {
