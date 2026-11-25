@@ -265,6 +265,17 @@ dialog::backdrop { background: #21193575; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 3px; }
 .form-field { display: grid; gap: 4px; color: #57516b; font-size: 12px; font-weight: 600; }
 .form-field :is(input, select) { width: 100%; font-size: 14px; font-weight: 400; }
+.english-date-field { min-width: 0; }
+.date-field-controls, .date-picker-navigation { display: flex; align-items: center; gap: 5px; }
+.date-field-controls input { min-width: 0; }
+.date-picker-toggle { flex: none; }
+.date-picker { width: min(310px, calc(100vw - 24px)); padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface, white); color: inherit; box-shadow: 0 8px 24px #33245126; }
+.date-picker-navigation select { flex: 1; min-width: 0; }
+.date-picker-navigation input { width: 65px; }
+.date-picker-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; margin-top: 8px; text-align: center; }
+.date-picker-days span { align-self: center; }
+.date-picker-days button { width: 100%; }
+.date-picker-days button[aria-pressed='true'] { background: var(--accent-soft); color: var(--accent); }
 .form-error { color: #a6374e; font-size: 12px; }
 .intake-filters { justify-content: space-between; }
 .intake-editor { margin-top: 16px; }

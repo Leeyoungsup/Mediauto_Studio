@@ -1,3 +1,4 @@
+import { EnglishDateField } from './english-date-field';
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { X } from 'lucide-react';
@@ -171,7 +172,7 @@ function ManualRecordForm({ endpoint, caseVersion, onCancel, onSaved }: {
   return <form className="history-manual" aria-label="Add Clinical Record" onSubmit={(event) => void save(event)}>
     <div className="form-grid">
       <label className="form-field">Record Type<select name="kind"><option value="encounter_note">Encounter Note</option><option value="diagnostic_report">Diagnostic Report</option></select></label>
-      <label className="form-field">Clinical Date<input type="date" name="occurred_on" required /></label>
+      <EnglishDateField label="Clinical Date" name="occurred_on" required />
     </div>
     <label className="form-field">Title<input name="title" required maxLength={160} /></label>
     <label className="form-field">Clinical Text<textarea name="body" rows={5} required maxLength={12000} /></label>

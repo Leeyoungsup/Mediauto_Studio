@@ -1,3 +1,4 @@
+import { EnglishDateField } from './english-date-field';
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { api, jsonBody, request } from './session';
@@ -34,6 +35,7 @@ function fieldValues(form: HTMLFormElement) {
 function Field({ label, name, value, type = 'text', required = false, maxLength = 120 }: {
   label: string; name: string; value?: string | null; type?: string; required?: boolean; maxLength?: number;
 }) {
+  if (type === 'date') return <EnglishDateField label={label} name={name} defaultValue={value ?? ''} required={required} />;
   return <label className="form-field">{label}<input type={type} name={name} defaultValue={value ?? ''} maxLength={maxLength} required={required} /></label>;
 }
 

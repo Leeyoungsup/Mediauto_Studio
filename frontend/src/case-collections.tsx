@@ -1,3 +1,4 @@
+import { EnglishDateField } from './english-date-field';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { modelNames } from './analysis-execution';
 import { api, auditAttemptId, jsonBody } from './session';
@@ -233,7 +234,7 @@ function BoardMeetings({ path, data, reload }: { path: string; data: Detail; rel
         });
       }}>
         <label className="form-field">Meeting Title<input name="title" required maxLength={100} /></label>
-        <label className="form-field">Meeting Date<input name="meeting_date" type="date" required /></label>
+        <EnglishDateField label="Meeting Date" name="meeting_date" required />
         {changes.error && <p role="alert" className="form-error">{changes.error}</p>}
         <button className="button primary" disabled={changes.busy}>Create Board Meeting</button>
       </form>

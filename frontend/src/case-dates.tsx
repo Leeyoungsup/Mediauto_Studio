@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import type { DemoCase } from './demo';
 import { api, jsonBody } from './session';
 import { formatIntakeDate } from './intake-api';
+import { EnglishDateField } from './english-date-field';
 
 function localDateTime(value?: string | null) {
   if (!value) return '';
@@ -21,7 +22,7 @@ export function CaseDates({ item, organization, editable, onChanged }: {
   async function save(event: FormEvent<HTMLFormElement>, endpoint: string, version: number, field: string) {
     event.preventDefault();
     const entry = new FormData(event.currentTarget).get('date') as string;
-    const value = entry && field === 'accessioned_at' ? new Date(entry).toISOString() : entry || null;
+    const value = entry && field === 'accessioned_at' ? new Date(entry.replace(' ', 'T')).toISOString() : entry || null;
     setBusy(true); setError('');
     try {
       await api(path + endpoint, jsonBody('PATCH', { version, [field]: value }));
@@ -36,14 +37,12 @@ export function CaseDates({ item, organization, editable, onChanged }: {
     {error && <p role="alert" className="form-error">{error}</p>}
     {editable && item.version ? <form key={'case-' + item.version} onSubmit={(event) =>
       void save(event, '/cases/' + item.recordId + '/accessioned-at', item.version!, 'accessioned_at')}>
-      <label className="form-field">Accession Time (Browser Time Zone)
-        <input type="datetime-local" name="date" defaultValue={localDateTime(data?.accessioned_at)} /></label>
+      <EnglishDateField label="Accession Time (Browser Time Zone)" name="date" defaultValue={localDateTime(data?.accessioned_at)} withTime />
       <button className="button secondary" disabled={busy}>Save Accession Time</button>
     </form> : <p>Accessioned At: {data?.accessioned_at ? formatIntakeDate(data.accessioned_at) : 'Not Recorded'}</p>}
     {data?.specimens?.map((specimen) => editable ? <form key={specimen.id + ':' + specimen.version} onSubmit={(event) =>
       void save(event, '/specimens/' + specimen.id + '/collection-date', specimen.version, 'collection_date')}>
-      <label className="form-field">{specimen.number} Collection Date
-        <input type="date" name="date" defaultValue={specimen.collection_date ?? ''} /></label>
+      <EnglishDateField label={`${specimen.number} Collection Date`} name="date" defaultValue={specimen.collection_date ?? ''} />
       <button className="button secondary" disabled={busy}>Save Collection Date</button>
     </form> : <p key={specimen.id}>{specimen.number} Collection Date: {specimen.collection_date ?? 'Not Recorded'}</p>)}
   </details>;

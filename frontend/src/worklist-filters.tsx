@@ -3,6 +3,7 @@ import { priorityLabels } from './workgroups';
 import type { Priority, Queue } from './workgroups';
 import { ListFilter, X } from 'lucide-react';
 import type { FormEvent, ReactNode } from 'react';
+import { EnglishDateField } from './english-date-field';
 
 export const dateFields = {
   accessioned_at: 'Accessioned At', created_at: 'Registered At',
@@ -117,8 +118,8 @@ export function MoreFilters({ filters, queues, onApply, toolbar, clearAll }: {
           <input type="number" min={0} max={150} value={draft[key] ?? ''} onChange={(event) => set(key, event.target.value === '' ? undefined : Number(event.target.value))} /></label>)}
         <label className="form-field">Date Field<select value={draft.date_field ?? 'accessioned_at'} onChange={(event) => set('date_field', event.target.value)}>
           {Object.entries(dateFields).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-        <label className="form-field">From Date<input type="date" value={draft.date_from ?? ''} onChange={(event) => set('date_from', event.target.value)} /></label>
-        <label className="form-field">Through Date<input type="date" value={draft.date_to ?? ''} onChange={(event) => set('date_to', event.target.value)} /></label>
+        <EnglishDateField label="From Date" value={draft.date_from ?? ''} onValueChange={(value) => set('date_from', value)} />
+        <EnglishDateField label="Through Date" value={draft.date_to ?? ''} onValueChange={(value) => set('date_to', value)} />
       </div>
       {error && <p role="alert" className="form-error">{error}</p>}
       <div className="actions">
