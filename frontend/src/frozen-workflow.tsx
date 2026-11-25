@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { api, auditAttemptId, jsonBody } from './session';
+import { caseHref } from './case-navigation';
 
 type Result = { id: string; sequence: number; findings: string; margins: string | null; corrects_id: string | null; correction_reason: string | null; published_at: string };
 type Receipt = { id: string; recipient_id: string; status: 'pending' | 'acknowledged' | 'failed'; reason: string | null; responded_at: string | null };
@@ -61,7 +62,7 @@ function useFrozenRequest<T>(path: string, options?: { attempt?: string; interva
   return { state: state?.path === path ? state : undefined, refresh };
 }
 
-export function FrozenWorkflow({ endpoint, caseId }: { endpoint: string; caseId: string }) {
+export function FrozenWorkflow({ endpoint, caseId, scan }: { endpoint: string; caseId: string; scan?: string }) {
   const { state, refresh } = useFrozenRequest<FrozenSummary>(endpoint);
   const [compose, setCompose] = useState(false);
   const data = state?.value;
@@ -69,14 +70,27 @@ export function FrozenWorkflow({ endpoint, caseId }: { endpoint: string; caseId:
   const authorized = data?.recipients.filter((item) => item.active) ?? [];
   const named = (id: string) => data?.recipients.find((item) => item.id === id)?.name ?? 'Former Recipient';
 
+  const acknowledged = latest?.receipts.filter(({ status }) => status === 'acknowledged').length ?? 0;
+  const failed = latest?.receipts.filter(({ status }) => status === 'failed').length ?? 0;
+  const readBacks = latest?.callbacks.filter(({ outcome }) => outcome === 'reached_read_back').length ?? 0;
+
   return <section className="frozen-workflow" aria-label="Frozen Section Workflow">
     <div className="preview-label"><h2>Frozen Section</h2><div className="actions">
-      {data?.can_manage && <a className="button secondary" href={`#or/${caseId}`}>Open OR View</a>}
+      {data?.can_manage && <a className="button secondary" href={`#or/${caseId}${scan ? '/' + encodeURIComponent(scan) : ''}`}>Open OR View</a>}
       <button className="button secondary" type="button" onClick={refresh}>Refresh Frozen Result</button>
     </div></div>
     {state?.error ? <p role="alert" className="form-error">{state.error}</p>
       : !data ? <p role="status">Loading frozen workflow…</p> : <>
-        <FinalStatus report={data.final_report} />
+        <dl className="case-workflow-summary" aria-label="Preliminary Report Status">
+          <div><dt>Publication</dt><dd>{latest ? `Version ${latest.sequence} Published` : 'Awaiting Publication'}</dd></div>
+          <div><dt>OR Confirmations</dt><dd>{latest ? `${acknowledged}/${latest.receipts.length} Acknowledged` : 'Awaiting Publication'}</dd>
+            {failed > 0 && <dd className="case-workflow-issue">{failed} Confirmation {failed === 1 ? 'Issue' : 'Issues'}</dd>}</div>
+          <div><dt>Telephone Read-backs</dt><dd>{latest ? `${readBacks} of ${latest.callbacks.length} Attempts` : 'Awaiting Publication'}</dd></div>
+        </dl>
+        <div className="case-document-actions"><FinalStatus report={data.final_report} />
+          <a className="button secondary" href={caseHref(caseId, 'report', scan)}>Open Case Report</a>
+          <a className="button secondary" href={caseHref(caseId, 'logs', scan)}>View Case Logs</a>
+        </div>
         {data.can_manage && <RecipientForm data={data} endpoint={endpoint} refresh={refresh} />}
         {latest && <div className="history-manual">
           <ResultContent publication={latest} />
@@ -235,20 +249,24 @@ function CallbackForm({ endpoint, publication, recipients, refresh }: {
   </form>;
 }
 
-export function ORResults({ organization, caseId }: { organization: string; caseId?: string }) {
+export function ORResults({ organization, caseId, scan, canOpenCase }: { organization: string; caseId?: string; scan?: string; canOpenCase: boolean }) {
   const root = `/api/clinical/${encodeURIComponent(organization)}/or`;
   const { state, refresh } = useFrozenRequest<ORQueue>(root, { interval: 5000 });
   const queue = state?.value;
+  const activeCase = queue?.cases.find(({ id }) => id === caseId);
   return <>
     <div className="page-heading"><div><h1>OR Results</h1></div>
-      <button className="button secondary" type="button" onClick={refresh}>Refresh OR Cases</button></div>
+      <div className="actions">
+        {canOpenCase && activeCase && <a className="button secondary" href={caseHref(activeCase.id, 'frozen', scan)}>Back to Frozen Section</a>}
+        <button className="button secondary" type="button" onClick={refresh}>Refresh OR Cases</button>
+      </div></div>
     <div className="or-results-layout">
       <section className="panel detail-content" aria-label="OR Case Queue">
         <h2>Frozen Cases</h2>
         {state?.error ? <p role="alert" className="form-error">{state.error}</p>
           : !queue ? <p role="status">Loading OR cases…</p>
             : queue.cases.length ? <ul className="request-list">{queue.cases.map((item) => <li key={item.id}>
-              <a href={`#or/${item.id}`} aria-current={item.id === caseId ? 'page' : undefined}><strong>{item.case_number}</strong></a>
+              <a href={`#or/${item.id}${item.id === caseId && scan ? '/' + encodeURIComponent(scan) : ''}`} aria-current={item.id === caseId ? 'page' : undefined}><strong>{item.case_number}</strong></a>
               {item.sequence ? <small>Preliminary Version {item.sequence} · {item.status ? receiptLabels[item.status] : 'Published'}</small>
                 : <small>Awaiting Publication</small>}
             </li>)}</ul> : <p className="empty-inline">No authorized frozen cases.</p>}

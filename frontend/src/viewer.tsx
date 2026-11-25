@@ -3,9 +3,10 @@ import { CollaborativeReview, useCollaborativeReview } from './collaborative-rev
 import { roiSearchHref, roiViewerHref } from './roi-search';
 import type { RoiLocation } from './roi-search';
 import { useEffect, useRef, useState } from 'react';
-import { ClipboardList, ArrowLeft, GalleryHorizontalEnd, Images, PanelLeftClose, PanelLeftOpen, Maximize, Minimize, Settings2, ScanLine, History, FileText, Camera, List, MessageSquare, UsersRound, FlaskConical, PanelsTopLeft, SquarePen } from 'lucide-react';
+import { ClipboardList, ArrowLeft, Bell, ExternalLink, GalleryHorizontalEnd, Images, PanelLeftClose, PanelLeftOpen, Maximize, Minimize, Settings2, ScanLine, History, FileText, Camera, List, MessageSquare, UsersRound, FlaskConical, PanelsTopLeft, SquarePen } from 'lucide-react';
 import type { DemoCase } from './demo';
 import { CaseNotes } from './case-notes';
+import { caseHref, notificationPreferencesHref } from './case-navigation';
 import { CaseLogs } from './case-logs';
 import { CaseAttachments } from './case-attachments';
 import { ImageViewport } from './image-viewport';
@@ -19,8 +20,8 @@ import { WorkspaceTabs } from './workspace-tabs';
 
 type ViewerTab = 'slides' | 'analysis' | 'history' | 'media' | 'gross' | 'notes' | 'logs';
 
-export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsHref, initialSnapshot, initialRoi, roiOrigin, editorHref, historyEndpoint, attachmentsEndpoint, logsEndpoint, notesEndpoint, reviewEndpoint, viewerAccount, relatedEndpoint, analysisEndpoint }: {
-  item: DemoCase; activeSlide?: string; onSlide: (id: string) => void; onBack: (scan?: string) => void; onReview?: () => void; requestsHref?: string; initialSnapshot?: string; initialRoi?: string; roiOrigin?: RoiLocation; editorHref?: string; historyEndpoint?: string; attachmentsEndpoint?: string; logsEndpoint?: string; notesEndpoint?: string; reviewEndpoint?: string; relatedEndpoint?: string; viewerAccount: string;
+export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsHref, hasFrozenWorkflow, initialSnapshot, initialRoi, roiOrigin, historyEndpoint, attachmentsEndpoint, logsEndpoint, notesEndpoint, reviewEndpoint, viewerAccount, relatedEndpoint, analysisEndpoint }: {
+  item: DemoCase; activeSlide?: string; onSlide: (id: string) => void; onBack: (scan?: string) => void; onReview?: () => void; requestsHref?: string; hasFrozenWorkflow?: boolean; initialSnapshot?: string; initialRoi?: string; roiOrigin?: RoiLocation; historyEndpoint?: string; attachmentsEndpoint?: string; logsEndpoint?: string; notesEndpoint?: string; reviewEndpoint?: string; relatedEndpoint?: string; viewerAccount: string;
   analysisEndpoint?: string;
 }) {
   const [contextTab, setContextTab] = useState<Exclude<ViewerTab, 'analysis'>>('slides');
@@ -123,6 +124,8 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
     <p role="alert">Case access is no longer available.</p>
     <a href="#worklist/all">Back to Worklist</a>
   </section>;
+  const reportHref = requestsHref && item.recordId ? caseHref(item.recordId, 'report', slide?.id) : undefined;
+  const documentHref = item.recordId && contextTab !== 'slides' ? caseHref(item.recordId, contextTab, slide?.id) : undefined;
   return <section ref={root} className="viewer-workbench" aria-label="Slide Review">
     <div className="page-heading viewer-heading">
       <div className="viewer-context">
@@ -150,8 +153,9 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
         {fullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
       </button>
       {!comparing && <button className="button secondary" disabled={available.length < 2 || inReview} onClick={() => setComparing(true)}><GalleryHorizontalEnd size={16} /> Multi View</button>}
-      {editorHref && <a className="button secondary viewer-editor-link" href={editorHref}><SquarePen size={15} /> Case Editor</a>}
-      {requestsHref && <a className="button secondary" href={requestsHref.replace(/\/requests$/, '/report')}><ClipboardList size={16} /> Report Draft</a>}
+      {item.recordId && <a className="button secondary viewer-editor-link" href={caseHref(item.recordId, 'editor', slide?.id)}><SquarePen size={15} /> Case Editor</a>}
+      {reportHref && <a className="button secondary" href={reportHref}><ClipboardList size={16} /> Report Draft</a>}
+      {hasFrozenWorkflow && item.recordId && <a className="button secondary" href={caseHref(item.recordId, 'frozen', slide?.id)}><ClipboardList size={16} /> Frozen Section</a>}
       {requestsHref && <a className="button secondary" href={requestsHref} aria-label="Analysis and Consultation Requests"><MessageSquare size={15} /> Requests</a>}
       {!comparing && onReview && <button className="button secondary" disabled={!slide?.wsi} onClick={onReview}>{item.status === 'In Review' ? 'Review Complete' : 'Start Review'}</button>}</div></div>
     <WorkspaceTabs label="Viewer Workspace" tabs={tabs} active={activeTab} onSelect={selectTab} panelId="viewer-workspace-panel" />
@@ -181,7 +185,7 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
           caseId={item.recordId} scanId={slide.wsi.id} /> : undefined}
         options={{ settings, active: !isDocument,
           onCamera: (camera) => { singleCamera.current = { id: slide.id, camera }; },
-          reportHref: requestsHref?.replace(/\/requests$/, '/report/' + encodeURIComponent(slide.id)),
+          reportHref,
           position: { index: slideIndex + 1, total: item.slides.length }, toggleFullscreen, toggleGallery,
           previous: previous && !review.following ? () => selectSlide(previous.id) : undefined,
           next: next && !review.following ? () => selectSlide(next.id) : undefined,
@@ -194,10 +198,14 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
       {isDocument && <section className="viewer-document panel" aria-label={activeLabel}>
         <div className="panel-title"><div><h2>{activeLabel}</h2>
           {slide && <p className="viewer-document-context">{item.id} · {slide.label ?? slide.id}{slide.wsi && ` · ${slide.wsi.format} · Scan ${slide.wsi.id.slice(0, 8)}`}</p>}</div>
+          <div className="actions">
+          {contextTab === 'notes' && item.recordId && <a className="button secondary"
+            href={notificationPreferencesHref(item.recordId, slide?.id)}><Bell size={15} /> Notification Preferences</a>}
+          {documentHref && <a className="button secondary" href={documentHref}><ExternalLink size={15} /> Open in Case Details</a>}
           <button type="button" className="button secondary" onClick={() => {
             selectTab('slides');
             document.getElementById('viewer-workspace-panel-tab-slides')?.focus();
-          }}><ScanLine size={15} /> Return to Slides</button></div>
+          }}><ScanLine size={15} /> Return to Slides</button></div></div>
         <div className="detail-content">
           {contextTab === 'history' && historyEndpoint && <PatientHistory endpoint={historyEndpoint} />}
           {attachmentsEndpoint && (contextTab === 'media' || contextTab === 'gross') &&

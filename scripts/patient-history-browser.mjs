@@ -108,6 +108,13 @@ try {
   await button(dialog, 'Return to Slides').click();
   assert.ok(await canvas.evaluate((node, before) => node === before, prior));
   assert.equal(await slide.getAttribute('data-view-zoom'), zoom);
+  await doctor.getByRole('tab', { name: 'History', exact: true }).click();
+  await dialog.getByRole('link', { name: 'Open in Case Details', exact: true }).click();
+  await doctor.waitForURL((url) => url.hash === `#case/${caseId}/history/${scanId}`);
+  await history.getByText('External clinical text.', { exact: true }).waitFor();
+  await button(doctor, 'Open Viewer').click();
+  await doctor.waitForURL((url) => url.hash === viewerRoute.slice(1));
+  await button(doctor, 'Pan using minimap').waitFor();
 
   await outsider.goto(viewerRoute);
   await outsider.getByText('Unable to load the case.', { exact: true }).waitFor();

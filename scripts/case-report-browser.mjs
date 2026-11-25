@@ -127,6 +127,8 @@ try {
   await button(report, 'Stop Dictation').click();
   await button(report, 'Apply Transcript to Section').click();
   assert.equal(await report.getByLabel('Diagnosis (Required)').inputValue(), 'Synthetic local dictation.');
+  await button(report, 'Review Evidence').click();
+  assert.equal(await report.locator('fieldset').evaluate((element) => element === document.activeElement), true);
   await report.getByRole('checkbox', { name: /Completed Consultation/ }).first().check();
   await button(report, 'Save Draft').click();
   await report.getByText('Report draft saved.', { exact: true }).waitFor();
@@ -136,16 +138,18 @@ try {
   await button(report, 'Link Mock LIS Accession').click();
   await report.getByText('LIS accession ' + accession, { exact: true }).waitFor();
   await button(report, 'Submit for Review').click();
-  await report.locator('.count').filter({ hasText: 'Version 2 · In Review' }).waitFor();
+  await report.getByLabel('Report Status').getByText('Version 2 · In Review', { exact: true }).waitFor();
   assert.equal(await button(report, 'Approve Report').count(), 0);
 
-  await doctor.goto(route);
+  await doctor.getByRole('link', { name: 'Report Draft', exact: true }).click();
+  await doctor.waitForURL((url) => url.hash === `#case/${caseId}/report/${replacement.id}`);
+  await doctor.getByText(/^Source Scan/).waitFor();
   const review = reportOf(doctor);
   await review.getByText('Synthetic local dictation.', { exact: true }).waitFor();
   await review.getByText('Dictation draft used', { exact: true }).waitFor();
   await review.getByRole('checkbox', { name: 'I reviewed this report and its evidence.' }).check();
   await button(review, 'Approve Report').click();
-  await review.locator('.count').filter({ hasText: 'Version 3 · Approved' }).waitFor();
+  await review.getByLabel('Report Status').getByText('Version 3 · Approved', { exact: true }).waitFor();
   await button(review, 'Queue Mock LIS Delivery').click();
   await review.getByText(/Version 3 · Initial · Acknowledged/).waitFor();
   await review.getByLabel('Correction Reason').fill('Synthetic correction reason');
@@ -154,18 +158,22 @@ try {
   await review.getByLabel('Diagnosis (Required)').fill('Synthetic amended report.');
   await button(review, 'Save Draft').click();
   await review.getByText('Report draft saved.', { exact: true }).waitFor();
-  await review.getByText('Version History', { exact: true }).click();
+  await button(review, 'Browse Versions').click();
   await button(review, 'View Version 3').click();
   await review.getByText('Synthetic local dictation.', { exact: true }).waitFor();
   assert.equal(await review.getByLabel('Diagnosis (Required)').inputValue(), 'Synthetic amended report.');
   await button(review, 'Submit for Review').click();
-  await review.locator('.count').filter({ hasText: 'Version 6 · In Review' }).waitFor();
+  await review.getByLabel('Report Status').getByText('Version 6 · In Review', { exact: true }).waitFor();
   await review.getByRole('checkbox', { name: 'I reviewed this report and its evidence.' }).check();
   await button(review, 'Approve Report').click();
-  await review.locator('.count').filter({ hasText: 'Version 7 · Approved' }).waitFor();
+  await review.getByLabel('Report Status').getByText('Version 7 · Approved', { exact: true }).waitFor();
   await button(review, 'Queue Mock LIS Delivery').click();
   await review.getByText(/Version 7 · Correction · Acknowledged/).waitFor();
+  await review.getByLabel('Report Status').getByText('Acknowledged', { exact: true }).waitFor();
   await evidence.capture(review, 'approved-correction');
+  await button(doctor, 'Open Viewer').click();
+  await button(doctor, 'Pan using minimap').waitFor();
+  assert.equal(await doctor.locator('.image-panel').getAttribute('data-scan-id'), replacement.id);
 
   for (const [action, minimum] of [
     ['report_approved', 2], ['report_correction_started', 1], ['report_delivery_acknowledged', 2],

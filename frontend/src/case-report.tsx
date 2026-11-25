@@ -1,5 +1,5 @@
 import { interpretations, markerNames, modelNames } from './analysis-execution';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { api, jsonBody } from './session';
 import { ReportDictation } from './report-dictation';
@@ -69,6 +69,9 @@ export function CaseReport({ endpoint, caseId, caseVersion, caseChanged }: {
   const [showTemplateEditor, setShowTemplateEditor] = useState(false);
   const [accession, setAccession] = useState('');
   const [linkReason, setLinkReason] = useState('');
+  const deliverySection = useRef<HTMLElement>(null);
+  const historySection = useRef<HTMLDetailsElement>(null);
+  const evidenceSection = useRef<HTMLFieldSetElement>(null);
 
   const load = useCallback(async (signal?: AbortSignal, preserveDraft = false) => {
     const result = await api<Report>(endpoint, { signal });
@@ -149,13 +152,29 @@ export function CaseReport({ endpoint, caseId, caseVersion, caseChanged }: {
     void perform(async () => {
       await api(endpoint + (retry ? '/retry' : '/send'), jsonBody('POST', { version: latest.version }));
       await load();
-      setNotice('Mock LIS delivery queued.');
+      setNotice(retry ? 'Mock LIS retry requested.' : 'Mock LIS delivery requested.');
     });
   }
 
   return <section className="case-report" aria-label="Case Report">
-    <div className="preview-label"><h2>Case Report</h2>
-      <span className="count">{latest ? `Version ${latest.version} · ${phases[latest.status]}` : 'Not Started'}</span></div>
+    <div className="preview-label"><h2>Case Report</h2></div>
+    <dl className="case-workflow-summary" aria-label="Report Status">
+      <div><dt>Report</dt><dd>{latest ? `Version ${latest.version} · ${phases[latest.status]}` : 'Not Started'}</dd></div>
+      <div><dt>Result Evidence</dt><dd>{editable ? draft.evidence_ids.length : latest?.evidence.length ?? 0} Linked
+        {editable && dirty && ' · Unsaved Draft'}</dd></div>
+      <div><dt>Mock LIS Delivery</dt><dd>{currentDelivery ? deliveryLabels[currentDelivery.status] : latest?.status === 'approved'
+        ? 'Not Queued' : 'Awaiting Approval'}</dd></div>
+    </dl>
+    <nav className="case-document-actions" aria-label="Report Sections">
+      {editable && <button type="button" className="button secondary" onClick={() => evidenceSection.current?.focus()}>Review Evidence</button>}
+      <button type="button" className="button secondary" onClick={() => deliverySection.current?.focus()}>View Delivery</button>
+      {data.history.length > 0 && <button type="button" className="button secondary" onClick={() => {
+        if (historySection.current) {
+          historySection.current.open = true;
+          historySection.current.querySelector('summary')?.focus();
+        }
+      }}>Browse Versions</button>}
+    </nav>
     {latest?.replaces_version && <p className="integration-note">Correction of Version {latest.replaces_version} · {latest.correction_reason}</p>}
     {error && <div role="alert" className="form-error">{error} <button className="button secondary" type="button" disabled={busy}
       onClick={() => void perform(() => load())}>Reload Report</button></div>}
@@ -186,7 +205,7 @@ export function CaseReport({ endpoint, caseId, caseVersion, caseChanged }: {
           <textarea rows={item.required ? 5 : 3} maxLength={12000} value={draft.sections[item.key] ?? ''} disabled={busy}
             onChange={(event) => editSection(item.key, event.target.value)} />
         </label>)}
-        <fieldset className="report-evidence"><legend>Result Evidence</legend>
+        <fieldset className="report-evidence" ref={evidenceSection} tabIndex={-1}><legend>Result Evidence</legend>
           {data.evidence.length ? data.evidence.map((item) => <label key={item.id}>
             <input type="checkbox" checked={draft.evidence_ids.includes(item.id)} onChange={(event) => {
               const selected = event.target.checked;
@@ -205,22 +224,25 @@ export function CaseReport({ endpoint, caseId, caseVersion, caseChanged }: {
           dictated_sections: [...new Set([...draft.dictated_sections, key])] });
         return true;
       }} />
-      {latest && <div className="actions">
+      {latest && <section className="history-manual" aria-label="Submit Report">
+        <h3>Send for Approval</h3>
         <button className="button secondary" type="button" disabled={dirty || busy} onClick={() => action('submit')}>Submit for Review</button>
-      </div>}
+      </section>}
     </> : latest && <ReportSnapshot row={latest} caseId={caseId} />}
     {latest?.status === 'in_review' && data.can_approve && <div className="history-manual">
+      <h3>Approval Review</h3>
       <label><input type="checkbox" checked={reviewed} onChange={(event) => setReviewed(event.target.checked)} /> I reviewed this report and its evidence.</label>
       <label className="form-field">Return Reason<input value={reason} maxLength={240} onChange={(event) => setReason(event.target.value)} /></label>
       <div className="actions"><button className="button primary" disabled={busy || !reviewed} onClick={() => action('approve')}>Approve Report</button>
         <button className="button secondary" disabled={busy || !reason.trim()} onClick={() => action('return')}>Return to Draft</button></div>
     </div>}
     {latest?.status === 'approved' && <div className="history-manual">
+      <h3>Correct Approved Report</h3>
       <label className="form-field">Correction Reason<input maxLength={240} value={reason} onChange={(event) => setReason(event.target.value)} /></label>
       <button className="button secondary" disabled={busy || !reason.trim() || (!!currentDelivery && currentDelivery.status !== 'acknowledged')}
         onClick={() => action('correct')}>Start Correction</button>
     </div>}
-    <div className="history-manual" aria-label="LIS Delivery">
+    <section ref={deliverySection} tabIndex={-1} className="history-manual" aria-label="LIS Delivery">
       <h3>LIS Delivery</h3>
       <p className="muted">{data.lis_enabled ? 'Development Mock Report Delivery Enabled' : 'Mock report delivery is disabled. Enable it in LIS integration settings.'}</p>
       <p className="muted">{data.lis_accession ? `LIS accession ${data.lis_accession}` : 'Link one LIS accession before sending.'}</p>
@@ -249,8 +271,8 @@ export function CaseReport({ endpoint, caseId, caseVersion, caseChanged }: {
         {item.error && <p>{failures[item.error] ?? 'Delivery failed.'}</p>}
         {item.ack_id && <small className="report-identifier">ACK {item.ack_id}</small>}
       </li>)}</ul>}
-    </div>
-    {data.history.length > 0 && <details className="report-history"><summary>Version History</summary>
+    </section>
+    {data.history.length > 0 && <details className="report-history" ref={historySection}><summary>Version History</summary>
       <ul className="timeline">{data.history.map((row) => <li key={row.version}>
         <div><strong>Version {row.version} · {actionNames[row.action] ?? phases[row.status]}</strong>
           <p>{row.author ?? 'Unknown User'} · {date.format(new Date(row.created_at))}</p>
@@ -275,7 +297,7 @@ function ReportSnapshot({ row, caseId }: { row: Revision; caseId: string }) {
       {row.dictated_sections.includes(section.key) && <small className="muted">Dictation draft used</small>}
     </div>)}
     {!!row.evidence.length && <><h3>Versioned Result Evidence</h3><ul className="timeline">{row.evidence.map((entry) => <li key={entry.id}>
-      <a href={evidenceRoute(entry, caseId)}>{evidenceLabel(entry)}</a> · Version {entry.version}
+      <a className="report-evidence-link" href={evidenceRoute(entry, caseId)}>{evidenceLabel(entry)}</a> · Version {entry.version}
       {entry.kind === 'lymph_node_count' && entry.reason && <p>{entry.reason}</p>}
       {entry.snapshot && <p>{entry.snapshot.score_type ?? 'AI'} · {entry.snapshot.model ?? 'Model unavailable'} · {entry.snapshot.model_version ?? 'Version unavailable'}
         {entry.snapshot.analysis_version && ` · Analysis ${entry.snapshot.analysis_version}`}</p>}

@@ -82,6 +82,14 @@ try {
   await gross.getByRole('img', { name: 'Gross specimen photograph', exact: true }).waitFor();
   await button(gross, 'Return to Slides').click();
   assert.ok(await canvas.evaluate((node, prior) => node === prior, before));
+  await assigned.getByRole('tab', { name: 'Gross Images', exact: true }).click();
+  await gross.getByRole('link', { name: 'Open in Case Details', exact: true }).click();
+  await assigned.waitForURL((url) => url.hash === `#case/${caseId}/gross/${scanId}`);
+  await assigned.reload();
+  await assigned.getByRole('img', { name: 'Gross specimen photograph', exact: true }).waitFor();
+  await button(assigned, 'Open Viewer').click();
+  await assigned.waitForURL((url) => url.hash === viewerRoute.slice(1));
+  await button(assigned, 'Pan using minimap').waitFor();
 
   await admin.reload();
   await button(admin, 'Gross Images').click();

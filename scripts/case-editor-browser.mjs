@@ -129,10 +129,14 @@ try {
   await button(page, 'Register Replacement').click();
   const result = await replaced;
   assert.equal(result.status(), 201, await result.text());
-  assert.equal((await result.json()).replaces_id, held.id);
+  const successor = await result.json();
+  assert.equal(successor.replaces_id, held.id);
   await page.getByText(replacement + ' · NDPI · Unassessed', { exact: true }).waitFor();
   await button(page, 'Open Viewer').click();
   await button(page, 'Pan using minimap').waitFor();
+  await page.getByRole('link', { name: 'Case Editor', exact: true }).click();
+  await page.waitForURL((url) => url.hash === `#case/${caseId}/editor/${successor.id}`);
+  await page.locator('[data-focused-scan]').filter({ hasText: replacement }).waitFor();
   await page.goto('/#worklist/all');
   await button(page, 'Register Case').click();
   const registration = page.getByRole('dialog', { name: 'Register Case' });

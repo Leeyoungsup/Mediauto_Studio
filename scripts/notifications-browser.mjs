@@ -64,6 +64,14 @@ try {
   await dialog.getByText('Synthetic WSI reply', { exact: true }).waitFor();
   await button(dialog, 'Return to Slides').click();
   await button(doctor, 'Pan using minimap').waitFor();
+  await doctor.getByRole('tab', { name: 'Notes', exact: true }).click();
+  await dialog.getByRole('link', { name: 'Notification Preferences', exact: true }).click();
+  await settings.getByLabel('Mentions Email', { exact: true }).waitFor();
+  await doctor.getByRole('link', { name: 'Back to Case Notes', exact: true }).click();
+  await doctor.waitForURL((url) => url.hash === `#case/${caseId}/notes/${scanId}`);
+  await doctor.getByText('Synthetic WSI reply', { exact: true }).waitFor();
+  await button(doctor, 'Open Viewer').click();
+  await doctor.waitForURL((url) => url.hash === `#viewer/${caseId}/${scanId}`);
 
   await summary(admin).click();
   const adminInbox = admin.getByRole('region', { name: 'Request Inbox' });

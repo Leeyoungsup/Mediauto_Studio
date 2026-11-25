@@ -15,6 +15,8 @@ import { CaseEditor } from './case-editor';
 import { PatientMatch } from './patient-match';
 import type { PatientSelection } from './patient-match';
 import { CaseDetail } from './case-detail';
+import { caseHref, caseTab } from './case-navigation';
+import type { CaseTab } from './case-navigation';
 import { CaseDates } from './case-dates';
 import { CaseRequests, ReportDraftReferences, RequestPage } from './case-requests';
 import type { DemoCase } from './demo';
@@ -48,7 +50,7 @@ const settingsSections = [
   { key: 'pap', label: 'Pap Review Policy', icon: Microscope, admin: true },
   { key: 'notifications', label: 'Notifications', icon: Bell, admin: false },
 ] as const;
-type SettingsPage = { view: 'settings'; section?: Exclude<typeof settingsSections[number]['key'], ''>; accountTab?: AccountTab };
+type SettingsPage = { view: 'settings'; section?: Exclude<typeof settingsSections[number]['key'], ''>; accountTab?: AccountTab; noteCase?: string; noteScan?: string };
 
 const accountLinks = [
   { tab: 'directory', label: 'Account Management', name: 'Accounts', icon: UsersRound },
@@ -56,7 +58,7 @@ const accountLinks = [
   { tab: 'audit', label: 'Account Audit Log', name: 'Account Audit', icon: ClipboardList },
 ] as const;
 
-type Page = { view: 'related-comparison'; id: string; anchor?: string } | { view: 'worklist'; scope: Scope } | { view: 'case'; id: string; files: boolean; tab?: 'requests' | 'report' | 'editor' | 'notes' | 'frozen'; selectedScan?: string } | { view: 'request'; id: string } | { view: 'or'; id?: string }
+type Page = { view: 'related-comparison'; id: string; anchor?: string } | { view: 'worklist'; scope: Scope } | { view: 'case'; id: string; files: boolean; tab?: CaseTab; selectedScan?: string } | { view: 'request'; id: string } | { view: 'or'; id?: string; scan?: string }
   | { view: 'viewer'; id: string; slide?: string; snapshot?: string; roi?: string; roiOrigin?: RoiLocation; files: boolean } | { view: 'roi-search'; location: RoiLocation } | { view: 'collections'; id?: string } | { view: 'scans' } | SettingsPage;
 type WorkflowAction = 'assignment' | 'review' | 'confirm';
 type Modal = 'register' | 'system' | null;
@@ -80,16 +82,20 @@ function readPage(): Page {
   }
   if (view === 'related-comparison' && isUuid(id)) return { view, id, anchor: isUuid(slide) ? slide : undefined };
   if (view === 'collections') return { view, id: isUuid(id) ? id : undefined };
-  if (view === 'or') return { view, id: id ? decodeRoute(id) : undefined };
+  if (view === 'or') return { view, id: id ? decodeRoute(id) : undefined, scan: slide ? decodeRoute(slide) : undefined };
   if (view === 'scans') return { view };
   if (view === 'settings') {
     const section = settingsSections.find(({ key }) => key === id)?.key || undefined;
     const accountTab = section === 'accounts' ? accountLinks.find(({ tab }) => tab === slide)?.tab ?? 'directory' : undefined;
-    return { view, section, accountTab };
+    const noteCase = section === 'notifications' && isUuid(slide) ? slide : undefined;
+    return { view, section, accountTab, noteCase, noteScan: noteCase && snapshot ? decodeRoute(snapshot) : undefined };
   }
   if (view === 'request' && id) return { view, id: decodeRoute(id) };
-  if ((view === 'case' || view === 'file-case') && id) return { view: 'case', id: decodeRoute(id), files: view === 'file-case', tab: slide === 'requests' || slide === 'report' || slide === 'editor' || slide === 'notes' || slide === 'frozen' ? slide : undefined,
-    selectedScan: (slide === 'slides' || slide === 'editor' || slide === 'report') && snapshot ? decodeRoute(snapshot) : undefined };
+  if ((view === 'case' || view === 'file-case') && id) {
+    const tab = caseTab(slide);
+    return { view: 'case', id: decodeRoute(id), files: view === 'file-case', tab,
+      selectedScan: tab && snapshot ? decodeRoute(snapshot) : undefined };
+  }
   if ((view === 'viewer' || view === 'file-viewer') && id) return { view: 'viewer', id: decodeRoute(id), slide: slide ? decodeRoute(slide) : undefined, snapshot: /^[a-f0-9]{64}$/.test(snapshot ?? '') ? snapshot : undefined, files: view === 'file-viewer' };
   return { view: 'worklist', scope: id === 'mine' || id === 'unassigned' ? id : 'all' };
 }
@@ -500,7 +506,10 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
               </a>)}
           </nav>
         </section>}
-        {page.view === 'settings' && page.section === 'notifications' && <NotificationSettings organization={user.organization} />}
+        {page.view === 'settings' && page.section === 'notifications' && <>
+          {page.noteCase && <a className="back-link" href={caseHref(page.noteCase, 'notes', page.noteScan)}>Back to Case Notes</a>}
+          <NotificationSettings organization={user.organization} />
+        </>}
         {page.view === 'settings' && page.section !== 'notifications' && settingsAllowed && (page.section === 'accounts' ? <AccountsSettings tab={accountTab ?? 'directory'} /> : page.section === 'groups'
           ? <WorkgroupSettings onChanged={refreshQueues} /> : page.section === 'analysis' ? <AnalysisSettings organization={user.organization} />
           : page.section === 'pap' ? <Suspense fallback={<p role="status">Loading Pap policy…</p>}>
@@ -510,7 +519,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
         </>)}
         {page.view === 'scans' && intakeAllowed && <IntakePage files={files} loading={filesLoading} problem={fileProblem} refresh={refreshFiles} onContinue={continueIntake} emr={emr} />}
         {((page.view === 'settings' && page.section !== 'notifications' && !settingsAllowed) || (page.view === 'scans' && !intakeAllowed)) && <div className="panel empty"><strong>You do not have permission to open this page.</strong><button className="button secondary" onClick={goBack}>Back to Worklist</button></div>}
-        {page.view === 'or' && (orAllowed ? <ORResults organization={user.organization} caseId={page.id} />
+        {page.view === 'or' && (orAllowed ? <ORResults organization={user.organization} caseId={page.id} scan={page.scan} canOpenCase={settingsAllowed} />
           : <div className="panel empty"><strong>You do not have permission to open the OR view.</strong></div>)}
         {page.view === 'collections' && (requestAllowed ? <CollectionWorkspace organization={user.organization} selected={page.id} />
           : <div className="panel empty"><strong>You do not have permission to open Collections.</strong></div>)}
@@ -526,13 +535,12 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
         {casePage && (!current ? <div className="panel empty"><CircleHelp size={28} /><strong>{casePage.files
           ? (intakeAllowed && filesLoading ? 'Loading case…' : 'Unable to load the case.')
           : detail?.key === detailKey ? detail?.error : 'Loading case…'}</strong><button className="button secondary" onClick={goBack}>Back to Worklist</button></div>
-          : casePage.view === 'case' ? <CaseDetail key={current.id + '/' + (casePage.tab ?? '')} item={current} relatedEndpoint={requestAllowed && clinicalCaseEndpoint ? clinicalCaseEndpoint + '/related-cases' : undefined} selectedScan={casePage.selectedScan} historyEndpoint={historyEndpoint} attachmentsEndpoint={attachmentsEndpoint} logsEndpoint={logsEndpoint} notesEndpoint={notesEndpoint}
-            initialTab={current.recordId ? casePage.tab === 'editor' ? 'Case Editor' : casePage.tab === 'notes' ? 'Notes' : casePage.tab === 'frozen' && frozenEndpoint ? 'Frozen Section' : requestAllowed
-              ? casePage.tab === 'requests' ? 'Requests' : casePage.tab === 'report' ? 'Report Draft' : undefined : undefined : undefined}
+          : casePage.view === 'case' ? <CaseDetail key={current.id} item={current} relatedEndpoint={requestAllowed && clinicalCaseEndpoint ? clinicalCaseEndpoint + '/related-cases' : undefined} selectedScan={casePage.selectedScan} historyEndpoint={historyEndpoint} attachmentsEndpoint={attachmentsEndpoint} logsEndpoint={logsEndpoint} notesEndpoint={notesEndpoint}
+            initialTab={current.recordId ? casePage.tab : undefined}
             editor={current.recordId ? <CaseEditor key={casePage.selectedScan ?? ''} item={current} focusScan={casePage.tab === 'editor' ? casePage.selectedScan : undefined} organization={user.organization} editable={writable && current.status !== 'Review Complete'}
               canImport={user.role === 'admin'} onChanged={patientChanged}
               patient={<PatientIntegration item={current} org={user.organization} editable={writable} status={integration} onChanged={patientChanged} />} /> : undefined}
-            frozen={frozenEndpoint && current.recordId ? <FrozenWorkflow caseId={current.recordId} endpoint={frozenEndpoint} /> : undefined}
+            frozen={frozenEndpoint && current.recordId ? <FrozenWorkflow caseId={current.recordId} scan={current.slides.find(({ id }) => id === casePage.selectedScan)?.id} endpoint={frozenEndpoint} /> : undefined}
             requests={requestAllowed && current.recordId ? <CaseRequests organization={user.organization} item={current} /> : undefined}
             report={requestAllowed && current.recordId && clinicalCaseEndpoint ? <>
               <CaseReport endpoint={clinicalCaseEndpoint + '/report'} caseId={current.recordId} caseVersion={current.version} caseChanged={patientChanged} />
@@ -548,7 +556,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
             onConfirm={intakeAllowed && current.source === 'files' ? () => openWorkflow(current, 'confirm') : undefined} />
           : <Viewer key={current.id} item={current} relatedEndpoint={requestAllowed && clinicalCaseEndpoint ? clinicalCaseEndpoint + '/related-cases' : undefined} viewerAccount={user.id}
             analysisEndpoint={requestAllowed ? clinicalCaseEndpoint : undefined}
-            reviewEndpoint={requestAllowed && clinicalCaseEndpoint ? clinicalCaseEndpoint + '/review-room' : undefined} activeSlide={casePage.slide} initialSnapshot={casePage.snapshot} initialRoi={casePage.roi} roiOrigin={casePage.roiOrigin} historyEndpoint={historyEndpoint} attachmentsEndpoint={attachmentsEndpoint} logsEndpoint={logsEndpoint} notesEndpoint={notesEndpoint} editorHref={current.recordId ? `#case/${current.recordId}/editor` : undefined} requestsHref={requestAllowed && current.recordId ? `#case/${current.recordId}/requests` : undefined} onSlide={(id) => navigateViewer(current, id)} onBack={(scan) => navigateCase(current, scan)}
+            reviewEndpoint={requestAllowed && clinicalCaseEndpoint ? clinicalCaseEndpoint + '/review-room' : undefined} activeSlide={casePage.slide} initialSnapshot={casePage.snapshot} initialRoi={casePage.roi} roiOrigin={casePage.roiOrigin} historyEndpoint={historyEndpoint} attachmentsEndpoint={attachmentsEndpoint} logsEndpoint={logsEndpoint} notesEndpoint={notesEndpoint} hasFrozenWorkflow={!!frozenEndpoint} requestsHref={requestAllowed && current.recordId ? `#case/${current.recordId}/requests` : undefined} onSlide={(id) => navigateViewer(current, id)} onBack={(scan) => navigateCase(current, scan)}
             onReview={mayReview ? () => openWorkflow(current, 'review') : undefined} />)}
       </main>
     </div>
