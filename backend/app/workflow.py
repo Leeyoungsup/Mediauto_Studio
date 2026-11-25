@@ -22,13 +22,17 @@ from app.workgroup_policy import GroupKey, Priority, group_member, lock_group, m
 router = APIRouter(prefix="/api/clinical/{organization}", tags=["Case workflow"])
 
 
-class CaseChange(ClinicalInput):
+class CaseVersion(ClinicalInput):
     version: int = Field(ge=1)
+
+
+class CaseChange(CaseVersion):
     reason: Reason
 
 
-class Assignment(CaseChange):
+class Assignment(CaseVersion):
     assignee_id: UUID
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, max_length=240)] | None = None
 
 
 class Review(CaseChange):
@@ -71,7 +75,7 @@ async def assign_case(organization: Organization, case_id: UUID, data: Assignmen
         action = "reassigned" if case.assigned_to else "assigned"
         case.assigned_to = assignee.id
         case.status = "assigned"
-        result = record_change(session, case, action, before, data.reason)
+        result = record_change(session, case, action, before, data.reason or None)
         if assignee.id != user.id:
             await enqueue(session, organization=organization, case_id=case.id, recipients={assignee.id: None},
                           event="case_assignment", action=action, event_key=f"assignment:{case.id}:{case.version}")

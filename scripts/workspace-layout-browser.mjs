@@ -76,7 +76,7 @@ try {
   await preview.getByRole('button', { name: /^(Assign|Reassign) Case$/ }).click();
   const assignment = page.getByRole('dialog');
   await assignment.getByLabel('Assigned Pathologist').selectOption({ label: 'integration-other (integration-other)' });
-  await assignment.getByLabel('Reason for Change').fill('Synthetic Worklist assignment');
+  assert.equal(await assignment.getByLabel('Reason for Change').count(), 0);
   await button(assignment, 'Save').click();
   await assignment.waitFor({ state: 'hidden' });
   await previewTabs.getByRole('tab', { name: 'Case Summary', exact: true }).click();
@@ -96,7 +96,8 @@ try {
   await button(intakePreview, 'Reassign Case').click();
   const intakeAssignment = technologist.getByRole('dialog', { name: 'Reassign Case', exact: true });
   await intakeAssignment.getByLabel('Assigned Pathologist').selectOption({ label: 'integration-doctor (integration-doctor)' });
-  await intakeAssignment.getByLabel('Reason for Change').fill('Synthetic technologist reassignment');
+  assert.equal(await intakeAssignment.getByLabel('Reason for Change (Optional)', { exact: true })
+    .evaluate((input) => input.required), false);
   await button(intakeAssignment, 'Save').click();
   await intakeAssignment.waitFor({ state: 'hidden' });
   await intakePreview.getByRole('tab', { name: 'Case Summary', exact: true }).click();

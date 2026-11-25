@@ -145,7 +145,6 @@ try {
     const target = dialog(admin).getByLabel('Assigned Pathologist');
     const doctor = await target.getByRole('option', { name: /integration-doctor/ }).getAttribute('value');
     await step('admin', 'Select Pathologist', () => target.selectOption(doctor));
-    await step('admin', 'Enter Assignment Reason', () => dialog(admin).getByLabel('Reason for Change').fill('Assign Synthetic Case'));
     await step('admin', 'Save Assignment', () => dialog(admin).getByRole('button', { name: 'Save', exact: true }).click());
     await admin.getByRole('complementary').getByText(accounts.doctor, { exact: true }).waitFor();
   });

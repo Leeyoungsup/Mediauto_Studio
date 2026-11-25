@@ -64,7 +64,6 @@ try {
   await button(admin, 'Assign Case').click();
   const assignment = admin.getByRole('dialog');
   await assignment.getByLabel('Assigned Pathologist').selectOption(currentUser.id);
-  await assignment.getByLabel('Reason for Change').fill('Assign the verified intake case');
   await button(assignment, 'Save').click();
   await assignment.waitFor({ state: 'hidden' });
   await doctor.goto('/#case/' + caseId);

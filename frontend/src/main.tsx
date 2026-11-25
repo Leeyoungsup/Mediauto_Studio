@@ -407,10 +407,10 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
         location.hash = `case/${id}/editor`;
       } else {
         const reason = String(fields.get('reason') ?? '').trim();
-        if (!reason) { setWorkflowError('Enter a reason for the change.'); return; }
-        const data = action === 'assignment' ? { assignee_id: fields.get('assignee') }
-          : { status: item.status === 'In Review' ? 'reviewed' : 'in_review', note: String(fields.get('note') ?? '') };
-        await api(`${prefix}/cases/${item.recordId}/${action}`, jsonBody('PATCH', { ...data, reason, version: item.version }));
+        if (action === 'review' && !reason) { setWorkflowError('Enter a reason for the change.'); return; }
+        const data = action === 'assignment' ? { assignee_id: fields.get('assignee'), reason: reason || undefined }
+          : { status: item.status === 'In Review' ? 'reviewed' : 'in_review', note: String(fields.get('note') ?? ''), reason };
+        await api(`${prefix}/cases/${item.recordId}/${action}`, jsonBody('PATCH', { ...data, version: item.version }));
       }
       setWorkflow(undefined);
       setRevision((value) => value + 1);
@@ -626,7 +626,9 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
             <p>Reassigning returns the case to Assigned so the new pathologist can start the review.</p>}
           {workflow.action === 'review' && workflow.item.status === 'In Review' &&
             <p>This sets the IMS review status to Review Complete.</p>}
-          <label className="form-field">Reason for Change<textarea name="reason" required maxLength={240} rows={2} /></label>
+          {workflow.action === 'review' && <label className="form-field">Reason for Change<textarea name="reason" required maxLength={240} rows={2} /></label>}
+          {workflow.action === 'assignment' && workflow.item.assignedTo &&
+            <label className="form-field">Reason for Change (Optional)<textarea name="reason" maxLength={240} rows={2} /></label>}
           {workflow.action === 'review' && <label className="form-field">Review Note (Optional)<textarea name="note" maxLength={2000} rows={3} /></label>}
         </>}
         {workflowError && <p className="form-error" role="alert">{workflowError}</p>}

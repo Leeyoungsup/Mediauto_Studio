@@ -64,7 +64,6 @@ try {
   const dialog = page.getByRole('dialog');
   assert.equal(await dialog.getByRole('option').filter({ hasText: 'integration-other' }).count(), 0);
   await dialog.getByLabel('Assigned Pathologist').selectOption(doctor.user.id);
-  await dialog.getByLabel('Reason for Change').fill('Synthetic Breast workload');
   await dialog.getByRole('button', { name: 'Save', exact: true }).click();
   await dialog.waitFor({ state: 'hidden' });
 

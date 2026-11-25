@@ -419,12 +419,13 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         candidates = (await self.client.get(f"/api/worklist/{case['id']}")).json()["candidates"]
         self.assertEqual({candidate["id"] for candidate in candidates}, {str(doctor.id) for doctor in doctors})
         one, two = await asyncio.gather(*[
-            self.client.patch(assignment, json={"version": 1, "assignee_id": str(doctors[0].id), "reason": "Initial assignment"})
+            self.client.patch(assignment, json={"version": 1, "assignee_id": str(doctors[0].id)})
             for _ in range(2)
         ])
         self.assertEqual(sorted([one.status_code, two.status_code]), [200, 409])
         await change(review, 2, 403, status="in_review")
         await login(self.client, self.org, doctors[0].username)
+        await change(review, 2, 422, status="in_review", reason=None)
         await change(review, 2, 409, status="in_review")
         await login(self.client, self.org, self.user.username)
         (self.root / "workflow.ndpi").write_bytes(b"synthetic scan path")
@@ -433,7 +434,7 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         await change(review, 2, 409, status="reviewed")
         self.assertEqual((await change(review, 2, status="in_review"))["status"], "in_review")
         await login(self.client, self.org, staff.username)
-        reassigned = await change(assignment, 3, assignee_id=str(doctors[1].id))
+        reassigned = await change(assignment, 3, assignee_id=str(doctors[1].id), reason="   ")
         self.assertEqual(reassigned["status"], "assigned")
         await login(self.client, self.org, doctors[0].username)
         await change(review, 4, 404, status="in_review")
@@ -459,7 +460,8 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         self.assertEqual(events[2]["before"]["assigned_to"], str(doctors[0].id))
         self.assertEqual(events[2]["after"]["assigned_to"], str(doctors[1].id))
         self.assertEqual(events[2]["source"], "ims")
-        self.assertEqual(events[2]["reason"], "Synthetic reason")
+        self.assertIsNone(events[2]["reason"])
+        self.assertIsNone(events[4]["reason"])
         self.assertTrue(events[2]["occurred_at"])
         self.assertTrue(events[2]["transaction_id"])
 
