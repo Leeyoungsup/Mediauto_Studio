@@ -3,6 +3,9 @@ import type { FormEvent, ReactNode } from 'react';
 import { Microscope, UserPlus } from 'lucide-react';
 
 export type User = { id: string; organization: string; username: string; display_name: string; role: 'admin' | 'doctor' | 'labeler' | 'viewer' };
+export const accountRoleLabels: Record<User['role'], string> = {
+  admin: 'Administrator', doctor: 'Pathologist', labeler: 'Slide Registration Staff', viewer: 'Viewer',
+};
 export const canWrite = (user: User) => user.role === 'admin' || user.role === 'labeler';
 const expired = 'mediauto-session-expired';
 

@@ -17,6 +17,7 @@ from app.case_collections import router as case_collections_router
 from app.analysis_execution import router as analysis_execution_router
 from app.analysis_jobs import poll_analysis
 from app.auth import load_auth_key, router as auth_router
+from app.account_management import router as account_management_router
 from app.registration import router as registration_router
 from app.case_activity import case_http_exception, case_validation_exception
 from app.case_attachments import router as case_attachments_router
@@ -97,6 +98,7 @@ app = FastAPI(title="Mediauto Studio", lifespan=lifespan)
 app.add_exception_handler(StarletteHTTPException, case_http_exception)
 app.add_exception_handler(RequestValidationError, case_validation_exception)
 app.include_router(auth_router)
+app.include_router(account_management_router)
 app.include_router(registration_router)
 app.include_router(case_attachments_router)
 app.include_router(case_logs_router)

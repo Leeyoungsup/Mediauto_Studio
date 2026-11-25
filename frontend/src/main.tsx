@@ -3,7 +3,7 @@ import { AnalysisSettings } from './analysis-execution';
 import { RoiSearchPage } from './roi-search';
 import type { RoiLocation } from './roi-search';
 import { FrozenWorkflow, ORResults } from './frozen-workflow';
-import { RegistrationRequests } from './registration-requests';
+import { AccountsSettings } from './accounts-settings';
 import { CaseReport } from './case-report';
 import { NotificationCenter, NotificationSettings } from './notifications';
 import { lazy, Suspense, StrictMode, useCallback, useEffect, useRef, useState } from 'react';
@@ -28,7 +28,7 @@ import { CaseRouting, WorkgroupSettings } from './workgroups';
 import type { Queue } from './workgroups';
 import type { Scope } from './worklist';
 import { defaultOrder } from './worklist-config';
-import { api, auditAttemptId, canWrite, jsonBody, SessionGate } from './session';
+import { accountRoleLabels, api, auditAttemptId, canWrite, jsonBody, SessionGate } from './session';
 import type { User } from './session';
 import { caseView, emptyResult, states } from './worklist-api';
 import type { Result, WorklistEntry, WorklistQuery } from './worklist-api';
@@ -357,7 +357,9 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
         {orAllowed && <a href="#or" aria-label="OR Results" title="OR Results" aria-current={page.view === 'or' ? 'page' : undefined}><ClipboardList size={19} /> <span>OR Results</span></a>}
         {requestAllowed && <a href="#collections" aria-label="Collections and Tumor Board" title="Collections and Tumor Board"
           aria-current={page.view === 'collections' ? 'page' : undefined}><ClipboardList size={19} /> <span>Collections and Tumor Board</span></a>}
-        {settingsAllowed && <a href="#settings" aria-label="Settings" title="Settings" aria-current={page.view === 'settings' ? 'page' : undefined}><Settings2 size={19} /> <span>Settings</span></a>}
+        {settingsAllowed && <a href="#settings/accounts" aria-label="Account Management" title="Account Management"
+          aria-current={page.view === 'settings' && page.section === 'accounts' ? 'page' : undefined}><UserRoundPlus size={19} /> <span>Accounts</span></a>}
+        {settingsAllowed && <a href="#settings" aria-label="Settings" title="Settings" aria-current={page.view === 'settings' && page.section !== 'accounts' ? 'page' : undefined}><Settings2 size={19} /> <span>Settings</span></a>}
       </nav>
       <div className="side-footer"><button aria-label="Service Status" title="Service Status" onClick={() => showModal('system')}><Activity size={18} /><span>Service Status</span><i className={health?.status === 'ok' ? 'online' : ''} /></button></div>
     </aside>
@@ -368,7 +370,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
           title={collapseNavigation ? 'Expand Navigation' : 'Collapse Navigation'} onClick={() => setNavigationCollapsed(!collapseNavigation)}>
           {collapseNavigation ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
         </button><span>Pathology Workspace</span><ChevronRight size={15} /><strong>{{ viewer: 'WSI Viewer', 'related-comparison': 'Pap and Biopsy Comparison', 'roi-search': 'ROI Similarity Search', case: 'Case Details', request: 'Analysis and Consultation Requests', or: 'OR Results', collections: 'Collections and Tumor Board', scans: 'Slide Registration', settings: 'Settings', worklist: 'Worklist' }[page.view]}</strong></div>
-        <div className="header-actions"><NotificationCenter key={user.id} organization={user.organization} /><span className="demo-label"><FlaskConical size={15} /> Demo Environment</span><button className="emr-chip" onClick={() => showModal('system')}><span /> EMR {emr} · LIS {lis}</button><span className="identity"><UserRound size={17} />{user.display_name}</span><button className="button secondary" onClick={logout}>Sign Out</button></div>
+        <div className="header-actions"><NotificationCenter key={user.id} organization={user.organization} /><span className="demo-label"><FlaskConical size={15} /> Demo Environment</span><button className="emr-chip" onClick={() => showModal('system')}><span /> EMR {emr} · LIS {lis}</button><span className="identity"><UserRound size={17} />{user.display_name}<small className="identity-role">{accountRoleLabels[user.role]}</small></span><button className="button secondary" onClick={logout}>Sign Out</button></div>
       </header>
       <main className="workspace-main" data-view={page.view}>
         {page.view === 'scans' && worklistNavigation}
@@ -395,7 +397,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
           </nav>
         </section>}
         {page.view === 'settings' && page.section === 'notifications' && <NotificationSettings organization={user.organization} />}
-        {page.view === 'settings' && page.section !== 'notifications' && settingsAllowed && (page.section === 'accounts' ? <RegistrationRequests /> : page.section === 'groups'
+        {page.view === 'settings' && page.section !== 'notifications' && settingsAllowed && (page.section === 'accounts' ? <AccountsSettings /> : page.section === 'groups'
           ? <WorkgroupSettings onChanged={refreshQueues} /> : page.section === 'analysis' ? <AnalysisSettings organization={user.organization} />
           : page.section === 'pap' ? <Suspense fallback={<p role="status">Loading Pap policy…</p>}>
             <PapPolicySettings organization={user.organization} /></Suspense> : <>

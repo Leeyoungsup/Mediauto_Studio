@@ -41,6 +41,7 @@ try {
   assert.equal(login.status(), 200);
   await admin.goto('/#settings');
   await admin.getByRole('link', { name: 'Accounts', exact: true }).click();
+  await admin.getByRole('tab', { name: 'Registration Requests', exact: true }).click();
   const queue = admin.getByRole('region', { name: 'Account Registration Requests', exact: true });
   await button(queue, 'Review ' + username).click();
   const review = queue.getByRole('form', { name: 'Review Registration', exact: true });
@@ -57,7 +58,39 @@ try {
   await applicant.goto('/#settings/accounts');
   await applicant.getByText('You do not have permission to open this page.', { exact: true }).waitFor();
   assert.ok(await applicant.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
-  console.log('PASS: registration form, applicant code, pending sign-in denial, admin approval, reviewed history and role-based login');
+  assert.equal(await applicant.getByRole('link', { name: 'Account Management', exact: true }).count(), 0);
+  assert.equal(await admin.getByRole('link', { name: 'Account Management', exact: true }).getAttribute('href'), '#settings/accounts');
+  await admin.getByRole('tab', { name: 'Directory and Access', exact: true }).click();
+  const directory = admin.getByRole('region', { name: 'Account Directory', exact: true });
+  await directory.getByRole('textbox', { name: 'Search Accounts', exact: true }).fill(username);
+  await button(directory, 'Search').click();
+  await button(directory, 'Edit Access for ' + username).click();
+  const access = directory.getByRole('form', { name: 'Edit Account Access', exact: true });
+  await access.getByLabel('Account Role').selectOption('labeler');
+  await access.getByLabel('Reason for Change').fill('Synthetic role adjustment');
+  await button(access, 'Save Access').click();
+  await directory.getByText('Account access updated.', { exact: true }).waitFor();
+  assert.equal((await applicant.request.get('/api/auth/me')).status(), 401);
+  await applicant.goto('/');
+  await signIn();
+  await applicant.getByRole('heading', { name: 'Worklist', exact: true }).waitFor();
+  assert.equal(await applicant.locator('.identity-role').textContent(), 'Slide Registration Staff');
+  await button(directory, 'Edit Access for ' + username).click();
+  await access.getByLabel('Account Status').selectOption('disabled');
+  await access.getByLabel('Reason for Change').fill('Synthetic access suspension');
+  await button(access, 'Save Access').click();
+  await directory.getByRole('cell', { name: 'Disabled', exact: true }).waitFor();
+  assert.equal((await applicant.request.get('/api/auth/me')).status(), 401);
+  await button(directory, 'View Log for ' + username).click();
+  const log = admin.getByRole('region', { name: 'Account Audit Log', exact: true });
+  assert.equal(await log.getByRole('textbox', { name: 'Filter by Username' }).inputValue(), username);
+  await log.getByRole('cell', { name: 'Registration Approved', exact: true }).waitFor();
+  const permission = log.getByRole('row').filter({ hasText: 'Synthetic role adjustment' });
+  await permission.getByRole('cell', { name: 'Viewer · Active', exact: true }).waitFor();
+  await permission.getByRole('cell', { name: 'Slide Registration Staff · Active', exact: true }).waitFor();
+  await permission.getByRole('cell', { name: 'integration-admin', exact: true }).waitFor();
+  await log.getByRole('cell', { name: 'Slide Registration Staff · Disabled', exact: true }).waitFor();
+  console.log('PASS: registration, administrator account directory, role and status changes, session revocation, and account audit');
 } finally {
   await browser.close();
 }

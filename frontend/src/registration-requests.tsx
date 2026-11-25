@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { UserPlus, UsersRound } from 'lucide-react';
-import { api, jsonBody } from './session';
+import { accountRoleLabels, api, jsonBody } from './session';
 
 type StaffRole = 'doctor' | 'labeler' | 'viewer';
 type Registration = {
   id: string; username: string; display_name: string; state: 'pending' | 'approved' | 'rejected';
   role: StaffRole | null; created_at: string; reviewed_at: string | null;
 };
-const roleNames: Record<StaffRole, string> = { doctor: 'Pathologist', labeler: 'Slide Registration Staff', viewer: 'Viewer' };
+const staffRoles = ['doctor', 'labeler', 'viewer'] as const;
 const dateTime = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' });
 const endpoint = '/api/auth/registration-requests';
 const pageSize = 30;
@@ -69,7 +69,7 @@ export function RegistrationRequests() {
       <tbody>{page.rows.map((row) => <tr key={row.id}>
         <td>{row.display_name}</td><td>{row.username}</td><td>{dateTime.format(new Date(row.created_at))}</td>
         <td>{row.state === 'pending' ? 'Pending' : row.state === 'approved' ? 'Approved' : 'Rejected'}</td>
-        <td>{row.role ? roleNames[row.role] : '—'}</td><td>{row.reviewed_at ? dateTime.format(new Date(row.reviewed_at)) : '—'}</td>
+        <td>{row.role ? accountRoleLabels[row.role] : '—'}</td><td>{row.reviewed_at ? dateTime.format(new Date(row.reviewed_at)) : '—'}</td>
         <td>{row.state === 'pending' && <button className="button secondary" type="button" disabled={busy}
           onClick={() => { setSelected(row); setDecisionError(''); }}>Review {row.username}</button>}</td>
       </tr>)}</tbody>
@@ -82,7 +82,7 @@ export function RegistrationRequests() {
       onSubmit={(event) => { event.preventDefault(); void decision('approve', new FormData(event.currentTarget)); }}>
       <div className="title-inline"><UserPlus size={18} aria-hidden="true" /><h3>{selected.display_name} · {selected.username}</h3></div>
       <label className="form-field">Account Role<select name="role" defaultValue="" required disabled={busy}>
-        <option value="" disabled>Select a role</option>{Object.entries(roleNames).map(([role, label]) => <option key={role} value={role}>{label}</option>)}
+        <option value="" disabled>Select a role</option>{staffRoles.map((role) => <option key={role} value={role}>{accountRoleLabels[role]}</option>)}
       </select></label>
       <label className="form-field">Applicant Confirmation Code<input name="code" autoComplete="off" required pattern="[A-Fa-f0-9]{20}" maxLength={20} disabled={busy} /></label>
       {decisionError && <p role="alert" className="form-error">{decisionError}</p>}

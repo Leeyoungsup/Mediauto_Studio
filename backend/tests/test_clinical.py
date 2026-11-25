@@ -124,6 +124,45 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
             self.assertEqual((await applicant.post(register, json=rejected)).status_code, 202)
             self.assertEqual([row["username"] for row in (await self.client.get(queue)).json()["rows"]], ["reject-me"])
 
+            directory = "/api/auth/accounts"
+            audit = "/api/auth/account-audit"
+            account = (await self.client.get(directory, params={"q": "new.applicant"})).json()["rows"][0]
+            self.assertEqual((account["role"], account["active"], account["version"]), ("doctor", True, 0))
+            self.assertNotIn("password_hash", account)
+            self.assertEqual((await applicant.get(directory)).status_code, 403)
+            self.assertEqual((await applicant.get(audit)).status_code, 403)
+            access_url = f"{directory}/{account['id']}/access"
+            change = {"role": "viewer", "active": True, "version": 0, "reason": "Synthetic access review"}
+            self.assertEqual((await applicant.patch(access_url, json=change)).status_code, 403)
+            await login(self.client, other.organization, other.username)
+            self.assertEqual((await self.client.patch(access_url, json=change)).status_code, 404)
+            self.assertEqual((await self.client.get(audit)).json()["rows"], [])
+            await login(self.client, self.org, self.user.username)
+            self.assertEqual((await self.client.patch(f"{directory}/{self.user.id}/access", json=change)).status_code, 403)
+            changed = await asyncio.gather(*(self.client.patch(access_url, json=change) for _ in range(2)))
+            self.assertEqual(sorted(result.status_code for result in changed), [200, 409])
+            self.assertEqual((await applicant.get("/api/auth/me")).status_code, 401)
+            self.assertEqual((await applicant.post("/api/auth/login", json=payload)).json()["role"], "viewer")
+            group_result = await self.client.put(f"/api/worklist/workgroups/breast/members/{account['id']}",
+                                                 json={"member": True, "version": 0})
+            self.assertEqual(group_result.status_code, 200, group_result.text)
+            disabled = await self.client.patch(access_url, json={**change, "active": False, "version": 1})
+            self.assertEqual(disabled.status_code, 200, disabled.text)
+            self.assertFalse(disabled.json()["active"])
+            self.assertEqual((await applicant.get("/api/auth/me")).status_code, 401)
+            self.assertEqual((await applicant.post("/api/auth/login", json=payload)).status_code, 401)
+            audit_response = await self.client.get(audit, params={"username": "NEW.APPLICANT"})
+            self.assertEqual(audit_response.status_code, 200, audit_response.text)
+            events = audit_response.json()["rows"]
+            self.assertEqual([event["action"] for event in events],
+                             ["account_access_changed", "workgroup_membership_changed", "account_access_changed", "registration_approved"])
+            self.assertEqual((events[1]["group_name"], events[1]["previous_member"], events[1]["member"]),
+                             ("Breast", False, True))
+            self.assertEqual((events[2]["actor"], events[2]["previous_role"], events[2]["role"], events[2]["reason"]),
+                             (self.user.username, "doctor", "viewer", "Synthetic access review"))
+            self.assertEqual([row["action"] for row in (await self.client.get(audit, params={"username": "reject-me"})).json()["rows"]],
+                             ["registration_rejected"])
+
     async def test_patient_case_specimen_slide_and_alternate_scans(self):
         case = await self.create("cases", {"case_number": "DEMO-001"})
         self.assertIsNone(case["patient_id"])

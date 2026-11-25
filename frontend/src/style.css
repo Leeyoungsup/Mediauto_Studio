@@ -810,3 +810,9 @@ dialog::backdrop { background: #21193575; }
 .registration-panel .actions [aria-pressed=true] { background: var(--accent-soft); color: var(--accent-dark); border-color: var(--accent); }
 .registration-decision { max-width: 510px; border: 1px solid var(--line); padding: 13px; border-radius: 8px; }
 .registration-code { padding: 10px; background: var(--accent-soft); color: var(--accent-dark); border-radius: 8px; font-family: monospace; font-size: 16px; overflow-wrap: anywhere; user-select: all; }
+
+.accounts-settings > .workspace-tabs { border-radius: 12px 12px 0 0; padding: 0 8px; }
+.accounts-settings .registration-panel.panel { border: 0; }
+.accounts-settings table .actions { flex-wrap: nowrap; }
+.accounts-settings [role=tabpanel] { min-width: 0; }
+.identity-role { color: var(--accent-dark); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; font-size: 11px; }
