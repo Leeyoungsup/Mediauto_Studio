@@ -117,9 +117,17 @@ try {
   await button('Restore Split View').click();
   await pane(2).waitFor();
   await canvas(2).focus();
+  await pane(2).getByRole('button', { name: 'Fit to Window', exact: true }).click();
+  await zoom(2, 5);
+  const returnCamera = await frame(2);
   await button('Open Active Scan in Single View').click();
   await page.getByRole('button', { name: /SYNTH-01.*SVS/, pressed: true }).waitFor();
   assert.equal(await page.locator('.multi-view').count(), 0);
+  await page.waitForFunction((camera) => {
+    const data = document.querySelector('.image-panel')?.dataset;
+    return data && Math.abs(Number(data.viewZoom) - camera.zoom) < 1e-6 &&
+      Math.abs(Number(data.viewCenterX) - camera.x) < 1 && Math.abs(Number(data.viewCenterY) - camera.y) < 1;
+  }, returnCamera);
 
   // A synthetic fifth candidate exercises the limit without importing an unrelated scan.
   await page.route('**/api/worklist/' + record.id, async (route) => {

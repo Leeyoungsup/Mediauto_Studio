@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, auditAttemptId, jsonBody } from './session';
 
 export type RoiLocation = { caseId: string; scanId: string; roiId: string };
@@ -29,8 +29,11 @@ function Preview({ endpoint, description }: { endpoint: string; description: str
   </div>;
 }
 
-export function RoiSearchPage({ location }: { location: RoiLocation }) {
+export function RoiSearchPage({ location, initialOrgan, onOrganChange }: {
+  location: RoiLocation; initialOrgan?: string; onOrganChange: (organ: string) => void;
+}) {
   const root = roiEndpoint(location.scanId, location.roiId);
+  const openingOrgan = useRef(initialOrgan);
   const [context, setContext] = useState<Context>();
   const [organ, setOrgan] = useState('');
   const [found, setFound] = useState<SearchResults>();
@@ -45,7 +48,9 @@ export function RoiSearchPage({ location }: { location: RoiLocation }) {
       if (controller.signal.aborted) return;
       if (data.case_id !== location.caseId) throw new Error('The ROI belongs to a different case.');
       setContext(data);
-      setOrgan(data.organ_system ?? '');
+      const remembered = openingOrgan.current;
+      setOrgan(remembered !== undefined && (remembered === '' || Object.hasOwn(data.organ_systems, remembered))
+        ? remembered : data.organ_system ?? '');
     }).catch((failure: Error) => { if (!controller.signal.aborted) setError(failure.message); });
     return () => controller.abort();
   }, [root, location.caseId, reload]);
@@ -83,12 +88,13 @@ export function RoiSearchPage({ location }: { location: RoiLocation }) {
     {context && <div className="roi-search-layout">
       <section className="panel detail-content" aria-label="Search ROI">
         <h2>Source ROI</h2>
+        <small className="scan-reference" title={location.scanId}>Scan {location.scanId.slice(0, 8)}</small>
         <Preview endpoint={root} description="Source ROI preview" />
         <p className="muted">{context.adapter}</p>
         <p>Search this case’s registered references. ROI images stay on this server. Results are for development review.</p>
         <form onSubmit={(event) => { event.preventDefault(); void update('search'); }}>
           <label className="form-field">Organ System<select value={organ} disabled={busy} required onChange={(event) => {
-            setOrgan(event.target.value); setFound(undefined); setError(''); setNotice('');
+            setOrgan(event.target.value); onOrganChange(event.target.value); setFound(undefined); setError(''); setNotice('');
           }}>
             <option value="">Select an Organ System</option>
             {Object.entries(context.organ_systems).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
@@ -113,7 +119,8 @@ export function RoiSearchPage({ location }: { location: RoiLocation }) {
           <p role="status">{found.results.length} {found.results.length === 1 ? 'match' : 'matches'} · {context.organ_systems[found.organ_system]}</p>
           <ul className="roi-search-results">{found.results.map((match) => <li key={match.roi_id}>
             <Preview endpoint={roiEndpoint(match.scan_id, match.roi_id)} description={`Match on ${match.format} slide ${match.slide}`} />
-            <div><h3>Slide {match.slide} · {match.format}</h3><a className="button secondary" href={roiViewerHref({
+            <div><h3>Slide {match.slide} · {match.format}</h3>
+              <small className="scan-reference" title={match.scan_id}>Scan {match.scan_id.slice(0, 8)}</small><a className="button secondary" href={roiViewerHref({
               caseId: location.caseId, scanId: match.scan_id, roiId: match.roi_id,
             }, location)}>Open Match in WSI</a></div>
           </li>)}</ul>

@@ -89,7 +89,7 @@ function readPage(): Page {
   }
   if (view === 'request' && id) return { view, id: decodeRoute(id) };
   if ((view === 'case' || view === 'file-case') && id) return { view: 'case', id: decodeRoute(id), files: view === 'file-case', tab: slide === 'requests' || slide === 'report' || slide === 'editor' || slide === 'notes' || slide === 'frozen' ? slide : undefined,
-    selectedScan: (slide === 'slides' || slide === 'editor') && snapshot ? decodeRoute(snapshot) : undefined };
+    selectedScan: (slide === 'slides' || slide === 'editor' || slide === 'report') && snapshot ? decodeRoute(snapshot) : undefined };
   if ((view === 'viewer' || view === 'file-viewer') && id) return { view: 'viewer', id: decodeRoute(id), slide: slide ? decodeRoute(slide) : undefined, snapshot: /^[a-f0-9]{64}$/.test(snapshot ?? '') ? snapshot : undefined, files: view === 'file-viewer' };
   return { view: 'worklist', scope: id === 'mine' || id === 'unassigned' ? id : 'all' };
 }
@@ -123,6 +123,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
   const settingsAllowed = user.role === 'admin';
   const requestAllowed = settingsAllowed || user.role === 'doctor';
   const [page, setPage] = useState(readPage);
+  const roiSearchPreference = useRef<{ roi: string; organ: string }>(undefined);
   const [navigationCollapsed, setNavigationCollapsed] = useState<boolean>();
   const collapseNavigation = navigationCollapsed ?? page.view === 'viewer';
   const settingsPage = page.view === 'settings' ? page : undefined;
@@ -514,7 +515,9 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
         {page.view === 'collections' && (requestAllowed ? <CollectionWorkspace organization={user.organization} selected={page.id} />
           : <div className="panel empty"><strong>You do not have permission to open Collections.</strong></div>)}
         {page.view === 'roi-search' && (requestAllowed
-          ? <RoiSearchPage key={`${page.location.caseId}/${page.location.scanId}/${page.location.roiId}`} location={page.location} />
+          ? <RoiSearchPage key={`${page.location.caseId}/${page.location.scanId}/${page.location.roiId}`} location={page.location}
+            initialOrgan={roiSearchPreference.current?.roi === page.location.roiId ? roiSearchPreference.current.organ : undefined}
+            onOrganChange={(organ) => { roiSearchPreference.current = { roi: page.location.roiId, organ }; }} />
           : <div className="panel empty"><strong>You do not have permission to search saved ROIs.</strong></div>)}
         {page.view === 'related-comparison' && <Suspense fallback={<p role="status">Loading comparison…</p>}>
           <RelatedComparison key={page.id + '/' + (page.anchor ?? '')} organization={user.organization} id={page.id} anchor={page.anchor} />

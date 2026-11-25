@@ -1,5 +1,5 @@
-import { ArrowUpRight, Bookmark, Check, CircleDot, Hand, LocateFixed, MapPin, Pencil, Ruler, Scan, Spline, SquareDashed, Tally5, Undo2, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { ArrowUpRight, Crosshair, Download, Search, Bookmark, Check, CircleDot, Hand, LocateFixed, MapPin, Pencil, Ruler, Scan, Spline, SquareDashed, Tally5, Undo2, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { api, auditAttemptId, jsonBody, request } from './session';
 import type { SlideInfo, Viewport } from './tile-viewer';
 
@@ -91,7 +91,7 @@ function polygonProblem(points: Point[]) {
   return Math.abs(area) <= boundsArea * 1e-12 ? 'The polygon must enclose an area.' : '';
 }
 
-export function useViewerRecords(endpoint: string, enabled: boolean, restore: (camera: Camera) => void) {
+export function useViewerRecords(endpoint: string, enabled: boolean, restore: (camera: Camera) => void, restoreOnLoad = true) {
   const [records, setRecords] = useState<Records>();
   const [draft, setDraft] = useState<Draft>();
   const [tool, setTool] = useState<Tool>('pan');
@@ -116,11 +116,11 @@ export function useViewerRecords(endpoint: string, enabled: boolean, restore: (c
     api<Records>(path, { signal: controller.signal }).then((result) => {
       if (controller.signal.aborted) return;
       setRecords(result);
-      if (result.position) restore(result.position);
+      if (restoreOnLoad && result.position) restore(result.position);
     }).catch((error) => { if (!controller.signal.aborted) failure(error); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [enabled, path, restore, attempt]);
+  }, [enabled, path, restore, attempt, restoreOnLoad]);
 
   function chooseTool(next: Tool) {
     setTool(next);
@@ -268,7 +268,7 @@ export function ViewerToolsBar({ state, view, info, onChoose }: { state: ToolSta
   </div>;
 }
 
-export function DrawingControls({ state, shortcuts }: { state: ToolState; shortcuts: boolean }) {
+export function DrawingControls({ state, shortcuts, info, preview }: { state: ToolState; shortcuts: boolean; info: SlideInfo; preview?: Geometry }) {
   const { tool, vertices, minimum } = state;
   if (tool === 'pan') return null;
   const name = tool === 'path' ? 'Multi-segment Distance' : tool === 'preset' ? 'Calibrated ROI Preset' : labels[tool];
@@ -276,9 +276,11 @@ export function DrawingControls({ state, shortcuts }: { state: ToolState; shortc
     : hasVertices(tool) ? 'Click the slide to add points.'
     : tool === 'point' || tool === 'preset' ? 'Click the slide to place the annotation.'
     : 'Drag on the slide to draw.';
+  const length = preview?.kind === 'distance' && preview.points.length > 1 ? draftLength(preview.points, info) : undefined;
   return <div className="viewer-drawing-controls" role="group" aria-label="Drawing Controls">
     <div><strong>{name}</strong>{hasVertices(tool) && <span className="drawing-point-count" aria-live="polite">{vertices.length} / 256 points</span>}</div>
     <p>{instructions}{hasVertices(tool) && shortcuts && ' Press Enter when ready.'}</p>
+    {length && <p className="drawing-length">Length Preview <strong>{length}</strong>{(!info.mpp_x || !info.mpp_y) && ' · Pixel size unavailable'}</p>}
     {state.error && <p className="drawing-error" role="alert">{state.error}</p>}
     {tool === 'preset' && <label>Preset Size <select value={state.preset} onChange={(event) => state.setPreset(Number(event.target.value))}>
       {[250, 500, 1000].map((size) => <option key={size} value={size}>{size} × {size} µm</option>)}
@@ -293,8 +295,8 @@ export function DrawingControls({ state, shortcuts }: { state: ToolState; shortc
   </div>;
 }
 
-export function AnnotationOverlay({ view, annotations, draft, drawing, guide, closeHint }: {
-  view?: Viewport; annotations: Mark[]; draft?: Draft; drawing?: Geometry; guide?: Point; closeHint?: boolean;
+export function AnnotationOverlay({ view, annotations, draft, drawing, guide, closeHint, selectedId }: {
+  view?: Viewport; annotations: Mark[]; draft?: Draft; drawing?: Geometry; guide?: Point; closeHint?: boolean; selectedId?: string;
 }) {
   if (!view || (!annotations.length && !draft && !drawing)) return null;
   const display = (item: Geometry, preview: boolean, key: string, caption?: string) => {
@@ -337,55 +339,76 @@ export function AnnotationOverlay({ view, annotations, draft, drawing, guide, cl
     </g>;
   };
   return <svg className="annotation-overlay" aria-label="Review Annotation Overlay" viewBox={`0 0 ${view.width * view.zoom} ${view.height * view.zoom}`}>
-    {annotations.map((item) => display(item, false, item.id, item.length !== null && item.unit ? formatLength(item.length, item.unit) : undefined))}
+    {annotations.map((item) => <g key={item.id} data-selected-annotation={item.id === selectedId || undefined}>
+      {display(item, false, item.id, item.length !== null && item.unit ? formatLength(item.length, item.unit) : undefined)}
+    </g>)}
     {draft && display(draft, true, draft.id)}
     {drawing && display(drawing, true, 'drawing')}
   </svg>;
 }
 
-export function ViewerRecordsPanel({ state, info, move, searchHref, onClose }: {
-  state: ToolState; info: SlideInfo; move: (points: Point[], zoom?: number | null) => void; searchHref?: (id: string) => string; onClose?: () => void;
+export function ViewerRecordsPanel({ state, info, move, searchHref, onClose, selectedId, showMarkup, onToggleMarkup }: {
+  state: ToolState; info: SlideInfo; move: (id: string, points: Point[], zoom?: number | null) => void;
+  searchHref?: (id: string) => string; onClose?: () => void; selectedId?: string; showMarkup: boolean; onToggleMarkup: () => void;
 }) {
   const { records, draft, tool, error, busy, notice } = state;
   const [includeAnnotation, setIncludeAnnotation] = useState(true);
   const [includeScale, setIncludeScale] = useState(!!info.mpp_x);
   const [newestFirst, setNewestFirst] = useState(true);
-  const annotations = newestFirst ? records?.annotations.slice().reverse() : records?.annotations;
+  const [query, setQuery] = useState('');
+  const [kind, setKind] = useState('');
+  const all = records?.annotations ?? [];
+  const annotations = all.filter((item) => (!kind || kind === item.kind)
+    && (!query.trim() || (item.label || labels[item.kind]).toLowerCase().includes(query.trim().toLowerCase())));
+  if (newestFirst) annotations.reverse();
   const [editing, setEditing] = useState<{ mark: Mark; label: string }>();
+  const draftName = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (draft?.id && !window.matchMedia('(max-width: 760px)').matches) draftName.current?.focus({ preventScroll: true });
+  }, [draft?.id]);
   return <section className="viewer-record-panel" aria-label="Review Position and Annotations">
     <div className="viewer-record-heading"><h2>Annotations</h2>
       {onClose && <button type="button" className="icon-button" aria-label="Close Annotations" title="Close Annotations" onClick={onClose}><X size={18} /></button>}
     </div>
     {error && tool === 'pan' && <div className="notice" role="alert">{error}<button className="button secondary" disabled={busy} onClick={() => { setEditing(undefined); state.refresh(); }}>Refresh Saved Records</button></div>}
     {notice && <p role="status">{notice}</p>}
+    {all.length > 0 && <label className="annotation-visibility"><input type="checkbox" checked={showMarkup} onChange={onToggleMarkup} /> Show Saved Markup</label>}
     {records?.position && <p>Saved Position {date.format(new Date(records.position.saved_at))}</p>}
     {records?.can_export && records.annotations.some((item) => exportable.has(item.kind)) && <fieldset className="roi-export-options">
       <legend>ROI Export Options</legend>
+      <p>Exports the saved ROI’s bounding box as PNG.</p>
       <label><input type="checkbox" checked={includeAnnotation} onChange={(event) => setIncludeAnnotation(event.target.checked)} /> Include ROI Annotation</label>
       <label><input type="checkbox" checked={includeScale} disabled={!info.mpp_x} onChange={(event) => setIncludeScale(event.target.checked)} /> Include Scale Bar</label>
     </fieldset>}
     {draft && <form className="viewer-record-draft" onSubmit={(event) => { event.preventDefault(); state.saveAnnotation(); }}>
       <strong>{labels[draft.kind]}{draft.kind === 'count' && ` · ${draft.points.length} points`}{draft.kind === 'distance' && ` · ${draftLength(draft.points, info)}`}</strong>
-      <label className="form-field">Annotation Name <input value={draft.label} maxLength={160} onChange={(event) => state.renameDraft(event.target.value)} /></label>
+      <label className="form-field">Annotation Name <input ref={draftName} value={draft.label} maxLength={160} onChange={(event) => state.renameDraft(event.target.value)} /></label>
       <div className="actions"><button className="button primary" disabled={busy}>Save Annotation</button>
         <button className="button secondary" type="button" disabled={busy} onClick={state.cancel}>Cancel</button></div>
     </form>}
-    {!!annotations?.length && <label className="annotation-order">Sort by <select value={newestFirst ? 'newest' : 'oldest'}
-      onChange={(event) => setNewestFirst(event.target.value === 'newest')}>
-      <option value="newest">Newest First</option><option value="oldest">Oldest First</option>
-    </select></label>}
-    {annotations?.length && records ? <ul className="viewer-record-list">{annotations.map((item) => <li key={item.id}>
+    {all.length > 0 && <div className="annotation-filters">
+      <label className="form-field">Find Annotation<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search names" /></label>
+      <label className="form-field">Annotation Type<select value={kind} onChange={(event) => setKind(event.target.value)}>
+        <option value="">All Types</option>
+        {Object.entries(labels).filter(([key]) => all.some((item) => item.kind === key)).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+      </select></label>
+      <label className="annotation-order">Sort by <select value={newestFirst ? 'newest' : 'oldest'}
+        onChange={(event) => setNewestFirst(event.target.value === 'newest')}>
+        <option value="newest">Newest First</option><option value="oldest">Oldest First</option>
+      </select></label>
+    </div>}
+    {annotations.length > 0 && records ? <ul className="viewer-record-list">{annotations.map((item) => <li key={item.id} data-selected={selectedId === item.id || undefined} aria-current={selectedId === item.id || undefined}>
       <div><strong>{item.label || labels[item.kind]}</strong>
         {item.kind === 'count' && <span> · {item.points.length} points</span>}
         {item.length !== null && item.unit && <span> · {formatLength(item.length, item.unit)}{item.unit === 'px' && ' (Pixel size unavailable)'}</span>}
         <small>{item.author} · {date.format(new Date(item.created_at))}</small>
       </div>
       <div className="actions">
-        <button className="button secondary" onClick={() => move(item.points, item.zoom)}>Go to Position</button>
+        <button className="button secondary" onClick={() => move(item.id, item.points, item.zoom)}><Crosshair size={15} aria-hidden="true" /> Go to Position</button>
         {searchHref && records.can_annotate && item.kind !== 'brush' && exportable.has(item.kind) &&
-          <a className="button secondary" href={searchHref(item.id)}>Find Similar ROIs</a>}
+          <a className="button secondary" href={searchHref(item.id)}><Search size={15} aria-hidden="true" /> Find Similar ROIs</a>}
         {records.can_export && exportable.has(item.kind) && <button className="button secondary" disabled={busy}
-          onClick={() => state.capture(item, includeAnnotation, includeScale)}>Export ROI PNG</button>}
+          onClick={() => state.capture(item, includeAnnotation, includeScale)}><Download size={15} aria-hidden="true" /> Export ROI PNG</button>}
         {records.can_annotate && item.can_delete && <>
           <button className="button secondary" disabled={busy} onClick={() => setEditing({ mark: item, label: item.label })}>Edit Name</button>
           <button className="button secondary" disabled={busy}
@@ -401,6 +424,6 @@ export function ViewerRecordsPanel({ state, info, move, searchHref, onClose }: {
         <div className="actions"><button type="submit" className="button primary" disabled={busy}>Save Name</button>
           <button type="button" className="button secondary" disabled={busy} onClick={() => setEditing(undefined)}>Cancel</button></div>
       </form>}
-    </li>)}</ul> : records && <p>No saved annotations.</p>}
+    </li>)}</ul> : records && <p>{all.length ? 'No annotations match these filters.' : 'No saved annotations.'}</p>}
   </section>;
 }

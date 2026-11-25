@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
-import { AlertTriangle, ChevronLeft, ChevronRight, Image, List, LocateFixed, Map, Minus, Pause, Play, Plus, ScanLine, Tag } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, ChevronRight, Image, List, LocateFixed, Map, Minus, Pause, Play, Plus, ScanLine, Tag, Tally5 } from 'lucide-react';
 import type { WsiScan } from './demo';
 import { api, auditAttemptId, jsonBody, request } from './session';
 import { ViewerAnalysis } from './viewer-analysis';
@@ -69,6 +69,8 @@ export type PaneComparison = {
 type ViewerOptions = {
   settings: ViewerSettings;
   active: boolean;
+  onCamera?: (camera: Camera) => void;
+  reportHref?: string;
   position: { index: number; total: number };
   previous?: () => void;
   next?: () => void;
@@ -119,8 +121,8 @@ function useCanvasFit(enabled: boolean) {
 
 const autopanVectors = { right: [-1, 0], left: [1, 0], down: [0, -1], up: [0, 1] } as const;
 
-export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint, initialSnapshot, initialRoi, roiCaseId, options, sharedReview, extraAction, analysis }: {
-  scan: WsiScan; label: string; stain: string; comparison?: PaneComparison; readOnlyEndpoint?: string; initialSnapshot?: string; initialRoi?: string; roiCaseId?: string; options?: ViewerOptions;
+export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint, initialSnapshot, initialRoi, initialCamera, roiCaseId, options, sharedReview, extraAction, analysis }: {
+  scan: WsiScan; label: string; stain: string; comparison?: PaneComparison; readOnlyEndpoint?: string; initialSnapshot?: string; initialRoi?: string; initialCamera?: Camera; roiCaseId?: string; options?: ViewerOptions;
   extraAction?: ReactNode;
   analysis?: { caseEndpoint: string; open: boolean; change: (open: boolean) => void };
   sharedReview?: { locked: boolean; camera?: Camera; onFrame: (camera: Camera) => void };
@@ -132,11 +134,18 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   const focusedRoi = useRef<string>(undefined);
   const [roiUnavailable, setRoiUnavailable] = useState(false);
   const renderer = useRef<TileViewer | null>(null);
+  const onCamera = useRef(options?.onCamera);
+  onCamera.current = options?.onCamera;
   const drag = useRef<{ id: number; x: number; y: number } | null>(null);
   const drawing = useRef<{ id: number; kind: Geometry['kind']; points: Point[] } | null>(null);
   const [preview, setPreview] = useState<Geometry>();
-  const [polygonGuide, setPolygonGuide] = useState<Point>();
+  const [vertexGuide, setVertexGuide] = useState<Point>();
   const [annotationsOpen, setAnnotationsOpen] = useState(false);
+  const [showMarkup, setShowMarkup] = useState(true);
+  const [selectedAnnotation, setSelectedAnnotation] = useState<string>();
+  const [lymphOpen, setLymphOpen] = useState(false);
+  const lymphButton = useRef<HTMLButtonElement>(null);
+  const lymphDock = useRef<HTMLDivElement>(null);
   const annotationsButton = useRef<HTMLButtonElement>(null);
   const annotationsDock = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<Viewport>();
@@ -197,11 +206,21 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       renderer.current?.restoreCamera(camera);
     }
   }, [compareMode]);
-  const viewerRecords = useViewerRecords(endpoint, Boolean(info) && !readOnlyEndpoint, restoreCamera);
+  const entryCamera = useRef(initialCamera);
+  const initialFocusApplied = useRef(false);
+  const viewerRecords = useViewerRecords(endpoint, Boolean(info) && !readOnlyEndpoint, restoreCamera, !entryCamera.current);
+  useEffect(() => {
+    if (!info || !entryCamera.current || following || initialFocusApplied.current) return;
+    initialFocusApplied.current = true;
+    restoreCamera(entryCamera.current);
+  }, [info, following, restoreCamera]);
 
   const { tool, draft, notice: recordNotice, error: recordError } = viewerRecords;
   useEffect(() => {
-    if (draft || recordNotice || (recordError && tool === 'pan')) setAnnotationsOpen(true);
+    if (draft || recordNotice || (recordError && tool === 'pan')) {
+      setAnnotationsOpen(true);
+      setLymphOpen(false);
+    }
   }, [draft, recordNotice, recordError, tool]);
 
   useEffect(() => {
@@ -210,14 +229,21 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     }
   }, [draft?.id, annotationsOpen]);
 
+  useEffect(() => {
+    if (lymphOpen && window.matchMedia('(max-width: 760px)').matches) {
+      lymphDock.current?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [lymphOpen]);
+
   function chooseReviewTool(next: Tool) {
     setAutopan(false);
     ihc.setPicking(false);
     skin.setMode(undefined);
-    setPolygonGuide(undefined);
+    setVertexGuide(undefined);
     viewerRecords.chooseTool(next);
     if (next !== 'pan') {
       setAnnotationsOpen(false);
+      setLymphOpen(false);
       if (analysis?.open) analysis.change(false);
     }
     canvas.current?.focus({ preventScroll: true });
@@ -251,7 +277,10 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     focusedRoi.current = initialRoi;
     const match = viewerRecords.records.annotations.find((item) => item.id === initialRoi &&
       ['rectangle', 'ellipse', 'polygon'].includes(item.kind));
-    if (match) restoreCamera(cameraFor(match.points, view));
+    if (match) {
+      setSelectedAnnotation(match.id);
+      if (!entryCamera.current) restoreCamera(cameraFor(match.points, view));
+    }
     setRoiUnavailable(!match);
   }, [initialRoi, view, viewerRecords.records, restoreCamera]);
 
@@ -301,6 +330,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
           if (viewer) {
             report.current?.onFrame(viewer.cameraFrame(), metadata);
             reviewFrame.current?.onFrame(viewer.cameraFrame());
+            onCamera.current?.(viewer.cameraFrame());
           }
         }, (status) => {
           setTileStatus(status);
@@ -427,10 +457,23 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   const toggleMinimap = options?.toggleMinimap ?? (() => setShowNavigator(!showNavigator));
   const canReview = info && !compareMode && !readOnlyEndpoint && !following;
   const reviewTools = canReview && <ViewerToolsBar state={viewerRecords} view={view} info={info} onChoose={chooseReviewTool} />;
+  const canCountLymph = info && !compareMode && !readOnlyEndpoint && !following
+    && scan.source === 'clinical' && viewerRecords.records?.can_annotate;
+  const drawingPreview: Geometry | undefined = preview ?? (viewerRecords.vertices.length ? {
+    kind: tool === 'polygon' ? 'polygon' : tool === 'count' ? 'count' : 'distance',
+    points: tool === 'path' && vertexGuide ? [...viewerRecords.vertices, vertexGuide] : viewerRecords.vertices,
+  } : undefined);
   const recordsPanel = canReview && <ViewerRecordsPanel state={viewerRecords} info={info}
+    selectedId={selectedAnnotation} showMarkup={showMarkup} onToggleMarkup={() => setShowMarkup(!showMarkup)}
     onClose={options ? () => { setAnnotationsOpen(false); annotationsButton.current?.focus({ preventScroll: true }); } : undefined}
     searchHref={roiCaseId && scan.source === 'clinical' ? (roiId) => roiSearchHref({ caseId: roiCaseId, scanId: scan.id, roiId }) : undefined}
-    move={(points, zoom) => { if (view) navigate((viewer) => viewer.restoreCamera(cameraFor(points, view, zoom))); }} />;
+    move={(id, points, zoom) => {
+      if (!view) return;
+      setSelectedAnnotation(id);
+      setShowMarkup(true);
+      navigate((viewer) => viewer.restoreCamera(cameraFor(points, view, zoom)));
+      if (options && window.matchMedia('(max-width: 760px)').matches) canvas.current?.focus();
+    }} />;
   function closeAnalysis() {
     analysis?.change(false);
     analysisButton.current?.focus({ preventScroll: true });
@@ -475,13 +518,20 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       </div> : <span><ScanLine size={17} /> {label} <span className="image-stain">{stain} · {scan.format}</span></span>}
       <div className={options ? 'image-actions viewer-scan-actions' : 'image-actions'}>{analysis && <button type="button" ref={analysisButton} className="button primary"
         aria-expanded={analysis.open} aria-controls={analysis.open ? 'viewer-analysis-panel' : undefined}
-        onClick={() => analysis.change(!analysis.open)}>Analysis</button>}{extraAction}
+        onClick={() => { setLymphOpen(false); analysis.change(!analysis.open); }}>Analysis</button>}{extraAction}
         {options && canReview && <button type="button" ref={annotationsButton} className="button secondary viewer-annotations-toggle"
           aria-expanded={annotationsOpen && !analysis?.open}
           onClick={() => {
+            setLymphOpen(false);
             if (analysis?.open) { analysis.change(false); setAnnotationsOpen(true); }
             else setAnnotationsOpen(!annotationsOpen);
           }}><List size={17} aria-hidden="true" /> Annotations{viewerRecords.records?.annotations.length ? <small aria-hidden="true">{viewerRecords.records.annotations.length}</small> : null}</button>}
+        {options && canCountLymph && <button ref={lymphButton} type="button" className="button secondary"
+          aria-expanded={lymphOpen && !analysis?.open} onClick={() => {
+            setAnnotationsOpen(false);
+            if (analysis?.open) analysis.change(false);
+            setLymphOpen(!lymphOpen || !!analysis?.open);
+          }}><Tally5 size={16} aria-hidden="true" /> Lymph Node Count</button>}
         {canOpenSlideReview && <button type="button" className="button secondary" aria-expanded={showPapReview}
           onClick={() => setShowPapReview((open) => !open)}>Pap Review</button>}
         {canOpenSlideReview && <button type="button" className="button secondary" aria-expanded={showPap}
@@ -548,13 +598,13 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
             }
             return;
           }
-          if (!following && tool === 'polygon' && viewerRecords.vertices.length) setPolygonGuide(getPoint(event, false) ?? undefined);
+          if (!following && (tool === 'polygon' || tool === 'path') && viewerRecords.vertices.length) setVertexGuide(getPoint(event, false) ?? undefined);
           const last = drag.current;
           if (following || !last || last.id !== event.pointerId) return;
           navigate((viewer) => viewer.pan(event.clientX - last.x, event.clientY - last.y));
           drag.current = { id: last.id, x: event.clientX, y: event.clientY };
         }}
-        onPointerLeave={() => setPolygonGuide(undefined)}
+        onPointerLeave={() => setVertexGuide(undefined)}
         onPointerUp={(event) => {
           const gesture = drawing.current;
           if (gesture?.id !== event.pointerId) return;
@@ -623,10 +673,9 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
           width={(pap.selected.bounds[2] - pap.selected.bounds[0]) * view.zoom}
           height={(pap.selected.bounds[3] - pap.selected.bounds[1]) * view.zoom} />
       </svg>}
-      <AnnotationOverlay view={view} annotations={viewerRecords.records?.annotations ?? []} draft={viewerRecords.draft} guide={polygonGuide} closeHint={!!polygonGuide && nearPolygonStart(polygonGuide)} drawing={preview ?? (viewerRecords.vertices.length ? {
-        kind: viewerRecords.tool === 'polygon' ? 'polygon' : viewerRecords.tool === 'count' ? 'count' : 'distance',
-        points: viewerRecords.vertices,
-      } : undefined)} />
+      <AnnotationOverlay view={view} annotations={showMarkup ? viewerRecords.records?.annotations ?? [] : []}
+        draft={viewerRecords.draft} drawing={drawingPreview} selectedId={selectedAnnotation}
+        guide={tool === 'polygon' ? vertexGuide : undefined} closeHint={!!vertexGuide && nearPolygonStart(vertexGuide)} />
       {view && !!comparison?.landmarks?.length && <svg className="annotation-overlay" aria-label="Tissue Landmarks"
         viewBox={`0 0 ${view.width * view.zoom} ${view.height * view.zoom}`}>
         {comparison.landmarks.map(([x, y], index) => <text className="annotation-length" key={index}
@@ -651,13 +700,17 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         </div>}
       </aside>}
       {info && <ScaleBar mpp={info.mpp_x} zoom={view?.zoom} />}
-      {canReview && <DrawingControls state={viewerRecords} shortcuts={settings?.shortcuts !== false} />}
+      {canReview && <DrawingControls state={viewerRecords} info={info} preview={drawingPreview} shortcuts={settings?.shortcuts !== false} />}
       {options && reviewTools && <div className="viewer-tool-dock">{reviewTools}</div>}
     </div>
     {canOpenSlideReview && showPap && <Suspense fallback={<p role="status">Loading Pap Gallery…</p>}>
       <PapGallery state={pap} following={following} />
     </Suspense>}
     {options && annotationsOpen && !analysis?.open && recordsPanel && <div className="viewer-annotations-dock" ref={annotationsDock}>{recordsPanel}</div>}
+    {options && lymphOpen && !analysis?.open && canCountLymph && <div className="viewer-annotations-dock viewer-count-dock" ref={lymphDock}>
+      <LymphCounts endpoint={endpoint} scanId={scan.id} reportHref={options.reportHref}
+        onClose={() => { setLymphOpen(false); lymphButton.current?.focus({ preventScroll: true }); }} />
+    </div>}
     {analysis?.open && <ViewerAnalysis caseEndpoint={analysis.caseEndpoint} scanId={scan.id} label={label} stain={stain}
       onClose={closeAnalysis} onResult={(id) => {
         pdl1.setSelected(id);
@@ -694,8 +747,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       }} />}
     {roiUnavailable && <p className="notice" role="status">The linked ROI is unavailable. The scan is still open.</p>}
     {!options && recordsPanel}
-    {info && !compareMode && !readOnlyEndpoint && scan.source === 'clinical' && viewerRecords.records?.can_annotate &&
-      <LymphCounts endpoint={endpoint} />}
+    {!options && canCountLymph && <LymphCounts endpoint={endpoint} scanId={scan.id} />}
     {info && !compareMode && !readOnlyEndpoint && <Pdl1Panel state={pdl1} />}
     {info && !compareMode && !readOnlyEndpoint && <IhcPanel state={ihc} readOnly={following}
       onPickStart={() => { setAutopan(false); skin.setMode(undefined); viewerRecords.chooseTool('pan'); }} />}

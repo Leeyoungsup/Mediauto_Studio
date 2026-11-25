@@ -12,6 +12,7 @@ import { ImageViewport } from './image-viewport';
 import { PatientHistory } from './patient-history';
 import { MultiView } from './multi-view';
 import { ViewerSettingsPanel, useViewerPreferences } from './viewer-preferences';
+import type { Camera as SlideCamera } from './viewer-tools';
 import { ScanReference, SlidePreview, StatusLabel } from './worklist';
 
 import { WorkspaceTabs } from './workspace-tabs';
@@ -37,6 +38,8 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
   useEffect(() => { if (inReview) setComparing(false); }, [inReview]);
   const root = useRef<HTMLElement>(null);
   const trayList = useRef<HTMLDivElement>(null);
+  const singleCamera = useRef<{ id: string; camera: SlideCamera }>(undefined);
+  const [returnCamera, setReturnCamera] = useState<{ id: string; camera: SlideCamera }>();
   const preferences = useViewerPreferences();
   const { settings, change } = preferences;
   const trayVisible = settings.tray_visible;
@@ -79,8 +82,9 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
   const slide = requested
     ? item.slides.find(({ id }) => id === requested)
     : item.slides.find(({ wsi }) => wsi) ?? item.slides[0];
-  function selectSlide(id: string) {
+  function selectSlide(id: string, camera?: SlideCamera) {
     setReviewSelection(undefined);
+    setReturnCamera(camera ? { id, camera } : undefined);
     onSlide(id);
   }
 
@@ -155,15 +159,17 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
     {review.open && reviewEndpoint && <CollaborativeReview review={review} />}
     <div id="viewer-workspace-panel" role="tabpanel" aria-labelledby={'viewer-workspace-panel-tab-' + activeTab} className="viewer-stage" data-document={isDocument}>
       <div inert={isDocument} className="viewer-scan-stage">
-    {comparing ? <MultiView slides={available} primary={slide?.id} onClose={() => setComparing(false)}
-      onSingle={(id) => { selectSlide(id); setComparing(false); }} /> : <div className="viewer-layout" data-tray={trayVisible} data-orientation={settings.tray_orientation}>
+    {comparing ? <MultiView slides={available} primary={slide?.id} onClose={() => {
+      setReturnCamera(singleCamera.current);
+      setComparing(false);
+    }} onSingle={(id, camera) => { selectSlide(id, camera); setComparing(false); }} /> : <div className="viewer-layout" data-tray={trayVisible} data-orientation={settings.tray_orientation}>
       <aside className="panel viewer-tray" id="viewer-slide-tray" hidden={!trayVisible}><div className="panel-title"><h2>Slide Tray</h2><span className="count" title="Viewable scans">{available.length}/{item.slides.length}</span></div>
         <div ref={trayList} className="tray-items" data-gallery={settings.gallery}>{item.slides.map((entry) => <button className="tray-item" data-scan-id={entry.wsi?.id} key={entry.id} onClick={() => selectSlide(entry.id)} aria-pressed={slide?.id === entry.id} disabled={!entry.wsi || review.following}>
           <span className="slide-image"><SlidePreview slide={entry} /></span><span className="tray-scan-label"><strong>{entry.label ?? entry.id}</strong><small>{entry.wsi?.format ?? entry.state} · {entry.stain}</small><ScanReference scan={entry.wsi} /></span>
         </button>)}</div>
       </aside>
       {slide?.wsi ? <ImageViewport key={slide.wsi.id + ':' + (initialSnapshot ?? initialRoi ?? '')} scan={slide.wsi} initialSnapshot={initialSnapshot}
-        initialRoi={initialRoi} roiCaseId={requestsHref && item.recordId ? item.recordId : undefined} label={slide.label ?? slide.id} stain={slide.stain}
+        initialRoi={initialRoi} initialCamera={returnCamera?.id === slide.id ? returnCamera.camera : undefined} roiCaseId={requestsHref && item.recordId ? item.recordId : undefined} label={slide.label ?? slide.id} stain={slide.stain}
         analysis={analysisEndpoint && slide.wsi.source === 'clinical' && !review.following ?
           { caseEndpoint: analysisEndpoint, open: analysisOpen, change: (open) => selectTab(open ? 'analysis' : 'slides') } : undefined}
         sharedReview={reviewEndpoint ? {
@@ -173,7 +179,10 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
         } : undefined}
         extraAction={relatedEndpoint && item.recordId ? <RelatedCasesControl compact endpoint={relatedEndpoint}
           caseId={item.recordId} scanId={slide.wsi.id} /> : undefined}
-        options={{ settings, active: !isDocument, position: { index: slideIndex + 1, total: item.slides.length }, toggleFullscreen, toggleGallery,
+        options={{ settings, active: !isDocument,
+          onCamera: (camera) => { singleCamera.current = { id: slide.id, camera }; },
+          reportHref: requestsHref?.replace(/\/requests$/, '/report/' + encodeURIComponent(slide.id)),
+          position: { index: slideIndex + 1, total: item.slides.length }, toggleFullscreen, toggleGallery,
           previous: previous && !review.following ? () => selectSlide(previous.id) : undefined,
           next: next && !review.following ? () => selectSlide(next.id) : undefined,
           toggleMinimap: () => change('show_minimap', !settings.show_minimap),

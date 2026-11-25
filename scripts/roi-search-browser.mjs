@@ -88,6 +88,13 @@ try {
 
   await results.getByRole('link', { name: 'Open Match in WSI' }).click();
   await openAt(target);
+  await page.locator(`[data-selected-annotation="true"] [data-record="${target.result.id}"]`).waitFor();
+  await page.getByRole('link', { name: 'Return to ROI Search' }).click();
+  await sourceImage.waitFor();
+  assert.equal(await organ.inputValue(), 'digestive');
+  await button(page, 'Search Similar ROIs').click();
+  await results.getByRole('link', { name: 'Open Match in WSI' }).click();
+  await openAt(target);
   await page.getByRole('link', { name: 'Back to Source ROI' }).click();
   await openAt(source);
   const logs = await checked(page.request.get('/api/clinical/local/cases/' + caseId + '/logs', { params: {

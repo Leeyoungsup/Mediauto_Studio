@@ -1,11 +1,14 @@
+import { X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api, auditAttemptId, jsonBody } from './session';
 
-type Count = { id: string; version: number; positive: number; total: number; reason: string | null; created_at: string };
+type Count = { id: string; scan_id: string; version: number; positive: number; total: number; reason: string | null; created_at: string };
 type CountData = { specimen: string; history: Count[] };
 const dates = new Intl.DateTimeFormat('en-US', { dateStyle: 'short', timeStyle: 'short' });
 
-export function LymphCounts({ endpoint }: { endpoint: string }) {
+export function LymphCounts({ endpoint, scanId, onClose, reportHref }: {
+  endpoint: string; scanId: string; onClose?: () => void; reportHref?: string;
+}) {
   const path = endpoint + '/lymph-node-counts';
   const [data, setData] = useState<CountData>();
   const [positive, setPositive] = useState(0);
@@ -30,13 +33,15 @@ export function LymphCounts({ endpoint }: { endpoint: string }) {
     return () => controller.abort();
   }, [path, revision]);
 
-  return <details className="viewer-record-panel lymph-counts">
-    <summary>Lymph Node Count{current && ` · ${current.positive} / ${current.total}`}</summary>
+  const heading = `Lymph Node Count${current ? ' · ' + current.positive + ' / ' + current.total : ''}`;
+  const content = <>
     {error && <p role="alert" className="form-error">{error} <button className="button secondary" type="button"
       onClick={() => setRevision(revision + 1)}>Reload Count</button></p>}
     {notice && <p role="status">{notice}</p>}
+    {!data && !error && <p role="status">Loading specimen count…</p>}
     {data && <>
-      <p>Specimen {data.specimen} · Manual Positive / Total</p>
+      <p><strong>Specimen {data.specimen}</strong> · Manual Positive / Total</p>
+      <p className="muted">This count is shared by scans of the same specimen. Current scan {scanId.slice(0, 8)}.</p>
       <form aria-label="Lymph Node Count" onSubmit={async (event) => {
         event.preventDefault();
         setBusy(true); setError(''); setNotice('');
@@ -61,10 +66,18 @@ export function LymphCounts({ endpoint }: { endpoint: string }) {
           {current ? 'Save Count Correction' : 'Save Lymph Node Count'}
         </button>
       </form>
+      {current && reportHref && <a className="button secondary" href={reportHref}>Open Report Draft</a>}
       {data.history.length > 0 && <ul className="timeline">{data.history.map((row) => <li key={row.id}>
         <strong>Version {row.version} · {row.positive} / {row.total}</strong> · {dates.format(new Date(row.created_at))}
+        <p title={row.scan_id}>Recorded on scan {row.scan_id.slice(0, 8)}{row.scan_id === scanId ? ' (current scan)' : ''}</p>
         {row.reason && <p>{row.reason}</p>}
       </li>)}</ul>}
     </>}
-  </details>;
+  </>;
+  return onClose ? <section className="viewer-record-panel lymph-counts" aria-label="Specimen Lymph Node Count">
+    <div className="viewer-record-heading"><h2>{heading}</h2>
+      <button type="button" className="icon-button" aria-label="Close Lymph Node Count" title="Close Lymph Node Count" onClick={onClose}><X size={18} /></button>
+    </div>
+    {content}
+  </section> : <details className="viewer-record-panel lymph-counts"><summary>{heading}</summary>{content}</details>;
 }
