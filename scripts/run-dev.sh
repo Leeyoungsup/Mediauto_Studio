@@ -70,8 +70,10 @@ if [[ -z ${MEDIAUTO_TESSERACT:-} ]]; then
     if [[ -x "$ocr_binary" ]]; then export MEDIAUTO_TESSERACT="$ocr_binary"; fi
 fi
 
+# libtiff repairs this missing metadata terminator in memory each time a scan opens.
 "$python" -s -m uvicorn app.main:app --no-access-log \
     --host "${MEDIAUTO_HOST:-0.0.0.0}" --port "${MEDIAUTO_PORT:-9920}" \
-    --proxy-headers --forwarded-allow-ips 127.0.0.1 &
+    --proxy-headers --forwarded-allow-ips 127.0.0.1 \
+    2> >(sed -u '/^TIFFFetchNormalTag: Warning, ASCII value for tag "ImageDescription" does not end in null byte\. Forcing it to be null\.$/d' >&2) &
 server_pid=$!
 wait "$server_pid"
