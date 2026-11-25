@@ -40,8 +40,8 @@ export function SkinOverlay({ state, view }: { state: State; view?: Viewport }) 
   </svg>;
 }
 
-export function SkinPanel({ state, following, focus, activate }: { state: State; following: boolean; focus: (points: Point[]) => void;
-  activate: (mode: 'window' | 'add') => void }) {
+export function SkinPanel({ state, following, focus, activate, onSlide }: { state: State; following: boolean; focus: (points: Point[]) => void;
+  activate: (mode: 'window' | 'add') => void; onSlide: () => void }) {
   const { data, review, field, model } = state;
   const [page, setPage] = useState(0);
   const canEdit = Boolean(data?.can_review) && !following;
@@ -51,7 +51,10 @@ export function SkinPanel({ state, following, focus, activate }: { state: State;
   const labelsFor = (item: CountField, index: number) => item.manual ? `Manual Count Field ${index + 1}` : item.id;
   return <section className="pdl1-panel skin-review" aria-label="Skin and Melanoma Review">
     <div className="pdl1-heading"><h2>Skin and Melanoma Review</h2>
-      {data && <button type="button" className="button secondary" disabled={state.busy} onClick={state.refresh}>Reload Skin Review</button>}
+      <div className="actions">
+        <button type="button" className="button secondary" onClick={onSlide}>Return to WSI</button>
+        {data && <button type="button" className="button secondary" disabled={state.busy} onClick={state.refresh}>Reload Skin Review</button>}
+      </div>
     </div>
     {state.failed ? <p role="alert">Unable to load skin review. <button className="button secondary" onClick={state.refresh}>Retry</button></p>
       : !data ? <p role="status">Loading skin review…</p>

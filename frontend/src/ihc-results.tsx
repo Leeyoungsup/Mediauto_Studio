@@ -231,15 +231,22 @@ function ReviewForm({ state, details, onPickStart }: { state: IhcState; details:
   </form>;
 }
 
-export function IhcPanel({ state, readOnly, onPickStart }: { state: IhcState; readOnly: boolean; onPickStart: () => void }) {
+export function IhcPanel({ state, readOnly, onPickStart, showEmpty, caseRequestsHref, onSlide }: {
+  state: IhcState; readOnly: boolean; onPickStart: () => void; showEmpty?: boolean; caseRequestsHref?: string; onSlide: () => void;
+}) {
   const { source, details } = state;
   const grades = classLabels(source);
-  if (!source && !state.failed) return null;
+  if (!source && !state.failed && !showEmpty) return null;
   return <section className="pdl1-panel ihc-panel" aria-label="IHC Results">
     <div className="pdl1-heading"><h2>{source ? markers[source.marker] + ' Results' : 'IHC Results'}</h2>
-      <label className="pdl1-toggle"><input type="checkbox" checked={state.enabled} onChange={(event) => state.setEnabled(event.target.checked)} /> IHC Cell Overlay</label>
+      <div className="actions">
+        {source && <label className="pdl1-toggle"><input type="checkbox" checked={state.enabled} onChange={(event) => state.setEnabled(event.target.checked)} /> IHC Cell Overlay</label>}
+        <button type="button" className="button secondary" onClick={onSlide}>Return to WSI</button>
+      </div>
     </div>
     {state.failed && <p className="notice" role="alert">Unable to load IHC results or cell markers. <button className="button secondary" onClick={state.reload}>Retry IHC</button></p>}
+    {!source && !state.failed && (state.results ? <p>No IHC result is linked to this scan.</p> : <p role="status">Checking IHC results…</p>)}
+    {source && caseRequestsHref && <div className="actions"><a className="button secondary" href={caseRequestsHref}>IHC Review and Best Block</a></div>}
     {source && <div className="ihc-controls">
       {(state.results?.length ?? 0) > 1 && <label className="form-field">IHC Source Analysis
         <select value={source.id} onChange={(event) => state.selectSource(event.target.value)}>

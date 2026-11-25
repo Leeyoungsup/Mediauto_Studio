@@ -98,6 +98,11 @@ try {
     await p.locator('svg[aria-label="Selected Pap Candidate"] rect').waitFor({ state: 'attached' });
   }
   await checkCenter(page);
+  await panel.getByRole('button', { name: 'Open Pap Review', exact: true }).click();
+  const review = page.getByRole('region', { name: 'Pap Specimen Review', exact: true });
+  await review.getByText(/^Selected Candidate · Cell-21/).waitFor();
+  await review.getByRole('button', { name: 'Return to Pap Candidates' }).click();
+  await checkCenter(page);
   await panel.getByText('Model and Candidate Source', { exact: true }).click();
   await panel.getByText('Synthetic Pap Adapter · qa-model-1', { exact: true }).waitFor();
   await read(page.request.put(route + '/selection', { data: {

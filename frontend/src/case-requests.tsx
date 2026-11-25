@@ -75,8 +75,8 @@ function Candidates({ candidates, required = false, initial }: { candidates: Can
   </select></label>;
 }
 
-export function CaseRequests({ organization, item, sourceScan, collectionOrigin, inViewer = false }: {
-  organization: string; item: DemoCase; sourceScan?: string; collectionOrigin?: CollectionOrigin; inViewer?: boolean;
+export function CaseRequests({ organization, item, sourceScan, collectionOrigin, focusIhc, inViewer = false }: {
+  organization: string; item: DemoCase; sourceScan?: string; collectionOrigin?: CollectionOrigin; focusIhc?: boolean; inViewer?: boolean;
 }) {
   const path = pathFor(organization) + '/cases/' + item.recordId + '/requests';
   const resource = useResource<{ requests: CaseRequest[]; candidates: Record<Kind, Candidate[]> }>(path);
@@ -142,7 +142,7 @@ export function CaseRequests({ organization, item, sourceScan, collectionOrigin,
       <a href={requestHref(row.id)}><strong>{requestName(row)} · {requestStatus(row)}</strong><span>{row.question}</span></a>
       <small>{row.assignee_name ?? 'Unassigned'} · {time(row.updated_at)}</small>
     </li>)}</ul> : <p className="empty-inline">This case has no requests.</p>}
-    {!inViewer && item.recordId && <IhcReviews endpoint={pathFor(organization) + '/cases/' + item.recordId + '/ihc-reviews'} caseId={item.recordId} />}
+    {!inViewer && item.recordId && <IhcReviews key={sourceScan} initialScan={sourceScan} focus={focusIhc} endpoint={pathFor(organization) + '/cases/' + item.recordId + '/ihc-reviews'} caseId={item.recordId} />}
   </section>;
 }
 
@@ -169,8 +169,8 @@ export function ReportDraftReferences({ organization, caseId }: { organization: 
   </section>;
 }
 
-export function RequestPage({ organization, id, sourceScan, collectionOrigin }: {
-  organization: string; id: string; sourceScan?: string; collectionOrigin?: CollectionOrigin;
+export function RequestPage({ organization, id, sourceScan, fromAnalysis, collectionOrigin }: {
+  organization: string; id: string; sourceScan?: string; fromAnalysis?: boolean; collectionOrigin?: CollectionOrigin;
 }) {
   const path = pathFor(organization) + '/requests/' + encodeURIComponent(id);
   const resource = useResource<RequestDetail>(path);
@@ -204,13 +204,13 @@ export function RequestPage({ organization, id, sourceScan, collectionOrigin }: 
   if (!row) return <ResourceStatus error={resource.error} retry={resource.refresh} />;
   const caseRequests = row.case_id ? withCollection(caseHref(row.case_id, 'requests', sourceScan ?? row.scan_id ?? undefined), collectionOrigin) : '#worklist/all';
   const backToViewer = row.case_id && sourceScan
-    ? withCollection(`#viewer/${row.case_id}/${sourceScan}?requests=1`, collectionOrigin) : undefined;
-  const preferences = withCollection(`#settings/notifications?request=${id}${sourceScan ? '&scan=' + sourceScan : ''}`, collectionOrigin);
+    ? withCollection(`#viewer/${row.case_id}/${sourceScan}?${fromAnalysis ? 'analysis' : 'requests'}=1`, collectionOrigin) : undefined;
+  const preferences = withCollection(`#settings/notifications?request=${id}${sourceScan ? '&scan=' + sourceScan + (fromAnalysis ? '&return=analysis' : '') : ''}`, collectionOrigin);
   return <>
     <a className="back-link" href={caseRequests}>{row.case_id ? 'Case Requests' : 'Worklist'}</a>
     <div className="page-heading"><div><h1>{requestName(row)} Requests</h1><p>{row.case_number}</p></div>
       <div className="actions">
-        {backToViewer && <a className="button secondary" href={backToViewer}><ScanLine size={16} /> Back to Viewer Requests</a>}
+        {backToViewer && <a className="button secondary" href={backToViewer}><ScanLine size={16} /> {fromAnalysis ? 'Back to Slide Analysis' : 'Back to Viewer Requests'}</a>}
         <a className="button secondary" href={preferences}><Bell size={16} /> Notification Preferences</a>
         <button className="button secondary" onClick={() => { setAction(undefined); setError(''); resource.refresh(); }}>Refresh Request</button>
       </div></div>

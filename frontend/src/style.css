@@ -1008,3 +1008,13 @@ dialog::backdrop { background: #21193575; }
   .viewer-stage > .review-room { position: absolute; z-index: 9; inset: 8px 8px auto auto; width: min(540px, 100% - 16px); max-height: min(520px, 70dvh); overflow: auto; box-shadow: 0 10px 25px #25133626; }
   .viewer-stage > .review-room .review-room-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); }
 }
+
+.clinical-panel-focus:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+.clinical-panel-context { color: var(--muted); font-size: 13px; }
+.pap-gallery-dock { min-width: 0; min-height: 0; display: grid; }
+.pap-gallery > .panel-title { flex-wrap: wrap; }
+.analysis-method-summary, .analysis-unavailable-methods { border: 1px solid var(--line); padding: 8px; border-radius: 6px; }
+.analysis-unavailable-methods > div { margin-top: 5px; }
+.analysis-run-state[data-state="queued"], .analysis-run-state[data-state="running"] { color: var(--accent-dark); }
+.analysis-run-state[data-state="failed"] { color: #a12645; }
+.related-pane-heading small { color: var(--muted); }

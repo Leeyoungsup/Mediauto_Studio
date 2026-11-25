@@ -15,8 +15,8 @@ const label = (scan: Scan) => `${scan.case_number} · Specimen ${scan.specimen_n
 const reference = (scan: Scan) => ({ case_id: scan.case_id, specimen_id: scan.specimen_id, scan_id: scan.id, token: scan.token });
 const statusText = { revoked: 'Unlinked', confirmed: 'Confirmed', unavailable: 'Reconciliation Required' };
 
-export default function RelatedCasesDialog({ endpoint, caseId, scanId, onClose }: {
-  endpoint: string; caseId: string; scanId?: string; onClose: () => void;
+export default function RelatedCasesDialog({ endpoint, caseId, scanId, fromPapReview, onClose }: {
+  endpoint: string; caseId: string; scanId?: string; fromPapReview?: boolean; onClose: () => void;
 }) {
   const modal = useRef<HTMLDialogElement>(null);
   const [data, setData] = useState<Feed>();
@@ -140,7 +140,7 @@ export default function RelatedCasesDialog({ endpoint, caseId, scanId, onClose }
           <p>{link.reason}</p>
           {link.revoked_at && <p>Unlinked by {link.revoked_by} · {date.format(new Date(link.revoked_at))} · {link.revoke_reason}</p>}
           <div className="actions">
-            {link.status === 'confirmed' && <a className="button secondary" href={`#related-comparison/${link.id}/${caseId}`}
+            {link.status === 'confirmed' && <a className="button secondary" href={`#related-comparison/${link.id}/${caseId}${fromPapReview ? '?pap=review' + (scanId ? '&scan=' + encodeURIComponent(scanId) : '') : ''}`}
               target="_blank" rel="noopener">Open Independent Comparison</a>}
             {link.status !== 'revoked' && <button className="button secondary" type="button" disabled={busy}
               onClick={() => { setRevoking(link); setRevokeReason(''); }}>Unlink</button>}

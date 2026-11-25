@@ -136,13 +136,35 @@ try {
   await button(analysis, 'Run Analysis').click();
   const completed = analysis.locator('li').filter({ hasText: /PD-L1 CPS Archive Replay.*Completed · Attempt 1/ });
   await button(completed, 'Show Result on Slide').waitFor();
+  const runDetails = completed.getByRole('link', { name: 'Run Details' });
+  const runHref = await runDetails.getAttribute('href');
+  await runDetails.click();
+  await button(doctor, 'Refresh Request').waitFor();
+  await doctor.getByRole('link', { name: 'Back to Slide Analysis' }).click();
+  await button(completed, 'Show Result on Slide').waitFor();
+  await button(analysis, 'Close Slide Analysis').click();
+  const beforeZoom = (await camera())[0];
+  await button(doctor, 'Zoom In').click();
+  await doctor.waitForFunction((zoom) => Number(document.querySelector('.image-panel')?.dataset.viewZoom) > Number(zoom), beforeZoom);
+  const resumedCamera = await camera();
+  await button(doctor, 'Analysis').click();
   await button(completed, 'Show Result on Slide').click();
   await analysis.waitFor({ state: 'hidden' });
   await doctor.getByRole('complementary', { name: 'PD-L1 Score Card' }).waitFor();
-  assert.deepEqual(await camera(), originalCamera);
-  assert.equal(new URL(doctor.url()).hash, '#viewer/' + caseId + '/' + svs);
+  assert.deepEqual(await camera(), resumedCamera);
+  assert.equal(new URL(doctor.url()).hash, '#viewer/' + caseId + '/' + svs + '?analysis=1');
+
+  await button(doctor, 'PD-L1 Results').click();
+  await doctor.getByRole('region', { name: 'PD-L1 Results', exact: true }).getByLabel('Cell Overlay').waitFor();
+  await doctor.route('**/pdl1', (route) => route.fulfill({ json: { results: [], comparison: { status: 'insufficient_scores', pair: null } } }), { times: 1 });
+  await button(doctor, 'Analysis').click();
+  await button(completed, 'Show Result on Slide').click();
+  await doctor.getByText('Referenced PD-L1 Result Unavailable').waitFor();
 
   await button(doctor, 'Analysis').click();
+  await button(completed, 'Rerun').click();
+  const sameRun = analysis.locator('li').filter({ has: doctor.locator(`a[href="${runHref}"]`) });
+  await sameRun.getByText(/Completed · Attempt 2/).waitFor();
   await tray.locator('[data-scan-id="' + preflightScan + '"]').click();
   await analysis.getByText('PD-L1 CPS Archive Replay · No matching archived result', { exact: true }).waitFor();
   assert.equal(await analysis.getByRole('combobox', { name: 'Analysis Method' }).inputValue(), 'ihc_preflight');

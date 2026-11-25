@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { api, auditAttemptId, jsonBody } from './session';
 
@@ -39,7 +40,9 @@ function FindingsSummary({ findings, terms }: { findings: Findings; terms: Termi
   </dl>;
 }
 
-export default function PapReview({ endpoint, following }: { endpoint: string; following: boolean }) {
+export default function PapReview({ endpoint, following, candidate, onGallery, relatedAction }: {
+  endpoint: string; following: boolean; candidate?: { id: string; category: string }; onGallery: () => void; relatedAction?: ReactNode;
+}) {
   const url = endpoint + '/pap-review';
   const [feed, setFeed] = useState<Feed>();
   const [findings, setFindings] = useState<Findings>(empty);
@@ -102,7 +105,11 @@ export default function PapReview({ endpoint, following }: { endpoint: string; f
   const hasForm = actions.some((action) => formActions.includes(action));
   return <section className="pdl1-panel pap-review" aria-label="Pap Specimen Review">
     <div className="pdl1-heading"><h2>Pap Specimen Review</h2>
-      <button type="button" className="button secondary" disabled={busy} onClick={() => setAttempt((value) => value + 1)}>Reload Pap Review</button></div>
+      <div className="actions">{relatedAction}
+        <button type="button" className="button secondary" onClick={onGallery}>Return to Pap Candidates</button>
+        <button type="button" className="button secondary" disabled={busy} onClick={() => setAttempt((value) => value + 1)}>Reload Pap Review</button>
+      </div></div>
+    {candidate && <p className="clinical-panel-context">Selected Candidate · {candidate.id} · {candidate.category}</p>}
     {error && <p role="alert">{error}</p>}
     {!feed && busy && <p role="status">Loading Pap review…</p>}
     {feed?.availability === 'stain_unverified' && <p>Pap review requires a registered Papanicolaou scan.</p>}

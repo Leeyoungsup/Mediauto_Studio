@@ -22,7 +22,7 @@ function CandidateTile({ path, candidate, category, pressed, disabled, select }:
   </article>;
 }
 
-export default function PapGallery({ state, following }: { state: PapState; following: boolean }) {
+export default function PapGallery({ state, following, onReview }: { state: PapState; following: boolean; onReview: () => void }) {
   const { index, archive, selected, candidates, page } = state;
   const pageCount = Math.ceil((candidates?.total ?? 0) / (candidates?.page_size ?? 1));
   function label(candidate: Candidate) {
@@ -30,7 +30,10 @@ export default function PapGallery({ state, following }: { state: PapState; foll
   }
   return <aside className="pap-gallery" aria-label="Pap Candidate Gallery">
     <header className="panel-title"><h2>Pap Candidates</h2>
-      <button type="button" className="button secondary" disabled={state.busy} onClick={state.refresh}>Reload Gallery</button>
+      <div className="actions">
+        <button type="button" className="button secondary" onClick={onReview}>Open Pap Review</button>
+        <button type="button" className="button secondary" disabled={state.busy} onClick={state.refresh}>Reload Gallery</button>
+      </div>
     </header>
     {state.error ? <p role="alert">{state.error}</p>
       : !index ? <p role="status">Loading Pap results…</p>

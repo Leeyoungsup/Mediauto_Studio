@@ -51,6 +51,15 @@ try {
     await overlay.waitFor({ state: 'detached' });
     await checkbox.check();
     await overlay.waitFor();
+    if (marker === 'ER') {
+      await page.getByRole('button', { name: 'IHC Results', exact: true }).click();
+      await card.getByRole('button', { name: 'Return to WSI' }).click();
+      await page.waitForFunction(() => document.activeElement?.matches('canvas[aria-label="WSI Canvas"]'));
+      await card.getByRole('link', { name: 'IHC Review and Best Block' }).click();
+      const review = page.getByRole('region', { name: 'IHC Review', exact: true });
+      await review.getByText('No IHC reviews recorded.', { exact: true }).waitFor();
+      assert.equal(await review.getByRole('form', { name: 'Record IHC Review' }).count(), 0);
+    }
     if (marker !== 'Ki-67') continue;
 
     const canvas = page.locator('canvas[aria-label="WSI Canvas"]');

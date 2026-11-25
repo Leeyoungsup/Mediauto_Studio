@@ -57,6 +57,8 @@ try {
     await page.getByRole('button', { name: 'Skin Review', exact: true }).click();
   }
   await open(scans[0].id);
+  await panel.getByRole('button', { name: 'Return to WSI' }).click();
+  await page.waitForFunction(() => document.activeElement?.matches('canvas[aria-label="WSI Canvas"]'));
   await overlay.locator('[data-layer="orientation"]').waitFor({ state: 'attached' });
   await overlay.locator('[data-layer="epidermis"]').waitFor();
   const heatmap = overlay.locator('[data-layer="density"]');

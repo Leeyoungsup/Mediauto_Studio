@@ -53,6 +53,8 @@ try {
     await page.getByRole('button', { name: 'Prostate AI', exact: true }).click();
   }
   await open(scans[0].id);
+  await panel.getByRole('button', { name: 'Return to WSI' }).click();
+  await page.waitForFunction(() => document.activeElement?.matches('canvas[aria-label="WSI Canvas"]'));
   const analysis = panel.getByRole('combobox', { name: 'Prostate Analysis' });
   await analysis.waitFor();
   assert.equal(await analysis.inputValue(), fixture.archives.newer);

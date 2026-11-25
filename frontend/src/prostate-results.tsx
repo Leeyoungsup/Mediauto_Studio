@@ -81,15 +81,16 @@ function FindingValue({ finding }: { finding: Finding }) {
     {finding.value.unit === 'um' && ` · Source ${number.format(finding.value.value)} µm`}</span>;
 }
 
-export function ProstatePanel({ state, canNavigate, focus }: { state: State; canNavigate: boolean; focus: (points: Point[]) => void }) {
+export function ProstatePanel({ state, canNavigate, focus, onSlide }: { state: State; canNavigate: boolean; focus: (points: Point[]) => void; onSlide: () => void }) {
   const { data, analysis, row } = state;
   const panel = useRef<HTMLElement>(null);
-  useEffect(() => { panel.current?.focus({ preventScroll: true }); }, []);
+  useEffect(() => { panel.current?.focus(); }, []);
   return <section className="pdl1-panel prostate-panel" tabIndex={-1} ref={panel} aria-label="Prostate AI Results">
     <div className="pdl1-heading"><h2>Prostate AI Results</h2>
       <div className="actions">
         {row && <label className="pdl1-toggle"><input type="checkbox" checked={state.overlay}
           onChange={(event) => state.setOverlay(event.target.checked)} /> Region Overlay</label>}
+        <button type="button" className="button secondary" onClick={onSlide}>Return to WSI</button>
         {data && <button type="button" className="button secondary" onClick={state.refresh}>Refresh Prostate Results</button>}
       </div>
     </div>

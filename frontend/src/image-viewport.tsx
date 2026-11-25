@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
-import { AlertTriangle, ChevronLeft, ChevronRight, Image, List, LocateFixed, Map, Minus, Pause, Play, Plus, ScanLine, Tag, Tally5 } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, ChevronRight, Image, Layers, List, LocateFixed, Map, Minus, Pause, Play, Plus, ScanLine, Tag, Tally5 } from 'lucide-react';
+import type { CollectionOrigin } from './workflow-navigation';
 import type { WsiScan } from './demo';
 import { api, auditAttemptId, jsonBody, request } from './session';
 import { ViewerAnalysis } from './viewer-analysis';
@@ -121,16 +122,23 @@ function useCanvasFit(enabled: boolean) {
 
 const autopanVectors = { right: [-1, 0], left: [1, 0], down: [0, -1], up: [0, 1] } as const;
 
-export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint, initialSnapshot, initialRoi, initialCamera, roiCaseId, options, sharedReview, extraAction, analysis }: {
+export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint, initialSnapshot, initialRoi, initialCamera, roiCaseId, options, sharedReview, extraAction, analysis, papMode, relatedReviewAction, caseRequestsHref }: {
   scan: WsiScan; label: string; stain: string; comparison?: PaneComparison; readOnlyEndpoint?: string; initialSnapshot?: string; initialRoi?: string; initialCamera?: Camera; roiCaseId?: string; options?: ViewerOptions;
-  extraAction?: ReactNode;
-  analysis?: { caseEndpoint: string; open: boolean; change: (open: boolean) => void };
+  extraAction?: ReactNode; relatedReviewAction?: ReactNode; caseRequestsHref?: string;
+  papMode?: 'gallery' | 'review';
+  analysis?: { caseEndpoint: string; collectionOrigin?: CollectionOrigin; open: boolean; change: (open: boolean) => void };
   sharedReview?: { locked: boolean; camera?: Camera; onFrame: (camera: Camera) => void };
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const fit = useCanvasFit(Boolean(options));
   const slideVisible = options?.active ?? true;
   const analysisButton = useRef<HTMLButtonElement>(null);
+  const pdlPanel = useRef<HTMLDivElement>(null);
+  const ihcPanel = useRef<HTMLDivElement>(null);
+  const papReviewPanel = useRef<HTMLDivElement>(null);
+  const papGalleryPanel = useRef<HTMLDivElement>(null);
+  const papFocus = useRef<'gallery' | 'review'>(undefined);
+  const skinPanel = useRef<HTMLDivElement>(null);
   const focusedRoi = useRef<string>(undefined);
   const [roiUnavailable, setRoiUnavailable] = useState(false);
   const renderer = useRef<TileViewer | null>(null);
@@ -157,8 +165,8 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   const [labelError, setLabelError] = useState('');
   const [labelAttempt, setLabelAttempt] = useState(0);
   const [autopan, setAutopan] = useState(false);
-  const [showPapReview, setShowPapReview] = useState(false);
-  const [showPap, setShowPap] = useState(false);
+  const [showPapReview, setShowPapReview] = useState(papMode === 'review');
+  const [showPap, setShowPap] = useState(!!papMode);
   const [showSkin, setShowSkin] = useState(false);
   const [showProstate, setShowProstate] = useState(false);
   const [autopanNotice, setAutopanNotice] = useState('');
@@ -194,12 +202,16 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     if (info) renderer.current?.followCamera(following ? sharedCamera : undefined);
   }, [info, following, sharedCamera?.x, sharedCamera?.y, sharedCamera?.zoom]);
   const canOpenSlideReview = Boolean(info) && !readOnlyEndpoint && !compareMode && scan.source === 'clinical';
-  const pap = usePapGallery(endpoint, canOpenSlideReview && showPap);
+  const stainKey = stain.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const papStain = ['pap', 'papanicolaou', 'papsmear', 'papanicolaoustain'].includes(stainKey.replace(/[0-9]/g, ''));
+  const ihcStain = ['ki67', 'er', 'pr', 'her2'].includes(stainKey);
+  const canOpenPap = canOpenSlideReview && papStain;
+  const pap = usePapGallery(endpoint, canOpenPap && showPap);
   const appliedPapFocus = useRef<typeof pap.focus>(undefined);
-  const skin = useSkinReview(endpoint, canOpenSlideReview && showSkin);
-  const prostate = useProstateResults(endpoint, canOpenSlideReview && showProstate);
-  const ihc = useIhcResults(endpoint, Boolean(info) && !readOnlyEndpoint && !compareMode, view);
-  const pdl1 = usePdl1(endpoint, Boolean(info) && !readOnlyEndpoint, view, initialSnapshot);
+  const skin = useSkinReview(endpoint, canOpenSlideReview && !papStain && showSkin);
+  const prostate = useProstateResults(endpoint, canOpenSlideReview && !papStain && showProstate);
+  const ihc = useIhcResults(endpoint, Boolean(info) && !readOnlyEndpoint && !compareMode && !papStain, view);
+  const pdl1 = usePdl1(endpoint, Boolean(info) && !readOnlyEndpoint && !papStain, view, initialSnapshot);
   const restoreCamera = useCallback((camera: Camera) => {
     if (!compareMode && !reviewFrame.current?.locked) {
       setAutopan(false);
@@ -479,6 +491,36 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     analysisButton.current?.focus({ preventScroll: true });
   }
 
+  function openPapPanel(panel: 'gallery' | 'review') {
+    const target = panel === 'review' ? papReviewPanel : papGalleryPanel;
+    if (target.current) {
+      target.current.focus();
+    } else {
+      papFocus.current = panel;
+      if (panel === 'review') setShowPapReview(true);
+      else setShowPap(true);
+    }
+  }
+
+  useEffect(() => {
+    if (papMode) {
+      setShowPap(true);
+      if (papMode === 'review') setShowPapReview(true);
+    }
+  }, [papMode]);
+
+  useEffect(() => {
+    const panel = papFocus.current === 'review' ? papReviewPanel.current : papFocus.current === 'gallery' ? papGalleryPanel.current : null;
+    if (panel) { panel.focus(); papFocus.current = undefined; }
+  }, [canOpenPap, showPap, showPapReview]);
+
+  useEffect(() => { if (showSkin) skinPanel.current?.focus(); }, [showSkin]);
+  const focusSlide = () => canvas.current?.focus();
+  const papCandidate = pap.selected && { id: pap.selected.id,
+    category: pap.archive?.categories.find(({ code }) => code === pap.selected?.category)?.label ?? pap.selected.category };
+  const showIhcJump = canOpenSlideReview && !papStain && (ihcStain || ihc.source || ihc.failed);
+  const showPdlJump = canOpenSlideReview && !papStain && (stainKey === 'pdl1' || pdl1.result || pdl1.error || pdl1.referenceMissing);
+
   const navigationControls = <>
         <button className="icon-button" title="Zoom Out" aria-label="Zoom Out" disabled={!info || following} onClick={() => navigate((viewer) => viewer.magnify(0.7))}><Minus size={18} /></button>
         <output aria-label="Zoom relative to scan" className="zoom-value">{view ? `${(view.zoom * 100).toFixed(view.zoom < 0.01 ? 2 : view.zoom < 0.1 ? 1 : 0)}%` : '—'}</output>
@@ -532,19 +574,21 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
             if (analysis?.open) analysis.change(false);
             setLymphOpen(!lymphOpen || !!analysis?.open);
           }}><Tally5 size={16} aria-hidden="true" /> Lymph Node Count</button>}
-        {canOpenSlideReview && <button type="button" className="button secondary" aria-expanded={showPapReview}
+        {showPdlJump && <button type="button" className="button secondary" onClick={() => pdlPanel.current?.focus()}><Layers size={15} /> PD-L1 Results</button>}
+        {showIhcJump && <button type="button" className="button secondary" onClick={() => ihcPanel.current?.focus()}><Layers size={15} /> IHC Results</button>}
+        {canOpenPap && <button type="button" className="button secondary" aria-expanded={showPapReview}
           onClick={() => setShowPapReview((open) => !open)}>Pap Review</button>}
-        {canOpenSlideReview && <button type="button" className="button secondary" aria-expanded={showPap}
+        {canOpenPap && <button type="button" className="button secondary" aria-expanded={showPap}
           disabled={pap.busy} onClick={() => setShowPap((open) => !open)}>Pap Gallery</button>}
-        {canOpenSlideReview && <button type="button" className="button secondary" aria-expanded={showSkin}
+        {canOpenSlideReview && !papStain && <button type="button" className="button secondary" aria-expanded={showSkin}
           disabled={skin.busy} onClick={() => { skin.setMode(undefined); setShowSkin((open) => !open); }}>Skin Review</button>}
-        {canOpenSlideReview && <button type="button" className="button secondary" aria-expanded={showProstate}
+        {canOpenSlideReview && !papStain && <button type="button" className="button secondary" aria-expanded={showProstate}
           onClick={() => setShowProstate((open) => !open)}>Prostate AI</button>}
         {!options && navigationControls}
       </div>
     </div>
     {!options && reviewTools}
-    <div className={showPap ? 'analysis-workspace pap-workspace' : 'analysis-workspace'}>
+    <div className={canOpenPap && showPap ? 'analysis-workspace pap-workspace' : 'analysis-workspace'}>
     <div ref={fit.surface} className="image-surface" data-review-dock={Boolean(options && reviewTools)}
       style={options && fit.height ? { height: fit.height } : undefined}>
       <canvas className={viewerRecords.tool === 'pan' && !ihc.picking && !skin.mode ? 'wsi-canvas' : 'wsi-canvas drawing-tool'} ref={canvas} tabIndex={0} aria-label="WSI Canvas"
@@ -663,10 +707,10 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
           event.preventDefault();
         }}
       />
-      <Pdl1Overlay view={view} result={pdl1.result} cells={pdl1.cells} />
-      <IhcOverlay state={ihc} view={view} />
-      {canOpenSlideReview && showSkin && <Suspense fallback={null}><SkinOverlay state={skin} view={view} /></Suspense>}
-      {canOpenSlideReview && showProstate && <ProstateOverlay state={prostate} view={view} />}
+      {!papStain && <Pdl1Overlay view={view} result={pdl1.result} cells={pdl1.cells} />}
+      {!papStain && <IhcOverlay state={ihc} view={view} />}
+      {canOpenSlideReview && !papStain && showSkin && <Suspense fallback={null}><SkinOverlay state={skin} view={view} /></Suspense>}
+      {canOpenSlideReview && !papStain && showProstate && <ProstateOverlay state={prostate} view={view} />}
       {showPap && view && pap.selected && <svg className="annotation-overlay pap-candidate-overlay" aria-label="Selected Pap Candidate"
         viewBox={`0 0 ${view.width * view.zoom} ${view.height * view.zoom}`}>
         <rect x={(pap.selected.bounds[0] - view.x) * view.zoom} y={(pap.selected.bounds[1] - view.y) * view.zoom}
@@ -681,7 +725,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         {comparison.landmarks.map(([x, y], index) => <text className="annotation-length" key={index}
           x={(x - view.x) * view.zoom} y={(y - view.y) * view.zoom}>{index + 1}</text>)}
       </svg>}
-      {info && !readOnlyEndpoint && <Pdl1Badge state={pdl1} />}
+      {info && !readOnlyEndpoint && !papStain && <Pdl1Badge state={pdl1} />}
       {tileStatus === 'loading' && !failure && <div className="wsi-overlay image-empty" role="status">Opening slide…</div>}
       {(failure || tileStatus === 'unavailable') && <div className="wsi-overlay image-empty" role="alert"><AlertTriangle size={25} />
         <strong>Unable to open the slide.</strong><p>{failure || 'Unable to load tiles.'}</p>
@@ -703,32 +747,36 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       {canReview && <DrawingControls state={viewerRecords} info={info} preview={drawingPreview} shortcuts={settings?.shortcuts !== false} />}
       {options && reviewTools && <div className="viewer-tool-dock">{reviewTools}</div>}
     </div>
-    {canOpenSlideReview && showPap && <Suspense fallback={<p role="status">Loading Pap Gallery…</p>}>
-      <PapGallery state={pap} following={following} />
-    </Suspense>}
+    {canOpenPap && showPap && <div className="clinical-panel-focus pap-gallery-dock" ref={papGalleryPanel} tabIndex={-1}>
+      <Suspense fallback={<p role="status">Loading Pap Gallery…</p>}>
+        <PapGallery state={pap} following={following} onReview={() => openPapPanel('review')} />
+      </Suspense>
+    </div>}
     {options && annotationsOpen && !analysis?.open && recordsPanel && <div className="viewer-annotations-dock" ref={annotationsDock}>{recordsPanel}</div>}
     {options && lymphOpen && !analysis?.open && canCountLymph && <div className="viewer-annotations-dock viewer-count-dock" ref={lymphDock}>
       <LymphCounts endpoint={endpoint} scanId={scan.id} reportHref={options.reportHref}
         onClose={() => { setLymphOpen(false); lymphButton.current?.focus({ preventScroll: true }); }} />
     </div>}
     {analysis?.open && <ViewerAnalysis caseEndpoint={analysis.caseEndpoint} scanId={scan.id} label={label} stain={stain}
-      onClose={closeAnalysis} onResult={(id) => {
-        pdl1.setSelected(id);
-        pdl1.setEnabled(true);
-        pdl1.retry();
-        closeAnalysis();
-      }} />}
+      format={scan.format} collectionOrigin={analysis.collectionOrigin}
+      onClose={closeAnalysis} onResult={(id) => { pdl1.openSnapshot(id); closeAnalysis(); }} />}
     </div>
     <footer className="image-footer">
       <span>{info ? `${info.dimensions[0].toLocaleString()} × ${info.dimensions[1].toLocaleString()} px` : scan.format}</span>
       {autopanNotice && <span role="status">{autopanNotice}</span>}
+      {pdl1.referenceMissing && <span className="tile-warning" role="status">Referenced PD-L1 Result Unavailable
+        <button type="button" className="button secondary" onClick={() => pdlPanel.current?.focus()}>Review Result Status</button></span>}
       {overviewFailed && minimap && !settings?.show_overview && <span className="tile-warning" role="status">Minimap unavailable. <button className="button secondary" onClick={() => setOverviewAttempt((value) => value + 1)}>Retry Overview</button></span>}
       {tileStatus === 'partial' && <span className="tile-warning" role="status">Some tiles could not be loaded. <button className="button secondary" onClick={() => renderer.current?.retryTiles()}>Retry</button></span>}
     </footer>
-    {canOpenSlideReview && showPapReview && <Suspense fallback={<p role="status">Loading Pap review…</p>}>
-      <PapReview endpoint={endpoint} following={following} />
-    </Suspense>}
-    {canOpenSlideReview && showSkin && <Suspense fallback={<p role="status">Loading skin tools…</p>}><SkinPanel state={skin} following={following}
+    {canOpenPap && showPapReview && <div className="clinical-panel-focus" ref={papReviewPanel} tabIndex={-1}>
+      <Suspense fallback={<p role="status">Loading Pap review…</p>}>
+        <PapReview endpoint={endpoint} following={following} candidate={papCandidate} onGallery={() => openPapPanel('gallery')}
+          relatedAction={relatedReviewAction} />
+      </Suspense>
+    </div>}
+    {canOpenSlideReview && !papStain && showSkin && <div className="clinical-panel-focus" ref={skinPanel} tabIndex={-1}>
+      <Suspense fallback={<p role="status">Loading skin tools…</p>}><SkinPanel state={skin} following={following} onSlide={focusSlide}
       activate={(mode) => {
         setAutopan(false);
         ihc.setPicking(false);
@@ -739,8 +787,8 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       focus={(points) => {
         if (view) navigate((viewer) => viewer.restoreCamera(cameraFor(points, view)));
         canvas.current?.scrollIntoView({ block: 'nearest' });
-      }} /></Suspense>}
-    {canOpenSlideReview && showProstate && <ProstatePanel state={prostate} canNavigate={Boolean(view) && !following}
+      }} /></Suspense></div>}
+    {canOpenSlideReview && !papStain && showProstate && <ProstatePanel state={prostate} canNavigate={Boolean(view) && !following} onSlide={focusSlide}
       focus={(points) => {
         if (view) navigate((viewer) => viewer.restoreCamera(cameraFor(points, view)));
         canvas.current?.scrollIntoView({ block: 'nearest' });
@@ -748,9 +796,13 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     {roiUnavailable && <p className="notice" role="status">The linked ROI is unavailable. The scan is still open.</p>}
     {!options && recordsPanel}
     {!options && canCountLymph && <LymphCounts endpoint={endpoint} scanId={scan.id} />}
-    {info && !compareMode && !readOnlyEndpoint && <Pdl1Panel state={pdl1} />}
-    {info && !compareMode && !readOnlyEndpoint && <IhcPanel state={ihc} readOnly={following}
-      onPickStart={() => { setAutopan(false); skin.setMode(undefined); viewerRecords.chooseTool('pan'); }} />}
+    {info && !compareMode && !readOnlyEndpoint && !papStain && <div className="clinical-panel-focus" ref={pdlPanel} tabIndex={-1}>
+      <Pdl1Panel state={pdl1} reportHref={options?.reportHref} onSlide={focusSlide} />
+    </div>}
+    {info && !compareMode && !readOnlyEndpoint && !papStain && <div className="clinical-panel-focus" ref={ihcPanel} tabIndex={-1}>
+      <IhcPanel state={ihc} readOnly={following} showEmpty={ihcStain} caseRequestsHref={caseRequestsHref} onSlide={focusSlide}
+        onPickStart={() => { setAutopan(false); skin.setMode(undefined); viewerRecords.chooseTool('pan'); }} />
+    </div>}
   </section>;
 }
 

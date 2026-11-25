@@ -5,7 +5,7 @@ import type { Scan } from './related-cases';
 
 type Pair = { id: string; pap: Scan; biopsy: Scan };
 
-export default function RelatedComparison({ organization, id, anchor }: { organization: string; id: string; anchor?: string }) {
+export default function RelatedComparison({ organization, id, anchor, returnToPapReview, returnPapScan }: { organization: string; id: string; anchor?: string; returnToPapReview?: boolean; returnPapScan?: string }) {
   const endpoint = '/api/clinical/' + encodeURIComponent(organization) + '/related-comparisons/' + id;
   const [data, setData] = useState<Pair>();
   const [failure, setFailure] = useState('');
@@ -42,9 +42,16 @@ export default function RelatedComparison({ organization, id, anchor }: { organi
   }, [endpoint, attempt]);
 
   const sides = data && (anchor === data.biopsy.case_id ? ['biopsy', 'pap'] : ['pap', 'biopsy']) as ('pap' | 'biopsy')[] | undefined;
+  const primary = data && sides ? data[sides[0]] : undefined;
+  const returnToReview = returnToPapReview && sides?.[0] === 'pap';
+  const primaryScan = returnToReview && anchor === data?.pap.case_id ? returnPapScan ?? primary?.id : primary?.id;
   return <section className="related-comparison" aria-label="Independent WSI Comparison">
     <div className="page-heading"><div><h1>Pap and Biopsy Comparison</h1><p>Read-Only · Independent Pan and Zoom</p></div>
-      {data && sides && <a className="button secondary" href={'#viewer/' + data[sides[0]].case_id + '/' + data[sides[0]].id}>Open Primary Viewer</a>}</div>
+      {primary && data && <div className="actions"><a className="button secondary"
+        href={`#viewer/${primary.case_id}/${primaryScan}${returnToReview ? '?pap=review' : ''}`}>
+        {returnToReview ? 'Return to Pap Review' : 'Open Primary Viewer'}</a>
+        <a className="button secondary" href={`#viewer/${data.pap.case_id}/${data.pap.id}?pap=gallery`}>Open Pap Gallery</a>
+      </div>}</div>
     {failure ? <p className="notice" role="alert">{failure} <button className="button secondary" type="button"
       onClick={() => setAttempt((value) => value + 1)}>Retry Comparison</button></p>
       : !data || !sides ? <p role="status">Checking the confirmed comparison…</p>
@@ -55,6 +62,7 @@ export default function RelatedComparison({ organization, id, anchor }: { organi
             <header className={index === 0 ? 'related-pane-heading' : 'related-pane-heading related-secondary'}>
               <strong>{title} · {row.case_number}</strong>
               <span>{side === 'pap' ? 'Pap' : 'Tissue Biopsy'} · Specimen {row.specimen_number}</span>
+              <small>{row.stain} · {row.format} · Scan {row.id.slice(0, 8)}</small>
             </header>
             <ImageViewport scan={{ id: row.id, source: 'clinical', format: row.format }} label={row.label} stain={row.stain}
               readOnlyEndpoint={`${endpoint}/wsi/${side}`} />

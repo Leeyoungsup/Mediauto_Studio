@@ -144,24 +144,26 @@ export function AnalysisSettings({ organization }: { organization: string }) {
   </section>;
 }
 
-export function IhcReviews({ endpoint, caseId }: { endpoint: string; caseId: string }) {
+export function IhcReviews({ endpoint, caseId, initialScan, focus }: { endpoint: string; caseId: string; initialScan?: string; focus?: boolean }) {
   const resource = useData<IhcData>(endpoint);
-  const [scanId, setScan] = useState('');
+  const [scanId, setScan] = useState(initialScan ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const submission = useRef<{ payload: string; key: string } | undefined>(undefined);
   const data = resource.data;
-  const selected = data?.scans.find((scan) => scan.id === scanId);
+  const selected = data?.can_review ? data.scans.find((scan) => scan.id === scanId) : undefined;
+  const panel = useRef<HTMLElement>(null);
+  useEffect(() => { if (focus) panel.current?.focus(); }, [focus]);
   const current = selected && data?.history.find((review) => review.specimen_id === selected.specimen_id && review.marker === selected.marker);
   const blocks = selected ? data?.blocks.filter((block) => block.specimen_id === selected.specimen_id) ?? [] : [];
   const runs = selected ? data?.runs.filter((run) => run.scan_id === selected.id) ?? [] : [];
 
-  return <section className="panel detail-content ihc-reviews" aria-label="IHC Review">
+  return <section className="panel detail-content ihc-reviews clinical-panel-focus" aria-label="IHC Review" ref={panel} tabIndex={-1}>
     <h2>IHC Review and Best Block</h2>
     <Problem error={resource.error || error} retry={resource.refresh} />
     {notice && <p role="status">{notice}</p>}
-    {data?.can_review && <label className="form-field">IHC Scan<select value={scanId} onChange={(event) => setScan(event.target.value)}>
+    {data?.can_review && <label className="form-field">IHC Scan<select value={selected?.id ?? ''} onChange={(event) => setScan(event.target.value)}>
       <option value="">Select an IHC scan</option>{data.scans.map((scan) => <option key={scan.id} value={scan.id}>{scan.specimen} · {scan.slide} · {markerNames[scan.marker]}</option>)}
     </select></label>}
     {selected && !blocks.length && <p>Register a block for this specimen in Case Editor.</p>}

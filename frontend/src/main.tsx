@@ -60,8 +60,8 @@ const accountLinks = [
   { tab: 'audit', label: 'Account Audit Log', name: 'Account Audit', icon: ClipboardList },
 ] as const;
 
-type Page = ({ view: 'related-comparison'; id: string; anchor?: string } | { view: 'worklist'; scope: Scope; collectionTarget?: string } | { view: 'case'; id: string; files: boolean; tab?: CaseTab; selectedScan?: string } | { view: 'request'; id: string; sourceScan?: string } | { view: 'or'; id?: string; scan?: string }
-  | { view: 'viewer'; id: string; slide?: string; snapshot?: string; roi?: string; roiOrigin?: RoiLocation; files: boolean; openRequests?: boolean; openReview?: boolean } | { view: 'roi-search'; location: RoiLocation } | { view: 'collections'; id?: string; entry?: string } | { view: 'scans' } | SettingsPage) & { collectionOrigin?: CollectionOrigin };
+type Page = ({ view: 'related-comparison'; id: string; anchor?: string; returnToPapReview?: boolean; returnPapScan?: string } | { view: 'worklist'; scope: Scope; collectionTarget?: string } | { view: 'case'; id: string; files: boolean; tab?: CaseTab; selectedScan?: string; focusIhc?: boolean } | { view: 'request'; id: string; sourceScan?: string; fromAnalysis?: boolean } | { view: 'or'; id?: string; scan?: string }
+  | { view: 'viewer'; id: string; slide?: string; snapshot?: string; roi?: string; roiOrigin?: RoiLocation; files: boolean; openRequests?: boolean; openReview?: boolean; openAnalysis?: boolean; papMode?: 'gallery' | 'review' } | { view: 'roi-search'; location: RoiLocation } | { view: 'collections'; id?: string; entry?: string } | { view: 'scans' } | SettingsPage) & { collectionOrigin?: CollectionOrigin };
 type WorkflowAction = 'assignment' | 'review' | 'confirm';
 type Modal = 'register' | 'system' | null;
 
@@ -80,7 +80,10 @@ function readPage(): Page {
   const entry = params.get('entry') ?? undefined;
   const collectionOrigin = isUuid(collection) && isUuid(entry) ? { collection, entry } : undefined;
   const [view, id, slide, snapshot, roi, sourceScan, sourceRoi] = route.split('/');
-  const viewerMode = { openRequests: params.get('requests') === '1', openReview: params.get('review') === '1', collectionOrigin };
+  const pap = params.get('pap');
+  const papMode: 'review' | 'gallery' | undefined = pap === 'review' || pap === 'gallery' ? pap : undefined;
+  const viewerMode = { openRequests: params.get('requests') === '1', openReview: params.get('review') === '1',
+    openAnalysis: params.get('analysis') === '1', papMode, collectionOrigin };
   if (view === 'roi-search' && isUuid(id) && isUuid(slide) && isUuid(snapshot)) {
     return { view, location: { caseId: id, scanId: slide, roiId: snapshot } };
   }
@@ -88,7 +91,11 @@ function readPage(): Page {
     const roiOrigin = isUuid(sourceScan) && isUuid(sourceRoi) ? { caseId: id, scanId: sourceScan, roiId: sourceRoi } : undefined;
     return { view, id, slide, roi, roiOrigin, files: false, ...viewerMode };
   }
-  if (view === 'related-comparison' && isUuid(id)) return { view, id, anchor: isUuid(slide) ? slide : undefined };
+  if (view === 'related-comparison' && isUuid(id)) {
+    const fromScan = params.get('scan') ?? undefined;
+    return { view, id, anchor: isUuid(slide) ? slide : undefined, returnToPapReview: papMode === 'review',
+      returnPapScan: papMode === 'review' && isUuid(fromScan) ? fromScan : undefined };
+  }
   if (view === 'collections') return { view, id: isUuid(id) ? id : undefined, entry: isUuid(slide) ? slide : undefined };
   if (view === 'or') return { view, id: id ? decodeRoute(id) : undefined, scan: slide ? decodeRoute(slide) : undefined };
   if (view === 'scans') return { view };
@@ -98,18 +105,19 @@ function readPage(): Page {
     const noteCase = section === 'notifications' && isUuid(slide) ? slide : undefined;
     const request = params.get('request') ?? undefined;
     const requestScan = params.get('scan') ?? undefined;
+    const analysisReturn = params.get('return') === 'analysis';
     const requestReturn = section === 'notifications' && isUuid(request)
-      ? withCollection(`#request/${request}${isUuid(requestScan) ? '?scan=' + requestScan : ''}`, collectionOrigin) : undefined;
+      ? withCollection(`#request/${request}${isUuid(requestScan) ? '?scan=' + requestScan + (analysisReturn ? '&return=analysis' : '') : ''}`, collectionOrigin) : undefined;
     return { view, section, accountTab, noteCase, requestReturn, noteScan: noteCase && snapshot ? decodeRoute(snapshot) : undefined };
   }
   if (view === 'request' && id) {
     const scan = params.get('scan') ?? undefined;
-    return { view, id: decodeRoute(id), sourceScan: isUuid(scan) ? scan : undefined, collectionOrigin };
+    return { view, id: decodeRoute(id), sourceScan: isUuid(scan) ? scan : undefined, fromAnalysis: params.get('return') === 'analysis', collectionOrigin };
   }
   if ((view === 'case' || view === 'file-case') && id) {
     const tab = caseTab(slide);
     return { view: 'case', id: decodeRoute(id), files: view === 'file-case', tab, collectionOrigin,
-      selectedScan: tab && snapshot ? decodeRoute(snapshot) : undefined };
+      selectedScan: tab && snapshot ? decodeRoute(snapshot) : undefined, focusIhc: params.get('ihc') === '1' };
   }
   if ((view === 'viewer' || view === 'file-viewer') && id) return { view: 'viewer', id: decodeRoute(id), slide: slide ? decodeRoute(slide) : undefined, snapshot: /^[a-f0-9]{64}$/.test(snapshot ?? '') ? snapshot : undefined, files: view === 'file-viewer', ...viewerMode };
   return { view: 'worklist', scope: id === 'mine' || id === 'unassigned' ? id : 'all',
@@ -548,9 +556,9 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
             onOrganChange={(organ) => { roiSearchPreference.current = { roi: page.location.roiId, organ }; }} />
           : <div className="panel empty"><strong>You do not have permission to search saved ROIs.</strong></div>)}
         {page.view === 'related-comparison' && <Suspense fallback={<p role="status">Loading comparison…</p>}>
-          <RelatedComparison key={page.id + '/' + (page.anchor ?? '')} organization={user.organization} id={page.id} anchor={page.anchor} />
+          <RelatedComparison key={page.id + '/' + (page.anchor ?? '')} organization={user.organization} id={page.id} anchor={page.anchor} returnToPapReview={page.returnToPapReview} returnPapScan={page.returnPapScan} />
         </Suspense>}
-        {page.view === 'request' && <RequestPage key={page.id} id={page.id} organization={user.organization} sourceScan={page.sourceScan} collectionOrigin={page.collectionOrigin} />}
+        {page.view === 'request' && <RequestPage key={page.id} id={page.id} organization={user.organization} sourceScan={page.sourceScan} fromAnalysis={page.fromAnalysis} collectionOrigin={page.collectionOrigin} />}
         {casePage && (!current ? <div className="panel empty"><CircleHelp size={28} /><strong>{casePage.files
           ? (intakeAllowed && filesLoading ? 'Loading case…' : 'Unable to load the case.')
           : detail?.key === detailKey ? detail?.error : 'Loading case…'}</strong><button className="button secondary" onClick={goBack}>Back to Worklist</button></div>
@@ -560,7 +568,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
               canImport={user.role === 'admin'} onChanged={patientChanged}
               patient={<PatientIntegration item={current} org={user.organization} editable={writable} status={integration} onChanged={patientChanged} />} /> : undefined}
             frozen={frozenEndpoint && current.recordId ? <FrozenWorkflow caseId={current.recordId} scan={current.slides.find(({ id }) => id === casePage.selectedScan)?.id} endpoint={frozenEndpoint} /> : undefined}
-            requests={requestAllowed && current.recordId ? <CaseRequests organization={user.organization} item={current} sourceScan={casePage.selectedScan} collectionOrigin={casePage.collectionOrigin} /> : undefined}
+            requests={requestAllowed && current.recordId ? <CaseRequests organization={user.organization} item={current} sourceScan={casePage.selectedScan} focusIhc={casePage.focusIhc} collectionOrigin={casePage.collectionOrigin} /> : undefined}
             report={requestAllowed && current.recordId && clinicalCaseEndpoint ? <>
               <CaseReport endpoint={clinicalCaseEndpoint + '/report'} caseId={current.recordId} caseVersion={current.version} caseChanged={patientChanged} />
               <ReportDraftReferences organization={user.organization} caseId={current.recordId} />
@@ -575,7 +583,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
             onConfirm={intakeAllowed && current.source === 'files' ? () => openWorkflow(current, 'confirm') : undefined} />
           : <Viewer key={current.id} item={current} relatedEndpoint={requestAllowed && clinicalCaseEndpoint ? clinicalCaseEndpoint + '/related-cases' : undefined} viewerAccount={user.id}
             analysisEndpoint={requestAllowed ? clinicalCaseEndpoint : undefined} organization={user.organization}
-            openRequests={casePage.openRequests} openReview={casePage.openReview} collectionOrigin={casePage.collectionOrigin}
+            openRequests={casePage.openRequests} openReview={casePage.openReview} openAnalysis={casePage.openAnalysis} papMode={casePage.papMode} collectionOrigin={casePage.collectionOrigin}
             reviewEndpoint={requestAllowed && clinicalCaseEndpoint ? clinicalCaseEndpoint + '/review-room' : undefined} activeSlide={casePage.slide} initialSnapshot={casePage.snapshot} initialRoi={casePage.roi} roiOrigin={casePage.roiOrigin} historyEndpoint={historyEndpoint} attachmentsEndpoint={attachmentsEndpoint} logsEndpoint={logsEndpoint} notesEndpoint={notesEndpoint} hasFrozenWorkflow={!!frozenEndpoint} canRequest={requestAllowed && !!current.recordId} onSlide={(id) => navigateViewer(current, id)} onBack={(scan) => navigateCase(current, scan)}
             onReview={mayReview ? () => openWorkflow(current, 'review') : undefined} />)}
       </main>

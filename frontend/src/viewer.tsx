@@ -23,13 +23,13 @@ import { WorkspaceTabs } from './workspace-tabs';
 
 type ViewerTab = 'slides' | 'analysis' | 'history' | 'media' | 'gross' | 'notes' | 'logs' | 'requests';
 
-export function Viewer({ item, activeSlide, onSlide, onBack, onReview, canRequest, hasFrozenWorkflow, initialSnapshot, initialRoi, roiOrigin, historyEndpoint, attachmentsEndpoint, logsEndpoint, notesEndpoint, reviewEndpoint, viewerAccount, relatedEndpoint, analysisEndpoint, organization, openRequests, openReview, collectionOrigin }: {
+export function Viewer({ item, activeSlide, onSlide, onBack, onReview, canRequest, hasFrozenWorkflow, initialSnapshot, initialRoi, roiOrigin, historyEndpoint, attachmentsEndpoint, logsEndpoint, notesEndpoint, reviewEndpoint, viewerAccount, relatedEndpoint, analysisEndpoint, organization, openRequests, openReview, openAnalysis, papMode, collectionOrigin }: {
   item: DemoCase; activeSlide?: string; onSlide: (id: string) => void; onBack: (scan?: string) => void; onReview?: () => void; canRequest?: boolean; hasFrozenWorkflow?: boolean; initialSnapshot?: string; initialRoi?: string; roiOrigin?: RoiLocation; historyEndpoint?: string; attachmentsEndpoint?: string; logsEndpoint?: string; notesEndpoint?: string; reviewEndpoint?: string; relatedEndpoint?: string; viewerAccount: string;
-  analysisEndpoint?: string; organization: string; openRequests?: boolean; openReview?: boolean; collectionOrigin?: CollectionOrigin;
+  analysisEndpoint?: string; organization: string; openRequests?: boolean; openReview?: boolean; openAnalysis?: boolean; papMode?: 'gallery' | 'review'; collectionOrigin?: CollectionOrigin;
 }) {
   const [contextTab, setContextTab] = useState<Exclude<ViewerTab, 'analysis'>>(openRequests && canRequest ? 'requests' : 'slides');
   const [comparing, setComparing] = useState(false);
-  const [analysisOpen, setAnalysisOpen] = useState(false);
+  const [analysisOpen, setAnalysisOpen] = useState(!!openAnalysis);
   const [reviewSelection, setReviewSelection] = useState<string>();
   const review = useCollaborativeReview(reviewEndpoint, viewerAccount, openReview);
   const followingFrame = review.following ? review.room?.frame : undefined;
@@ -41,6 +41,7 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, canReques
   }, [followingFrame?.scan_id]);
   useEffect(() => { if (inReview) setComparing(false); }, [inReview]);
   useEffect(() => { if (openRequests && canRequest) { setAnalysisOpen(false); setContextTab('requests'); } }, [openRequests, canRequest]);
+  useEffect(() => { if (openAnalysis) { setContextTab('slides'); setAnalysisOpen(true); } }, [openAnalysis]);
   const root = useRef<HTMLElement>(null);
   const reviewButton = useRef<HTMLButtonElement>(null);
   const trayList = useRef<HTMLDivElement>(null);
@@ -190,12 +191,16 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, canReques
       {slide?.wsi ? <ImageViewport key={slide.wsi.id + ':' + (initialSnapshot ?? initialRoi ?? '')} scan={slide.wsi} initialSnapshot={initialSnapshot}
         initialRoi={initialRoi} initialCamera={returnCamera?.id === slide.id ? returnCamera.camera : undefined} roiCaseId={canRequest && item.recordId ? item.recordId : undefined} label={slide.label ?? slide.id} stain={slide.stain}
         analysis={analysisEndpoint && slide.wsi.source === 'clinical' && !review.following ?
-          { caseEndpoint: analysisEndpoint, open: analysisOpen, change: (open) => selectTab(open ? 'analysis' : 'slides') } : undefined}
+          { caseEndpoint: analysisEndpoint, collectionOrigin, open: analysisOpen, change: (open) => selectTab(open ? 'analysis' : 'slides') } : undefined}
         sharedReview={reviewEndpoint ? {
           locked: review.following,
           camera: followingFrame?.scan_id === slide.wsi.id ? followingFrame : undefined,
           onFrame: (camera) => review.camera(slide.wsi!.id, camera),
         } : undefined}
+        papMode={papMode}
+        relatedReviewAction={relatedEndpoint && item.recordId ? <RelatedCasesControl endpoint={relatedEndpoint}
+          caseId={item.recordId} scanId={slide.wsi.id} fromPapReview /> : undefined}
+        caseRequestsHref={canRequest && item.recordId ? withCollection(caseHref(item.recordId, 'requests', slide.id) + '?ihc=1', collectionOrigin) : undefined}
         extraAction={relatedEndpoint && item.recordId ? <RelatedCasesControl compact endpoint={relatedEndpoint}
           caseId={item.recordId} scanId={slide.wsi.id} /> : undefined}
         options={{ settings, active: !isDocument,

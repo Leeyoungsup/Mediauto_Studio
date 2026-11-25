@@ -32,7 +32,19 @@ const rangeSize = 512;
 export function usePdl1(endpoint: string, ready: boolean, view: Viewport | undefined, initialSnapshot?: string) {
   const [data, setData] = useState<{ results: Result[]; comparison: Comparison }>();
   const results = data?.results;
-  const [selected, setSelected] = useState(initialSnapshot ?? '');
+  const [selected, selectResult] = useState(initialSnapshot ?? '');
+  const [pinned, setPinned] = useState(initialSnapshot);
+  const requested = pinned ?? initialSnapshot;
+  function setSelected(id: string) {
+    setPinned(undefined);
+    selectResult(id);
+  }
+  function openSnapshot(id: string) {
+    setPinned(id);
+    selectResult(id);
+    setEnabled(true);
+    setAttempt((count) => count + 1);
+  }
   const [enabled, setEnabled] = useState(true);
   const [error, setError] = useState(false);
   const [overlayError, setOverlayError] = useState(false);
@@ -56,11 +68,11 @@ export function usePdl1(endpoint: string, ready: boolean, view: Viewport | undef
         if (controller.signal.aborted) return;
         setData(response);
         const entries = response.results;
-        setSelected((id) => entries.some((entry) => entry.id === id) ? id : initialSnapshot ?? entries[0]?.id ?? '');
+        selectResult((id) => entries.some((entry) => entry.id === id) ? id : requested ?? entries[0]?.id ?? '');
       })
       .catch(() => { if (!controller.signal.aborted) setError(true); });
     return () => controller.abort();
-  }, [endpoint, ready, attempt, initialSnapshot]);
+  }, [endpoint, ready, attempt, requested]);
 
   useEffect(() => {
     if (!ready || !selected || !enabled || left >= right || top >= bottom) return;
@@ -75,7 +87,7 @@ export function usePdl1(endpoint: string, ready: boolean, view: Viewport | undef
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [endpoint, ready, selected, enabled, left, top, right, bottom, attempt]);
 
-  return { results, result, referenceMissing: Boolean(initialSnapshot && selected === initialSnapshot && results && !result), comparison: data?.comparison, selected, setSelected, enabled, setEnabled, error, overlayError,
+  return { results, result, referenceMissing: Boolean(requested && selected === requested && results && !result), comparison: data?.comparison, selected, setSelected, openSnapshot, enabled, setEnabled, error, overlayError,
     retry: () => setAttempt((count) => count + 1), cells: ready && enabled && overlay?.id === selected ? overlay.cells : undefined };
 }
 
@@ -114,11 +126,14 @@ export function Pdl1Badge({ state }: { state: Pdl1State }) {
   </aside>;
 }
 
-export function Pdl1Panel({ state }: { state: Pdl1State }) {
+export function Pdl1Panel({ state, reportHref, onSlide }: { state: Pdl1State; reportHref?: string; onSlide: () => void }) {
   const { results, result, selected, setSelected, enabled, setEnabled, error, overlayError, retry, cells, comparison, referenceMissing } = state;
   return <section className="pdl1-panel" aria-label="PD-L1 Results">
     <div className="pdl1-heading"><h2>PD-L1</h2>
-      {result && <label className="pdl1-toggle"><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} /> Cell Overlay</label>}
+      <div className="actions">
+        {result && <label className="pdl1-toggle"><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} /> Cell Overlay</label>}
+        <button type="button" className="button secondary" onClick={onSlide}>Return to WSI</button>
+      </div>
     </div>
     {error ? <div role="alert">Unable to load PD-L1 results. <button className="button secondary" onClick={retry}>Reload</button></div>
       : !results ? <p role="status">Checking PD-L1 results…</p>
@@ -126,6 +141,7 @@ export function Pdl1Panel({ state }: { state: Pdl1State }) {
         {results[0] && <button className="button secondary" onClick={() => setSelected(results[0].id)}>View Other Results</button>}</div>
       : !result ? <p>There are no PD-L1 results linked to this scan.</p>
       : <>
+        {reportHref && <div className="actions"><a className="button secondary" href={reportHref}>Open Report Draft</a></div>}
         <label className="form-field">Result Version<select value={selected} onChange={(event) => setSelected(event.target.value)}>
           {results.map((entry) => <option key={entry.id} value={entry.id}>{entry.score_type} · {typeLabel[entry.kind]}{entry.editor ? ` · ${entry.editor}` : ''} · {entry.id.slice(0, 8)}</option>)}
         </select></label>

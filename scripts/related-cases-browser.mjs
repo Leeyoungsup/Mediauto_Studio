@@ -80,7 +80,8 @@ try {
   await read(req.post(endpoint(pap), { data: { ...payload, patient_confirmed: false } }), 422);
 
   await admin.page.goto('/#viewer/' + pap.record.id + '/' + pap.scan.id);
-  await button(admin.page, 'Related Pap and Biopsy Cases').click();
+  await button(admin.page, 'Pap Review').click();
+  await button(admin.page, 'Compare Related Biopsy').click();
   const dialog = admin.page.getByRole('dialog', { name: 'Related Pap and Biopsy Cases' });
   await dialog.getByRole('combobox', { name: 'Related Scan' }).selectOption(biopsy.scan.id);
   await dialog.getByRole('checkbox', { name: 'I verified the patient match' }).check();
@@ -111,6 +112,8 @@ try {
   const right = compare.getByRole('region', { name: 'Related Case', exact: true });
   await left.getByText('Primary Case · RELATED-QA-PAP', { exact: true }).waitFor();
   await right.getByText('Related Case · RELATED-QA-BIOPSY', { exact: true }).waitFor();
+  await compare.getByRole('link', { name: 'Return to Pap Review', exact: true }).waitFor();
+  await left.getByText(/Papanicolaou · SVS · Scan/).waitFor();
   const viewport = (pane) => pane.getByRole('region', { name: 'Slide Image', exact: true });
   await button(left, 'Pan using minimap').waitFor();
   await button(right, 'Pan using minimap').waitFor();
@@ -120,6 +123,14 @@ try {
   await compare.waitForFunction((previous) => Number(document.querySelector(
     'section[aria-label="Primary Case"] [data-view-zoom]')?.dataset.viewZoom) > previous, oldLeft);
   assert.equal(Number(await viewport(right).getAttribute('data-view-zoom')), oldRight);
+  const [returned] = await Promise.all([
+    compare.context().waitForEvent('page'),
+    compare.getByRole('link', { name: 'Return to Pap Review', exact: true }).evaluate((link) => window.open(link.href, '_blank', 'noopener')),
+  ]);
+  await returned.waitForURL((target) => target.hash === `#viewer/${pap.record.id}/${pap.scan.id}?pap=review`);
+  await returned.getByRole('region', { name: 'Pap Specimen Review', exact: true }).waitFor();
+  await returned.getByRole('complementary', { name: 'Pap Candidate Gallery', exact: true }).waitFor();
+  await returned.close();
   const primaryCenter = Number(await viewport(left).getAttribute('data-view-center-x'));
   const relatedCenter = await viewport(right).getAttribute('data-view-center-x');
   const canvas = await left.getByLabel('WSI Canvas', { exact: true }).boundingBox();
