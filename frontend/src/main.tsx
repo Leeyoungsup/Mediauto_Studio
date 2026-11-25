@@ -16,6 +16,8 @@ import { PatientMatch } from './patient-match';
 import type { PatientSelection } from './patient-match';
 import { CaseDetail } from './case-detail';
 import { caseHref, caseTab } from './case-navigation';
+import { collectionHref, withCollection } from './workflow-navigation';
+import type { CollectionOrigin } from './workflow-navigation';
 import type { CaseTab } from './case-navigation';
 import { CaseDates } from './case-dates';
 import { CaseRequests, ReportDraftReferences, RequestPage } from './case-requests';
@@ -50,7 +52,7 @@ const settingsSections = [
   { key: 'pap', label: 'Pap Review Policy', icon: Microscope, admin: true },
   { key: 'notifications', label: 'Notifications', icon: Bell, admin: false },
 ] as const;
-type SettingsPage = { view: 'settings'; section?: Exclude<typeof settingsSections[number]['key'], ''>; accountTab?: AccountTab; noteCase?: string; noteScan?: string };
+type SettingsPage = { view: 'settings'; section?: Exclude<typeof settingsSections[number]['key'], ''>; accountTab?: AccountTab; noteCase?: string; noteScan?: string; requestReturn?: string };
 
 const accountLinks = [
   { tab: 'directory', label: 'Account Management', name: 'Accounts', icon: UsersRound },
@@ -58,8 +60,8 @@ const accountLinks = [
   { tab: 'audit', label: 'Account Audit Log', name: 'Account Audit', icon: ClipboardList },
 ] as const;
 
-type Page = { view: 'related-comparison'; id: string; anchor?: string } | { view: 'worklist'; scope: Scope } | { view: 'case'; id: string; files: boolean; tab?: CaseTab; selectedScan?: string } | { view: 'request'; id: string } | { view: 'or'; id?: string; scan?: string }
-  | { view: 'viewer'; id: string; slide?: string; snapshot?: string; roi?: string; roiOrigin?: RoiLocation; files: boolean } | { view: 'roi-search'; location: RoiLocation } | { view: 'collections'; id?: string } | { view: 'scans' } | SettingsPage;
+type Page = ({ view: 'related-comparison'; id: string; anchor?: string } | { view: 'worklist'; scope: Scope; collectionTarget?: string } | { view: 'case'; id: string; files: boolean; tab?: CaseTab; selectedScan?: string } | { view: 'request'; id: string; sourceScan?: string } | { view: 'or'; id?: string; scan?: string }
+  | { view: 'viewer'; id: string; slide?: string; snapshot?: string; roi?: string; roiOrigin?: RoiLocation; files: boolean; openRequests?: boolean; openReview?: boolean } | { view: 'roi-search'; location: RoiLocation } | { view: 'collections'; id?: string; entry?: string } | { view: 'scans' } | SettingsPage) & { collectionOrigin?: CollectionOrigin };
 type WorkflowAction = 'assignment' | 'review' | 'confirm';
 type Modal = 'register' | 'system' | null;
 
@@ -72,32 +74,46 @@ function isUuid(value?: string): value is string {
 }
 
 function readPage(): Page {
-  const [view, id, slide, snapshot, roi, sourceScan, sourceRoi] = location.hash.slice(1).split('/');
+  const [route, query] = location.hash.slice(1).split('?');
+  const params = new URLSearchParams(query);
+  const collection = params.get('collection') ?? undefined;
+  const entry = params.get('entry') ?? undefined;
+  const collectionOrigin = isUuid(collection) && isUuid(entry) ? { collection, entry } : undefined;
+  const [view, id, slide, snapshot, roi, sourceScan, sourceRoi] = route.split('/');
+  const viewerMode = { openRequests: params.get('requests') === '1', openReview: params.get('review') === '1', collectionOrigin };
   if (view === 'roi-search' && isUuid(id) && isUuid(slide) && isUuid(snapshot)) {
     return { view, location: { caseId: id, scanId: slide, roiId: snapshot } };
   }
   if (view === 'viewer' && isUuid(id) && isUuid(slide) && snapshot === 'roi' && isUuid(roi)) {
     const roiOrigin = isUuid(sourceScan) && isUuid(sourceRoi) ? { caseId: id, scanId: sourceScan, roiId: sourceRoi } : undefined;
-    return { view, id, slide, roi, roiOrigin, files: false };
+    return { view, id, slide, roi, roiOrigin, files: false, ...viewerMode };
   }
   if (view === 'related-comparison' && isUuid(id)) return { view, id, anchor: isUuid(slide) ? slide : undefined };
-  if (view === 'collections') return { view, id: isUuid(id) ? id : undefined };
+  if (view === 'collections') return { view, id: isUuid(id) ? id : undefined, entry: isUuid(slide) ? slide : undefined };
   if (view === 'or') return { view, id: id ? decodeRoute(id) : undefined, scan: slide ? decodeRoute(slide) : undefined };
   if (view === 'scans') return { view };
   if (view === 'settings') {
     const section = settingsSections.find(({ key }) => key === id)?.key || undefined;
     const accountTab = section === 'accounts' ? accountLinks.find(({ tab }) => tab === slide)?.tab ?? 'directory' : undefined;
     const noteCase = section === 'notifications' && isUuid(slide) ? slide : undefined;
-    return { view, section, accountTab, noteCase, noteScan: noteCase && snapshot ? decodeRoute(snapshot) : undefined };
+    const request = params.get('request') ?? undefined;
+    const requestScan = params.get('scan') ?? undefined;
+    const requestReturn = section === 'notifications' && isUuid(request)
+      ? withCollection(`#request/${request}${isUuid(requestScan) ? '?scan=' + requestScan : ''}`, collectionOrigin) : undefined;
+    return { view, section, accountTab, noteCase, requestReturn, noteScan: noteCase && snapshot ? decodeRoute(snapshot) : undefined };
   }
-  if (view === 'request' && id) return { view, id: decodeRoute(id) };
+  if (view === 'request' && id) {
+    const scan = params.get('scan') ?? undefined;
+    return { view, id: decodeRoute(id), sourceScan: isUuid(scan) ? scan : undefined, collectionOrigin };
+  }
   if ((view === 'case' || view === 'file-case') && id) {
     const tab = caseTab(slide);
-    return { view: 'case', id: decodeRoute(id), files: view === 'file-case', tab,
+    return { view: 'case', id: decodeRoute(id), files: view === 'file-case', tab, collectionOrigin,
       selectedScan: tab && snapshot ? decodeRoute(snapshot) : undefined };
   }
-  if ((view === 'viewer' || view === 'file-viewer') && id) return { view: 'viewer', id: decodeRoute(id), slide: slide ? decodeRoute(slide) : undefined, snapshot: /^[a-f0-9]{64}$/.test(snapshot ?? '') ? snapshot : undefined, files: view === 'file-viewer' };
-  return { view: 'worklist', scope: id === 'mine' || id === 'unassigned' ? id : 'all' };
+  if ((view === 'viewer' || view === 'file-viewer') && id) return { view: 'viewer', id: decodeRoute(id), slide: slide ? decodeRoute(slide) : undefined, snapshot: /^[a-f0-9]{64}$/.test(snapshot ?? '') ? snapshot : undefined, files: view === 'file-viewer', ...viewerMode };
+  return { view: 'worklist', scope: id === 'mine' || id === 'unassigned' ? id : 'all',
+    collectionTarget: slide === 'collection' && isUuid(snapshot) ? snapshot : undefined };
 }
 
 function ModalWindow({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
@@ -301,10 +317,10 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
 
   function showModal(next: Modal) { setFormError(''); setModal(next); }
   function navigateCase(item: DemoCase, scan?: string) {
-    location.hash = `${item.source === 'files' ? 'file-case' : 'case'}/${encodeURIComponent(item.recordId ?? item.id)}${scan ? `/slides/${encodeURIComponent(scan)}` : ''}`;
+    location.hash = withCollection(`#${item.source === 'files' ? 'file-case' : 'case'}/${encodeURIComponent(item.recordId ?? item.id)}${scan ? `/slides/${encodeURIComponent(scan)}` : ''}`, page.collectionOrigin);
   }
   function navigateViewer(item: DemoCase, slide?: string) {
-    location.hash = `${item.source === 'files' ? 'file-viewer' : 'viewer'}/${encodeURIComponent(item.recordId ?? item.id)}${slide ? `/${encodeURIComponent(slide)}` : ''}`;
+    location.hash = withCollection(`#${item.source === 'files' ? 'file-viewer' : 'viewer'}/${encodeURIComponent(item.recordId ?? item.id)}${slide ? `/${encodeURIComponent(slide)}` : ''}`, page.collectionOrigin);
   }
   function goBack() { location.hash = `worklist/${lastScope}`; }
   function openEditor(item: DemoCase, scan?: string) {
@@ -471,9 +487,11 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
           title={collapseNavigation ? 'Expand Navigation' : 'Collapse Navigation'} onClick={() => setNavigationCollapsed(!collapseNavigation)}>
           {collapseNavigation ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
         </button><span>Pathology Workspace</span><ChevronRight size={15} /><strong>{{ viewer: 'WSI Viewer', 'related-comparison': 'Pap and Biopsy Comparison', 'roi-search': 'ROI Similarity Search', case: 'Case Details', request: 'Analysis and Consultation Requests', or: 'OR Results', collections: 'Collections and Tumor Board', scans: 'Slide Registration', settings: (settingsAllowed ? accountLocation?.label : undefined) ?? 'Settings', worklist: 'Worklist' }[page.view]}</strong></div>
-        <div className="header-actions"><NotificationCenter key={user.id} organization={user.organization} /><span className="demo-label"><FlaskConical size={15} /> Demo Environment</span><button className="emr-chip" onClick={() => showModal('system')}><span /> EMR {emr} · LIS {lis}</button><span className="identity"><UserRound size={17} />{user.display_name}<small className="identity-role">{accountRoleLabels[user.role]}</small></span><button className="button secondary" onClick={logout}>Sign Out</button></div>
+        <div className="header-actions"><NotificationCenter key={user.id} organization={user.organization} requestId={page.view === 'request' ? page.id : undefined} /><span className="demo-label"><FlaskConical size={15} /> Demo Environment</span><button className="emr-chip" onClick={() => showModal('system')}><span /> EMR {emr} · LIS {lis}</button><span className="identity"><UserRound size={17} />{user.display_name}<small className="identity-role">{accountRoleLabels[user.role]}</small></span><button className="button secondary" onClick={logout}>Sign Out</button></div>
       </header>
       <main className="workspace-main" data-view={page.view}>
+        {requestAllowed && page.collectionOrigin && <a className="back-link workspace-collection-back"
+          href={collectionHref(page.collectionOrigin.collection, page.collectionOrigin.entry)}>Back to Collection</a>}
         {page.view === 'scans' && worklistNavigation}
         <div className="worklist-page" hidden={page.view !== 'worklist'}>
           {listError && <div className="notice" role="alert">{listError}<button className="button secondary" onClick={() => setRevision((value) => value + 1)}>Retry</button></div>}
@@ -508,6 +526,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
         </section>}
         {page.view === 'settings' && page.section === 'notifications' && <>
           {page.noteCase && <a className="back-link" href={caseHref(page.noteCase, 'notes', page.noteScan)}>Back to Case Notes</a>}
+          {page.requestReturn && <a className="back-link" href={page.requestReturn}>Back to Request</a>}
           <NotificationSettings organization={user.organization} />
         </>}
         {page.view === 'settings' && page.section !== 'notifications' && settingsAllowed && (page.section === 'accounts' ? <AccountsSettings tab={accountTab ?? 'directory'} /> : page.section === 'groups'
@@ -521,7 +540,7 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
         {((page.view === 'settings' && page.section !== 'notifications' && !settingsAllowed) || (page.view === 'scans' && !intakeAllowed)) && <div className="panel empty"><strong>You do not have permission to open this page.</strong><button className="button secondary" onClick={goBack}>Back to Worklist</button></div>}
         {page.view === 'or' && (orAllowed ? <ORResults organization={user.organization} caseId={page.id} scan={page.scan} canOpenCase={settingsAllowed} />
           : <div className="panel empty"><strong>You do not have permission to open the OR view.</strong></div>)}
-        {page.view === 'collections' && (requestAllowed ? <CollectionWorkspace organization={user.organization} selected={page.id} />
+        {page.view === 'collections' && (requestAllowed ? <CollectionWorkspace organization={user.organization} selected={page.id} selectedEntry={page.entry} />
           : <div className="panel empty"><strong>You do not have permission to open Collections.</strong></div>)}
         {page.view === 'roi-search' && (requestAllowed
           ? <RoiSearchPage key={`${page.location.caseId}/${page.location.scanId}/${page.location.roiId}`} location={page.location}
@@ -531,17 +550,17 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
         {page.view === 'related-comparison' && <Suspense fallback={<p role="status">Loading comparison…</p>}>
           <RelatedComparison key={page.id + '/' + (page.anchor ?? '')} organization={user.organization} id={page.id} anchor={page.anchor} />
         </Suspense>}
-        {page.view === 'request' && <RequestPage key={page.id} id={page.id} organization={user.organization} />}
+        {page.view === 'request' && <RequestPage key={page.id} id={page.id} organization={user.organization} sourceScan={page.sourceScan} collectionOrigin={page.collectionOrigin} />}
         {casePage && (!current ? <div className="panel empty"><CircleHelp size={28} /><strong>{casePage.files
           ? (intakeAllowed && filesLoading ? 'Loading case…' : 'Unable to load the case.')
           : detail?.key === detailKey ? detail?.error : 'Loading case…'}</strong><button className="button secondary" onClick={goBack}>Back to Worklist</button></div>
           : casePage.view === 'case' ? <CaseDetail key={current.id} item={current} relatedEndpoint={requestAllowed && clinicalCaseEndpoint ? clinicalCaseEndpoint + '/related-cases' : undefined} selectedScan={casePage.selectedScan} historyEndpoint={historyEndpoint} attachmentsEndpoint={attachmentsEndpoint} logsEndpoint={logsEndpoint} notesEndpoint={notesEndpoint}
-            initialTab={current.recordId ? casePage.tab : undefined}
+            initialTab={current.recordId ? casePage.tab : undefined} collectionOrigin={casePage.collectionOrigin}
             editor={current.recordId ? <CaseEditor key={casePage.selectedScan ?? ''} item={current} focusScan={casePage.tab === 'editor' ? casePage.selectedScan : undefined} organization={user.organization} editable={writable && current.status !== 'Review Complete'}
               canImport={user.role === 'admin'} onChanged={patientChanged}
               patient={<PatientIntegration item={current} org={user.organization} editable={writable} status={integration} onChanged={patientChanged} />} /> : undefined}
             frozen={frozenEndpoint && current.recordId ? <FrozenWorkflow caseId={current.recordId} scan={current.slides.find(({ id }) => id === casePage.selectedScan)?.id} endpoint={frozenEndpoint} /> : undefined}
-            requests={requestAllowed && current.recordId ? <CaseRequests organization={user.organization} item={current} /> : undefined}
+            requests={requestAllowed && current.recordId ? <CaseRequests organization={user.organization} item={current} sourceScan={casePage.selectedScan} collectionOrigin={casePage.collectionOrigin} /> : undefined}
             report={requestAllowed && current.recordId && clinicalCaseEndpoint ? <>
               <CaseReport endpoint={clinicalCaseEndpoint + '/report'} caseId={current.recordId} caseVersion={current.version} caseChanged={patientChanged} />
               <ReportDraftReferences organization={user.organization} caseId={current.recordId} />
@@ -555,12 +574,13 @@ function Workspace({ user, logout }: { user: User; logout: () => void }) {
             onReview={mayReview ? () => openWorkflow(current, 'review') : undefined}
             onConfirm={intakeAllowed && current.source === 'files' ? () => openWorkflow(current, 'confirm') : undefined} />
           : <Viewer key={current.id} item={current} relatedEndpoint={requestAllowed && clinicalCaseEndpoint ? clinicalCaseEndpoint + '/related-cases' : undefined} viewerAccount={user.id}
-            analysisEndpoint={requestAllowed ? clinicalCaseEndpoint : undefined}
-            reviewEndpoint={requestAllowed && clinicalCaseEndpoint ? clinicalCaseEndpoint + '/review-room' : undefined} activeSlide={casePage.slide} initialSnapshot={casePage.snapshot} initialRoi={casePage.roi} roiOrigin={casePage.roiOrigin} historyEndpoint={historyEndpoint} attachmentsEndpoint={attachmentsEndpoint} logsEndpoint={logsEndpoint} notesEndpoint={notesEndpoint} hasFrozenWorkflow={!!frozenEndpoint} requestsHref={requestAllowed && current.recordId ? `#case/${current.recordId}/requests` : undefined} onSlide={(id) => navigateViewer(current, id)} onBack={(scan) => navigateCase(current, scan)}
+            analysisEndpoint={requestAllowed ? clinicalCaseEndpoint : undefined} organization={user.organization}
+            openRequests={casePage.openRequests} openReview={casePage.openReview} collectionOrigin={casePage.collectionOrigin}
+            reviewEndpoint={requestAllowed && clinicalCaseEndpoint ? clinicalCaseEndpoint + '/review-room' : undefined} activeSlide={casePage.slide} initialSnapshot={casePage.snapshot} initialRoi={casePage.roi} roiOrigin={casePage.roiOrigin} historyEndpoint={historyEndpoint} attachmentsEndpoint={attachmentsEndpoint} logsEndpoint={logsEndpoint} notesEndpoint={notesEndpoint} hasFrozenWorkflow={!!frozenEndpoint} canRequest={requestAllowed && !!current.recordId} onSlide={(id) => navigateViewer(current, id)} onBack={(scan) => navigateCase(current, scan)}
             onReview={mayReview ? () => openWorkflow(current, 'review') : undefined} />)}
       </main>
     </div>
-    {referenceCase && <AddCaseReference organization={user.organization} record={referenceCase} onClose={() => setReferenceCase(undefined)} />}
+    {referenceCase && <AddCaseReference organization={user.organization} record={referenceCase} initialDestination={page.view === 'worklist' ? page.collectionTarget : undefined} onClose={() => setReferenceCase(undefined)} />}
     {modal === 'register' && <ModalWindow title="Register Case" onClose={() => showModal(null)}><form onSubmit={(event) => void register(event)}>
       <label className="form-field">Case ID<input name="case-number" placeholder="IMS-26-0149" required maxLength={40} /></label>
       {formError && <p className="form-error" role="alert">{formError}</p>}

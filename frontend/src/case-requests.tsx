@@ -2,10 +2,13 @@ import { IhcReviews, ModelRuns, modelNames, runStatuses } from './analysis-execu
 import type { Catalog } from './analysis-execution';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { ClipboardList, ScanLine } from 'lucide-react';
+import { Bell, ClipboardList, ScanLine } from 'lucide-react';
 import { ImageViewport } from './image-viewport';
 import { api, jsonBody } from './session';
 import type { DemoCase } from './demo';
+import { caseHref } from './case-navigation';
+import { withCollection } from './workflow-navigation';
+import type { CollectionOrigin } from './workflow-navigation';
 
 const kinds = { ai: 'PD-L1 Analysis', consult: 'Consultation' };
 const statuses = { open: 'Awaiting Assignment', assigned: 'Assigned', in_progress: 'In Progress', completed: 'Completed', failed: 'Failed', cancelled: 'Cancel' };
@@ -72,7 +75,9 @@ function Candidates({ candidates, required = false, initial }: { candidates: Can
   </select></label>;
 }
 
-export function CaseRequests({ organization, item }: { organization: string; item: DemoCase }) {
+export function CaseRequests({ organization, item, sourceScan, collectionOrigin, inViewer = false }: {
+  organization: string; item: DemoCase; sourceScan?: string; collectionOrigin?: CollectionOrigin; inViewer?: boolean;
+}) {
   const path = pathFor(organization) + '/cases/' + item.recordId + '/requests';
   const resource = useResource<{ requests: CaseRequest[]; candidates: Record<Kind, Candidate[]> }>(path);
   const [showForm, setShowForm] = useState(false);
@@ -80,8 +85,11 @@ export function CaseRequests({ organization, item }: { organization: string; ite
   const catalog = useResource<Catalog>(showForm && kind === 'ai' ? pathFor(organization) + '/analysis-models' : null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [created, setCreated] = useState<string>();
   const submission = useRef<{ key: string; payload: string } | null>(null);
   const scans = item.slides.filter(({ wsi }) => wsi?.source === 'clinical');
+  const activeScan = scans.find(({ wsi }) => wsi?.id === sourceScan)?.wsi?.id;
+  const requestHref = (id: string) => withCollection(`#request/${id}${inViewer && activeScan ? '?scan=' + activeScan : ''}`, collectionOrigin);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -94,7 +102,12 @@ export function CaseRequests({ organization, item }: { organization: string; ite
     try {
       const result = await api<CaseRequest>(path, jsonBody('POST', payload, { 'Idempotency-Key': submission.current.key }));
       changed();
-      location.hash = 'request/' + result.id;
+      if (inViewer) {
+        setCreated(result.id);
+        setShowForm(false);
+        submission.current = null;
+        resource.refresh();
+      } else location.hash = requestHref(result.id);
     } catch (failure) { setError(errorText(failure)); }
     finally { setBusy(false); }
   }
@@ -102,8 +115,11 @@ export function CaseRequests({ organization, item }: { organization: string; ite
   if (!resource.data) return <ResourceStatus error={resource.error} retry={resource.refresh} />;
   return <section>
     <div className="preview-label"><h2>Analysis and Consultation Requests</h2>
-      <button className="button secondary" onClick={() => setShowForm((value) => !value)} aria-expanded={showForm}>New Request</button></div>
-    {showForm && <form className="request-form" onSubmit={(event) => void submit(event)}>
+      <button className="button secondary" onClick={() => { setShowForm(!showForm); setCreated(undefined); setError(''); }}
+        aria-expanded={showForm}>{showForm ? 'Close Request Form' : 'New Request'}</button></div>
+    {created && <div className="notice" role="status">Request created.
+      <a className="button secondary" href={requestHref(created)}>Open Created Request</a></div>}
+    {showForm && <form className="request-form" aria-label="New Case Request" onSubmit={(event) => void submit(event)}>
       <label className="form-field">Request Type<select value={kind} onChange={(event) => setKind(event.target.value as Kind)}>
         <option value="consult">Consultation</option><option value="ai">AI Analysis</option>
       </select></label>
@@ -112,7 +128,7 @@ export function CaseRequests({ organization, item }: { organization: string; ite
         {catalog.data?.models.map((model) => <option key={model.key} value={model.key}>{model.name} · {model.version}</option>)}
       </select></label>}
       {kind === 'ai' && catalog.error && <ResourceStatus error={catalog.error} retry={catalog.refresh} />}
-      <label className="form-field">Target Scan<select name="scan" required={kind === 'ai'}>
+      <label className="form-field">Target Scan<select name="scan" defaultValue={activeScan ?? ''} required={kind === 'ai'}>
         <option value="">{kind === 'ai' ? 'Select a scan' : 'None'}</option>
         {scans.map(({ id, label, stain, wsi }) => <option key={id} value={wsi?.id}>{label ?? id} · {stain} · {wsi?.format}</option>)}
       </select></label>
@@ -123,10 +139,10 @@ export function CaseRequests({ organization, item }: { organization: string; ite
       <button className="button primary" disabled={busy || (kind === 'ai' && !scans.length)}>Create Request</button>
     </form>}
     {resource.data.requests.length ? <ul className="request-list">{resource.data.requests.map((row) => <li key={row.id}>
-      <a href={'#request/' + row.id}><strong>{requestName(row)} · {requestStatus(row)}</strong><span>{row.question}</span></a>
+      <a href={requestHref(row.id)}><strong>{requestName(row)} · {requestStatus(row)}</strong><span>{row.question}</span></a>
       <small>{row.assignee_name ?? 'Unassigned'} · {time(row.updated_at)}</small>
     </li>)}</ul> : <p className="empty-inline">This case has no requests.</p>}
-    {item.recordId && <IhcReviews endpoint={pathFor(organization) + '/cases/' + item.recordId + '/ihc-reviews'} caseId={item.recordId} />}
+    {!inViewer && item.recordId && <IhcReviews endpoint={pathFor(organization) + '/cases/' + item.recordId + '/ihc-reviews'} caseId={item.recordId} />}
   </section>;
 }
 
@@ -153,7 +169,9 @@ export function ReportDraftReferences({ organization, caseId }: { organization: 
   </section>;
 }
 
-export function RequestPage({ organization, id }: { organization: string; id: string }) {
+export function RequestPage({ organization, id, sourceScan, collectionOrigin }: {
+  organization: string; id: string; sourceScan?: string; collectionOrigin?: CollectionOrigin;
+}) {
   const path = pathFor(organization) + '/requests/' + encodeURIComponent(id);
   const resource = useResource<RequestDetail>(path);
   const refreshRequest = resource.refresh;
@@ -184,19 +202,29 @@ export function RequestPage({ organization, id }: { organization: string; id: st
   }
 
   if (!row) return <ResourceStatus error={resource.error} retry={resource.refresh} />;
+  const caseRequests = row.case_id ? withCollection(caseHref(row.case_id, 'requests', sourceScan ?? row.scan_id ?? undefined), collectionOrigin) : '#worklist/all';
+  const backToViewer = row.case_id && sourceScan
+    ? withCollection(`#viewer/${row.case_id}/${sourceScan}?requests=1`, collectionOrigin) : undefined;
+  const preferences = withCollection(`#settings/notifications?request=${id}${sourceScan ? '&scan=' + sourceScan : ''}`, collectionOrigin);
   return <>
-    <a className="back-link" href={row.case_id ? `#case/${row.case_id}/requests` : '#worklist/all'}>{row.case_id ? 'Case Requests' : 'Worklist'}</a>
+    <a className="back-link" href={caseRequests}>{row.case_id ? 'Case Requests' : 'Worklist'}</a>
     <div className="page-heading"><div><h1>{requestName(row)} Requests</h1><p>{row.case_number}</p></div>
-      <button className="button secondary" onClick={() => { setAction(undefined); setError(''); resource.refresh(); }}>Refresh Request</button></div>
+      <div className="actions">
+        {backToViewer && <a className="button secondary" href={backToViewer}><ScanLine size={16} /> Back to Viewer Requests</a>}
+        <a className="button secondary" href={preferences}><Bell size={16} /> Notification Preferences</a>
+        <button className="button secondary" onClick={() => { setAction(undefined); setError(''); resource.refresh(); }}>Refresh Request</button>
+      </div></div>
     <div className="detail-layout">
       <section className="panel detail-content">
         <h2>{requestStatus(row)}</h2><p className="request-text">{row.question}</p>
         <dl className="key-values"><div><dt>Requested By</dt><dd>{row.requested_by}</dd></div>
-          <div><dt>Request Assignee</dt><dd>{row.assignee_name ?? 'Unassigned'}</dd></div></dl>
-        {row.result_note && <p className="request-text">{row.result_note}</p>}
+          <div><dt>Request Assignee</dt><dd>{row.assignee_name ?? 'Unassigned'}</dd></div>
+          <div><dt>Target Scan</dt><dd>{row.scan ? `${row.scan.label} · ${row.scan.format} · ${row.scan.id.slice(0, 8)}` : 'Case-level Request'}</dd></div></dl>
+        {row.result_note && <section className="request-result"><h3>{row.kind === 'consult' ? 'Consultation Result' : 'Result Note'}</h3>
+          <p className="request-text">{row.result_note}</p></section>}
         {row.snapshot && <SnapshotReference snapshot={row.snapshot} />}
         {row.status === 'completed' && row.case_id &&
-          <a className="button secondary" href={`#case/${row.case_id}/report`}><ClipboardList size={16} /> Open Report Draft References</a>}
+          <a className="button secondary" href={withCollection(caseHref(row.case_id, 'report', row.scan_id ?? sourceScan), collectionOrigin)}><ClipboardList size={16} /> Open Report Draft References</a>}
         <div className="actions request-actions">
           {row.actions.map((key) => <button key={key} className="button secondary" disabled={busy}
             onClick={() => { setAction(key); setError(''); }}>{actions[key]}</button>)}

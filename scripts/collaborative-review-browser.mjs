@@ -72,15 +72,24 @@ try {
     } catch (failure) {
       throw new Error('Viewer did not load. ' + (await page.locator('main').innerText()).slice(0, 1000) + ' ' + errors.join(' '), { cause: failure });
     }
+    const scanBefore = await image(page).boundingBox();
     await button(page, 'Collaborative Review').click();
     await panel(page).getByRole('status').filter({ hasText: 'Connected' }).waitFor();
+    const scanAfter = await image(page).boundingBox();
+    assert.equal(scanAfter.y, scanBefore.y);
+    assert.equal(scanAfter.width, scanBefore.width);
   }
   await open(owner);
   await button(panel(owner), 'Start Review Session').click();
   await panel(owner).getByText('Driving', { exact: true }).waitFor();
   await panel(owner).getByRole('combobox', { name: 'Invite Participant' }).selectOption(account.id);
   await button(panel(owner), 'Invite').click();
-  await open(peer);
+  await panel(owner).getByRole('list', { name: 'Participants' }).getByText(account.display_name, { exact: true }).waitFor();
+  await panel(owner).getByText('Session Link for Invited Participants', { exact: true }).click();
+  const invitation = await panel(owner).getByRole('textbox', { name: 'Review Session Link' }).inputValue();
+  await peer.goto(invitation);
+  await panel(peer).getByRole('status').filter({ hasText: 'Connected' }).waitFor();
+  await panel(peer).getByText('Microsoft Teams · Not Configured', { exact: true }).waitFor();
   await button(panel(peer), 'Join Review Session').click();
   await button(panel(peer), 'Follow Driver').click();
   await panel(peer).getByText('Following', { exact: true }).waitFor();
@@ -133,6 +142,7 @@ try {
   await button(owner, 'Zoom In').click();
   await owner.waitForFunction((zoom) => Number(document.querySelector('.image-panel')?.dataset.viewZoom) > zoom, oldZoom);
   const reconnect = performance.now();
+  await button(panel(peer), 'Retry Connection').click();
   await peer.context().setOffline(false);
   await panel(peer).getByRole('status').filter({ hasText: 'Connected' }).waitFor();
   await compare(peer, await camera(owner));
@@ -156,6 +166,13 @@ try {
   await panel(peer).getByText('No review invitation is available for this account.', { exact: true }).waitFor();
   await panel(owner).getByText('Driving', { exact: true }).waitFor();
   assert.ok(await image(peer).isVisible());
+  await peer.setViewportSize({ width: 390, height: 844 });
+  await peer.getByRole('tab', { name: 'History', exact: true }).click();
+  await button(panel(peer), 'Close Review Panel').click();
+  await panel(peer).waitFor({ state: 'hidden' });
+  await button(peer, 'Collaborative Review').click();
+  await button(panel(peer), 'Close Review Panel').click();
+  await peer.getByRole('tabpanel', { name: 'History', exact: true }).waitFor();
 
   const logs = await checked(owner.request.get(prefix + '/cases/' + record.id + '/logs', { params: { action: 'review_drive_changed' } }));
   assert.ok(logs.rows.length >= 2);

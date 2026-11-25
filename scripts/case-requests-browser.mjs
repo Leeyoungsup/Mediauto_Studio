@@ -45,9 +45,16 @@ try {
   const createUrl = `${clinical}/cases/${caseId}/requests`;
 
   await doctor.page.goto('/#viewer/' + caseId + '/' + scan);
-  await doctor.page.getByRole('link', { name: 'Analysis and Consultation Requests', exact: true }).click();
-  await button(doctor.page, 'New Request').click();
-  await doctor.page.getByLabel('Target Scan').selectOption(scan);
+  await button(doctor.page, 'Pan using minimap').waitFor();
+  const canvas = doctor.page.getByLabel('WSI Canvas', { exact: true });
+  const prior = await canvas.elementHandle();
+  await doctor.page.getByRole('tab', { name: 'Requests', exact: true }).click();
+  const panel = doctor.page.getByRole('tabpanel', { name: 'Requests' });
+  await button(panel, 'Return to Slides').click();
+  assert.ok(await canvas.evaluate((node, earlier) => node === earlier, prior));
+  await button(doctor.page, 'Analysis and Consultation Requests').click();
+  await button(panel, 'New Request').click();
+  assert.equal(await panel.getByLabel('Target Scan').inputValue(), scan);
   await doctor.page.getByLabel('Request Details').fill('Synthetic consultation request');
   await doctor.page.route('**/cases/*/requests', async (route) => {
     if (route.request().method() !== 'POST') return route.continue();
@@ -58,8 +65,16 @@ try {
   await button(doctor.page, 'Create Request').click();
   await doctor.page.getByRole('alert').waitFor();
   await button(doctor.page, 'Create Request').click();
+  await panel.getByRole('link', { name: 'Open Created Request' }).click();
   await state(doctor.page, 'Awaiting Assignment');
-  const requestId = new URL(doctor.page.url()).hash.split('/').at(-1);
+  const requestId = new URL(doctor.page.url()).hash.split('?')[0].split('/').at(-1);
+  await doctor.page.getByRole('main').getByRole('link', { name: 'Notification Preferences' }).click();
+  await doctor.page.getByRole('region', { name: 'Notification Settings' }).waitFor();
+  await doctor.page.getByRole('link', { name: 'Back to Request' }).click();
+  await state(doctor.page, 'Awaiting Assignment');
+  await doctor.page.getByRole('link', { name: 'Back to Viewer Requests' }).click();
+  await panel.getByText('Synthetic consultation request', { exact: true }).click();
+  await state(doctor.page, 'Awaiting Assignment');
   assert.equal((await (await doctor.page.request.get(createUrl)).json()).requests.length, 1);
 
   await act(doctor.page, 'Assign Request', () => doctor.page.getByLabel('Request Assignee').selectOption(consultant.user.id));
@@ -67,6 +82,12 @@ try {
   await consultant.page.goto('/');
   await openNotice(consultant.page, 'Request Assigned');
   await state(consultant.page, 'Assigned');
+  await consultant.page.locator('details.request-inbox > summary').click();
+  const inbox = consultant.page.getByRole('region', { name: 'Request Inbox' });
+  await inbox.getByLabel('This Request Only').check();
+  await inbox.getByText(/^Request Assigned/).first().waitFor();
+  await consultant.page.locator('details.request-inbox > summary').click();
+  assert.equal(await consultant.page.getByRole('link', { name: 'Back to Viewer Requests' }).count(), 0);
   const requestPath = `${clinical}/requests/${requestId}`;
   assert.equal((await consultant.page.request.get('/api/worklist/' + caseId)).status(), 404);
   assert.equal((await consultant.page.request.get('/api/wsi/clinical/' + scan)).status(), 404);

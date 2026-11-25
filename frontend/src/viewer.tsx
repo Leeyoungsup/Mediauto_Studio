@@ -5,6 +5,9 @@ import type { RoiLocation } from './roi-search';
 import { useEffect, useRef, useState } from 'react';
 import { ClipboardList, ArrowLeft, Bell, ExternalLink, GalleryHorizontalEnd, Images, PanelLeftClose, PanelLeftOpen, Maximize, Minimize, Settings2, ScanLine, History, FileText, Camera, List, MessageSquare, UsersRound, FlaskConical, PanelsTopLeft, SquarePen } from 'lucide-react';
 import type { DemoCase } from './demo';
+import { CaseRequests } from './case-requests';
+import { withCollection } from './workflow-navigation';
+import type { CollectionOrigin } from './workflow-navigation';
 import { CaseNotes } from './case-notes';
 import { caseHref, notificationPreferencesHref } from './case-navigation';
 import { CaseLogs } from './case-logs';
@@ -18,17 +21,17 @@ import { ScanReference, SlidePreview, StatusLabel } from './worklist';
 
 import { WorkspaceTabs } from './workspace-tabs';
 
-type ViewerTab = 'slides' | 'analysis' | 'history' | 'media' | 'gross' | 'notes' | 'logs';
+type ViewerTab = 'slides' | 'analysis' | 'history' | 'media' | 'gross' | 'notes' | 'logs' | 'requests';
 
-export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsHref, hasFrozenWorkflow, initialSnapshot, initialRoi, roiOrigin, historyEndpoint, attachmentsEndpoint, logsEndpoint, notesEndpoint, reviewEndpoint, viewerAccount, relatedEndpoint, analysisEndpoint }: {
-  item: DemoCase; activeSlide?: string; onSlide: (id: string) => void; onBack: (scan?: string) => void; onReview?: () => void; requestsHref?: string; hasFrozenWorkflow?: boolean; initialSnapshot?: string; initialRoi?: string; roiOrigin?: RoiLocation; historyEndpoint?: string; attachmentsEndpoint?: string; logsEndpoint?: string; notesEndpoint?: string; reviewEndpoint?: string; relatedEndpoint?: string; viewerAccount: string;
-  analysisEndpoint?: string;
+export function Viewer({ item, activeSlide, onSlide, onBack, onReview, canRequest, hasFrozenWorkflow, initialSnapshot, initialRoi, roiOrigin, historyEndpoint, attachmentsEndpoint, logsEndpoint, notesEndpoint, reviewEndpoint, viewerAccount, relatedEndpoint, analysisEndpoint, organization, openRequests, openReview, collectionOrigin }: {
+  item: DemoCase; activeSlide?: string; onSlide: (id: string) => void; onBack: (scan?: string) => void; onReview?: () => void; canRequest?: boolean; hasFrozenWorkflow?: boolean; initialSnapshot?: string; initialRoi?: string; roiOrigin?: RoiLocation; historyEndpoint?: string; attachmentsEndpoint?: string; logsEndpoint?: string; notesEndpoint?: string; reviewEndpoint?: string; relatedEndpoint?: string; viewerAccount: string;
+  analysisEndpoint?: string; organization: string; openRequests?: boolean; openReview?: boolean; collectionOrigin?: CollectionOrigin;
 }) {
-  const [contextTab, setContextTab] = useState<Exclude<ViewerTab, 'analysis'>>('slides');
+  const [contextTab, setContextTab] = useState<Exclude<ViewerTab, 'analysis'>>(openRequests && canRequest ? 'requests' : 'slides');
   const [comparing, setComparing] = useState(false);
   const [analysisOpen, setAnalysisOpen] = useState(false);
   const [reviewSelection, setReviewSelection] = useState<string>();
-  const review = useCollaborativeReview(reviewEndpoint, viewerAccount);
+  const review = useCollaborativeReview(reviewEndpoint, viewerAccount, openReview);
   const followingFrame = review.following ? review.room?.frame : undefined;
   const inReview = review.state?.state === 'joined';
   const noCaseAccess = review.connection === 'denied';
@@ -37,7 +40,9 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
     if (followingFrame?.scan_id) setReviewSelection(followingFrame.scan_id);
   }, [followingFrame?.scan_id]);
   useEffect(() => { if (inReview) setComparing(false); }, [inReview]);
+  useEffect(() => { if (openRequests && canRequest) { setAnalysisOpen(false); setContextTab('requests'); } }, [openRequests, canRequest]);
   const root = useRef<HTMLElement>(null);
+  const reviewButton = useRef<HTMLButtonElement>(null);
   const trayList = useRef<HTMLDivElement>(null);
   const singleCamera = useRef<{ id: string; camera: SlideCamera }>(undefined);
   const [returnCamera, setReturnCamera] = useState<{ id: string; camera: SlideCamera }>();
@@ -112,6 +117,7 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
     ...(attachmentsEndpoint ? [{ key: 'media', label: 'Media', icon: FileText }, { key: 'gross', label: 'Gross Images', icon: Camera }] : []),
     ...(notesEndpoint ? [{ key: 'notes', label: 'Notes', icon: MessageSquare }] : []),
     ...(logsEndpoint ? [{ key: 'logs', label: 'Case Logs', icon: List }] : []),
+    ...(canRequest ? [{ key: 'requests', label: 'Requests', icon: MessageSquare }] : []),
   ] as { key: ViewerTab; label: string; icon: typeof ScanLine; disabled?: boolean }[];
   const activeLabel = tabs.find((tab) => tab.key === activeTab)?.label;
   const isDocument = contextTab !== 'slides';
@@ -124,15 +130,19 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
     <p role="alert">Case access is no longer available.</p>
     <a href="#worklist/all">Back to Worklist</a>
   </section>;
-  const reportHref = requestsHref && item.recordId ? caseHref(item.recordId, 'report', slide?.id) : undefined;
-  const documentHref = item.recordId && contextTab !== 'slides' ? caseHref(item.recordId, contextTab, slide?.id) : undefined;
+  const reportHref = canRequest && item.recordId ? withCollection(caseHref(item.recordId, 'report', slide?.id), collectionOrigin) : undefined;
+  const documentHref = item.recordId && contextTab !== 'slides' ? withCollection(caseHref(item.recordId, contextTab, slide?.id), collectionOrigin) : undefined;
   return <section ref={root} className="viewer-workbench" aria-label="Slide Review">
     <div className="page-heading viewer-heading">
       <div className="viewer-context">
         <button className="back-link" onClick={() => onBack(slide?.id)}><ArrowLeft size={16} /> Case Details</button>
         <div className="viewer-title"><h1>WSI Viewer</h1><p>{item.id} · {item.specimen}</p></div>
-        {reviewEndpoint && <button className="icon-button" type="button" title="Collaborative Review" aria-label="Collaborative Review"
-          aria-expanded={review.open} onClick={review.toggle}><UsersRound size={18} /></button>}
+        {reviewEndpoint && <button ref={reviewButton} className="button secondary viewer-collaboration" type="button" aria-label="Collaborative Review"
+          aria-expanded={review.open} aria-controls={review.open ? 'collaborative-review-panel' : undefined}
+          aria-describedby={inReview ? 'viewer-review-mode' : undefined} data-joined={inReview || undefined} onClick={review.toggle}>
+          <UsersRound size={16} /> <span className="viewer-collaboration-label">Collaborative Review</span>
+          {inReview && <span className="review-mode" id="viewer-review-mode">{review.connection === 'reconnecting' ? 'Reconnecting…' : review.driving ? 'Driving' : review.following ? 'Following' : 'Independent'}</span>}
+        </button>}
       </div>
       <div className="actions"><StatusLabel status={item.status} />
       {roiOrigin && <><a className="button secondary" href={roiViewerHref(roiOrigin)}>Back to Source ROI</a>
@@ -153,15 +163,20 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
         {fullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
       </button>
       {!comparing && <button className="button secondary" disabled={available.length < 2 || inReview} onClick={() => setComparing(true)}><GalleryHorizontalEnd size={16} /> Multi View</button>}
-      {item.recordId && <a className="button secondary viewer-editor-link" href={caseHref(item.recordId, 'editor', slide?.id)}><SquarePen size={15} /> Case Editor</a>}
+      {item.recordId && <a className="button secondary viewer-editor-link" href={withCollection(caseHref(item.recordId, 'editor', slide?.id), collectionOrigin)}><SquarePen size={15} /> Case Editor</a>}
       {reportHref && <a className="button secondary" href={reportHref}><ClipboardList size={16} /> Report Draft</a>}
       {hasFrozenWorkflow && item.recordId && <a className="button secondary" href={caseHref(item.recordId, 'frozen', slide?.id)}><ClipboardList size={16} /> Frozen Section</a>}
-      {requestsHref && <a className="button secondary" href={requestsHref} aria-label="Analysis and Consultation Requests"><MessageSquare size={15} /> Requests</a>}
+      {canRequest && <button type="button" className="button secondary" aria-label="Analysis and Consultation Requests"
+        aria-pressed={contextTab === 'requests'} onClick={() => {
+          selectTab('requests');
+          document.getElementById('viewer-workspace-panel-tab-requests')?.focus();
+        }}><MessageSquare size={15} /> Requests</button>}
       {!comparing && onReview && <button className="button secondary" disabled={!slide?.wsi} onClick={onReview}>{item.status === 'In Review' ? 'Review Complete' : 'Start Review'}</button>}</div></div>
     <WorkspaceTabs label="Viewer Workspace" tabs={tabs} active={activeTab} onSelect={selectTab} panelId="viewer-workspace-panel" />
     {fullscreenError && <p className="notice" role="alert">{fullscreenError}</p>}
-    {review.open && reviewEndpoint && <CollaborativeReview review={review} />}
     <div id="viewer-workspace-panel" role="tabpanel" aria-labelledby={'viewer-workspace-panel-tab-' + activeTab} className="viewer-stage" data-document={isDocument}>
+        {review.open && reviewEndpoint && <CollaborativeReview review={review} sessionHref={item.recordId ? `#viewer/${item.recordId}?review=1` : undefined}
+        onClose={() => { review.toggle(); reviewButton.current?.focus(); }} />}
       <div inert={isDocument} className="viewer-scan-stage">
     {comparing ? <MultiView slides={available} primary={slide?.id} onClose={() => {
       setReturnCamera(singleCamera.current);
@@ -173,7 +188,7 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
         </button>)}</div>
       </aside>
       {slide?.wsi ? <ImageViewport key={slide.wsi.id + ':' + (initialSnapshot ?? initialRoi ?? '')} scan={slide.wsi} initialSnapshot={initialSnapshot}
-        initialRoi={initialRoi} initialCamera={returnCamera?.id === slide.id ? returnCamera.camera : undefined} roiCaseId={requestsHref && item.recordId ? item.recordId : undefined} label={slide.label ?? slide.id} stain={slide.stain}
+        initialRoi={initialRoi} initialCamera={returnCamera?.id === slide.id ? returnCamera.camera : undefined} roiCaseId={canRequest && item.recordId ? item.recordId : undefined} label={slide.label ?? slide.id} stain={slide.stain}
         analysis={analysisEndpoint && slide.wsi.source === 'clinical' && !review.following ?
           { caseEndpoint: analysisEndpoint, open: analysisOpen, change: (open) => selectTab(open ? 'analysis' : 'slides') } : undefined}
         sharedReview={reviewEndpoint ? {
@@ -212,6 +227,8 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, requestsH
             <CaseAttachments key={contextTab} endpoint={attachmentsEndpoint} kind={contextTab === 'media' ? 'pdf' : 'gross'} />}
           {contextTab === 'notes' && notesEndpoint && <CaseNotes endpoint={notesEndpoint} />}
           {contextTab === 'logs' && logsEndpoint && <CaseLogs endpoint={logsEndpoint} />}
+          {contextTab === 'requests' && canRequest && <CaseRequests organization={organization} item={item} sourceScan={slide?.wsi?.id}
+            collectionOrigin={collectionOrigin} inViewer />}
         </div>
       </section>}
     </div>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { auditAttemptId, jsonBody } from './session';
+import { Link2, RotateCw, Video, X } from 'lucide-react';
 import type { Camera } from './viewer-tools';
 
 type Frame = Camera & { scan_id: string };
@@ -24,12 +25,12 @@ async function call<T>(path: string, client: string, options?: RequestInit): Pro
   return response.json();
 }
 
-export function useCollaborativeReview(endpoint: string | undefined, identity: string) {
+export function useCollaborativeReview(endpoint: string | undefined, identity: string, openFromLink = false) {
   const storageKey = 'mediauto-review-open:' + identity + ':' + (endpoint ?? '');
   const joinedKey = storageKey + ':joined';
   const [client] = useState(auditAttemptId);
   const pendingResume = useRef(sessionStorage.getItem(joinedKey) === '1');
-  const [open, setOpen] = useState(() => pendingResume.current || sessionStorage.getItem(storageKey) === '1');
+  const [open, setOpen] = useState(() => openFromLink || pendingResume.current || sessionStorage.getItem(storageKey) === '1');
   const [state, setState] = useState<State>();
   const [connection, setConnection] = useState<'connecting' | 'connected' | 'reconnecting' | 'denied'>('connecting');
   const [busy, setBusy] = useState(false);
@@ -42,6 +43,7 @@ export function useCollaborativeReview(endpoint: string | undefined, identity: s
   const network = useRef(false);
   const joined = state?.state === 'joined';
   const enabled = !!endpoint && (open || joined);
+  useEffect(() => { if (openFromLink) setOpen(true); }, [openFromLink]);
 
   function receive(next: State) {
     const previous = current.current?.room;
@@ -145,6 +147,7 @@ export function useCollaborativeReview(endpoint: string | undefined, identity: s
   const driving = !!(joined && room && room.driver_id === room.you);
   const following = !!(joined && room && !driving && room.follow);
   return { open, state, room, driving, following, connection, busy, actionError, act,
+    retry: () => setRevision((value) => value + 1),
     toggle: () => { setOpen(!open); sessionStorage.setItem(storageKey, open ? '0' : '1'); },
     camera: (scan_id: string, value: Camera) => { latestCamera.current = { scan_id, x: value.x, y: value.y, zoom: value.zoom }; },
   };
@@ -152,7 +155,7 @@ export function useCollaborativeReview(endpoint: string | undefined, identity: s
 
 type Review = ReturnType<typeof useCollaborativeReview>;
 
-export function CollaborativeReview({ review }: { review: Review }) {
+export function CollaborativeReview({ review, sessionHref, onClose }: { review: Review; sessionHref?: string; onClose: () => void }) {
   const { state, room, busy, connection, actionError, act } = review;
   const [invite, setInvite] = useState('');
   const [nextDriver, setNextDriver] = useState('');
@@ -162,21 +165,30 @@ export function CollaborativeReview({ review }: { review: Review }) {
   const drivers = room?.participants.filter((person) => person.online && person.id !== room.you) ?? [];
   const actor = room?.participants.find((person) => person.id === room.driver_id);
   const mayAct = network && !busy;
-  return <section className="panel detail-content review-room" aria-label="Collaborative Review">
+  const readyDriver = drivers.some(({ id }) => id === nextDriver);
+  const readyInvite = room?.candidates.some(({ id }) => id === invite);
+  return <section className="panel detail-content review-room" aria-label="Collaborative Review" id="collaborative-review-panel">
     <div className="preview-label"><h2>Collaborative Review</h2>
-      <span role="status">{({ connecting: 'Connecting', connected: 'Connected', reconnecting: 'Reconnecting…', denied: 'Case Access Unavailable' })[connection]}</span>
+      <div className="actions">
+        <span className="count" role="status">{({ connecting: 'Connecting', connected: 'Connected', reconnecting: 'Reconnecting…', denied: 'Case Access Unavailable' })[connection]}</span>
+        {connection === 'reconnecting' && <button type="button" className="button secondary" onClick={review.retry}><RotateCw size={15} /> Retry Connection</button>}
+        <button type="button" className="icon-button" aria-label="Close Review Panel" onClick={onClose}><X size={16} /></button>
+      </div>
     </div>
     {actionError && <p role="alert" className="form-error">{actionError}</p>}
     {state?.state === 'available' && <button className="button primary" disabled={!mayAct} onClick={() => void act('')}>Start Review Session</button>}
     {state?.state === 'unavailable' && <p>No review invitation is available for this account.</p>}
-    {state?.state === 'invited' && <button className="button primary" disabled={!mayAct} onClick={() => void act(localPath + '/join')}>Join Review Session</button>}
+    {state?.state === 'invited' && <div className="actions"><p>Review session available{actor ? ' · Driver: ' + actor.name : ''}</p>
+      <button className="button primary" disabled={!mayAct} onClick={() => void act(localPath + '/join')}>Join Review Session</button></div>}
     {joined && room && <div className="review-room-layout">
       <div>
         <p><strong>{review.driving ? 'Driving' : review.following ? 'Following' : 'Independent View'}</strong>
           {' · '}{actor ? `Driver: ${actor.name}` : 'Driver unavailable'}{!room.driver_online && ' · Offline'}</p>
+        <h3>Participants <span className="muted">{room.participants.filter(({ online }) => online).length} Online</span></h3>
         <ul className="review-people" aria-label="Participants">{room.participants.map((person) => <li key={person.id}>
-          <strong>{person.name}{person.id === room.you ? ' (You)' : ''}</strong>
-          <small>{person.id === room.driver_id ? 'Driver' : person.follow ? 'Following' : 'Independent'} · {person.online ? 'Online' : 'Offline'}</small>
+          <span className="review-avatar" data-color={parseInt(person.id.slice(-2), 16) % 6} aria-hidden="true">{person.name.slice(0, 1).toUpperCase()}</span>
+          <div><strong>{person.name}{person.id === room.you ? ' (You)' : ''}</strong>
+          <small>{person.id === room.driver_id ? 'Driver' : person.online ? person.follow ? 'Following' : 'Independent' : 'Participant'} · {person.online ? 'Online' : 'Offline'}</small></div>
           {room.is_owner && person.id !== room.you && <button type="button" className="button secondary" disabled={!mayAct}
             onClick={() => void act(localPath + '/participants/' + person.id, 'PUT', { active: false })}>Revoke {person.name}</button>}
         </li>)}</ul>
@@ -194,23 +206,31 @@ export function CollaborativeReview({ review }: { review: Review }) {
         </div>
         {room.is_owner && <form className="actions" onSubmit={(event) => {
           event.preventDefault();
+          if (!readyInvite || !mayAct) return;
           void act(localPath + '/participants/' + invite, 'PUT', { active: true }); setInvite('');
         }}>
           <label className="form-field">Invite Participant<select value={invite} required onChange={(event) => setInvite(event.target.value)}>
             <option value="">Select a user</option>{room.candidates.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}
           </select></label>
-          <button className="button secondary" disabled={!invite || !mayAct}>Invite</button>
+          <button className="button secondary" disabled={!readyInvite || !mayAct}>Invite</button>
         </form>}
         {review.driving && <form className="actions" onSubmit={(event) => {
           event.preventDefault();
+          if (!readyDriver || !mayAct) return;
           void act(localPath + '/drive', 'PUT', { epoch: room.epoch, driver_id: nextDriver }); setNextDriver('');
         }}>
           <label className="form-field">Next Driver<select value={nextDriver} required onChange={(event) => setNextDriver(event.target.value)}>
             <option value="">Select a connected participant</option>{drivers.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}
           </select></label>
-          <button className="button secondary" disabled={!nextDriver || !mayAct}>Hand Off Drive</button>
+          <button className="button secondary" disabled={!readyDriver || !mayAct}>Hand Off Drive</button>
         </form>}
+        {room.is_owner && sessionHref && <details className="review-session-link">
+          <summary><Link2 size={15} /> Session Link for Invited Participants</summary>
+          <label className="form-field">Review Session Link<input readOnly value={new URL(sessionHref, location.href).href}
+            onFocus={(event) => event.currentTarget.select()} /></label>
+        </details>}
       </div>
     </div>}
+    <p className="review-teams"><Video size={15} aria-hidden="true" /> Microsoft Teams · Not Configured</p>
   </section>;
 }

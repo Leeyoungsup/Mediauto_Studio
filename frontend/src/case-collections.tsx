@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { modelNames } from './analysis-execution';
 import { api, auditAttemptId, jsonBody } from './session';
+import { ArrowDown, ArrowUp, Check, ClipboardList, ScanLine } from 'lucide-react';
+import { collectionHref as href, withCollection } from './workflow-navigation';
+import type { CollectionOrigin } from './workflow-navigation';
 
 type Kind = 'personal' | 'shared' | 'board' | 'meeting';
 type Role = 'owner' | 'editor' | 'viewer';
@@ -16,7 +19,6 @@ type Links = { scans: { id: string; label: string; stain: string | null; format:
   runs: { id: string; request_id: string; attempt: number; model: string; scan_id: string; snapshot: string | null }[]; has_approved_report: boolean };
 
 const root = (organization: string) => '/api/clinical/' + encodeURIComponent(organization) + '/collections';
-const href = (id: string) => '#collections/' + id;
 const editable = (role: Role) => role === 'owner' || role === 'editor';
 const roleLabel = (role: Role) => ({ owner: 'Owner', editor: 'Editor', viewer: 'Viewer' })[role];
 const kindLabel = { personal: 'Personal Collection', shared: 'Shared Collection', board: 'Tumor Board', meeting: 'Board Meeting' };
@@ -64,23 +66,24 @@ function useMutation() {
   return { busy, error, perform };
 }
 
-export function AddCaseReference({ organization, record, onClose }: {
-  organization: string; record: { id: string; title: string }; onClose: () => void;
+export function AddCaseReference({ organization, record, initialDestination, onClose }: {
+  organization: string; record: { id: string; title: string }; initialDestination?: string; onClose: () => void;
 }) {
   const resource = useResource<Index>(root(organization));
   const changes = useMutation();
   const dialog = useRef<HTMLDialogElement>(null);
-  const [destination, setDestination] = useState('');
+  const [choice, setChoice] = useState(initialDestination ?? '');
   const [note, setNote] = useState('');
-  const [saved, setSaved] = useState('');
+  const [saved, setSaved] = useState<{ collection: string; entry: string }>();
   useEffect(() => {
     const element = dialog.current;
     element?.showModal();
     return () => element?.close();
   }, []);
-  const boards = new Map(resource.data?.collections.filter((item) => item.kind === 'board').map((item) => [item.id, item.title]));
+  const boards = resource.data?.collections.filter((item) => item.kind === 'board') ?? [];
   const available = resource.data?.collections.filter((item) => item.kind !== 'board' && editable(item.role)) ?? [];
   const meetings = resource.data?.meetings.filter((item) => editable(item.role)) ?? [];
+  const destination = [...available, ...meetings].find(({ id }) => id === choice);
   return <dialog ref={dialog} aria-labelledby="collection-add-title" onCancel={onClose}>
     <div className="panel-title"><h2 id="collection-add-title">Add Case Reference</h2><button className="button secondary" onClick={onClose}>Close</button></div>
     <div className="dialog-content">
@@ -89,27 +92,34 @@ export function AddCaseReference({ organization, record, onClose }: {
       {resource.data && (available.length || meetings.length ? <form className="request-form" onSubmit={(event) => {
         event.preventDefault();
         void changes.perform(async () => {
-          await api(root(organization) + '/' + destination + '/entries', jsonBody('POST', { case_id: record.id, note }));
-          setSaved(destination);
+          if (!destination) return;
+          const entry = await api<Entry>(root(organization) + '/' + destination.id + '/entries', jsonBody('POST', { case_id: record.id, note }));
+          setSaved({ collection: destination.id, entry: entry.id });
         });
       }}>
-        <label className="form-field">Add To<select value={destination} onChange={(event) => { setDestination(event.target.value); setSaved(''); }} required>
+        <label className="form-field">Add To<select value={destination?.id ?? ''} onChange={(event) => { setChoice(event.target.value); setSaved(undefined); }} required>
           <option value="">Select a collection or Board meeting</option>
-          {available.length > 0 && <optgroup label="Collections">{available.map((item) =>
-            <option key={item.id} value={item.id}>{item.title} · {kindLabel[item.kind]}</option>)}</optgroup>}
-          {meetings.length > 0 && <optgroup label="Board Meetings">{meetings.map((item) =>
-            <option key={item.id} value={item.id}>{boards.get(item.parent_id ?? '')} · {item.title} · {dateLabel(item.meeting_date!)}</option>)}</optgroup>}
+          {(['personal', 'shared'] as const).map((kind) => {
+            const group = available.filter((item) => item.kind === kind);
+            return group.length > 0 && <optgroup key={kind} label={kindLabel[kind] + 's'}>{group.map((item) =>
+              <option key={item.id} value={item.id}>{item.title} · {kindLabel[kind]}</option>)}</optgroup>;
+          })}
+          {boards.map((board) => {
+            const group = meetings.filter((meeting) => meeting.parent_id === board.id);
+            return group.length > 0 && <optgroup key={board.id} label={board.title}>{group.map((item) =>
+              <option key={item.id} value={item.id}>{item.title} · {dateLabel(item.meeting_date!)}</option>)}</optgroup>;
+          })}
         </select></label>
-        <label className="form-field">Collection Note<textarea rows={3} maxLength={2000} value={note} onChange={(event) => { setNote(event.target.value); setSaved(''); }} /></label>
+        <label className="form-field">Collection Note<textarea rows={3} maxLength={2000} value={note} onChange={(event) => { setNote(event.target.value); setSaved(undefined); }} /></label>
         <button className="button primary" disabled={changes.busy || !destination || !!saved}>Add Case Reference</button>
       </form> : <p>No writable collections or Board meetings are available. <a href="#collections" onClick={onClose}>Open Collections</a></p>)}
       {changes.error && <p className="form-error" role="alert">{changes.error}</p>}
-      {saved && <p role="status">Case reference saved. <a href={href(saved)} onClick={onClose}>Open Destination</a></p>}
+      {saved && <p role="status">Case reference saved. <a href={href(saved.collection, saved.entry)} onClick={onClose}>Open Destination</a></p>}
     </div>
   </dialog>;
 }
 
-export function CollectionWorkspace({ organization, selected }: { organization: string; selected?: string }) {
+export function CollectionWorkspace({ organization, selected, selectedEntry }: { organization: string; selected?: string; selectedEntry?: string }) {
   const endpoint = root(organization);
   const index = useResource<Index>(endpoint, true);
   return <>
@@ -121,13 +131,14 @@ export function CollectionWorkspace({ organization, selected }: { organization: 
             <h2>{kind === 'board' ? 'Tumor Boards' : kind === 'personal' ? 'Personal Collections' : 'Shared Collections'}</h2>
             {index.data!.collections.some((item) => item.kind === kind) ?
               <ul className="collection-list">{index.data!.collections.filter((item) => item.kind === kind).map((item) => <li key={item.id}>
-                <a href={href(item.id)} aria-current={item.id === selected ? 'page' : undefined}>{item.title}</a>
+                <a href={href(item.id)} aria-current={item.id === selected ? 'page' : undefined}>{item.title}<small>{roleLabel(item.role)}</small></a>
               </li>)}</ul> : <p className="muted">Empty</p>}
           </section>)}
           <CreateCollection endpoint={endpoint} canBoard={index.data.can_create_board} reload={index.reload} />
         </>}
       </aside>
-      {selected && <CollectionContent key={selected} path={endpoint + '/' + selected} onIndexChange={index.reload} />}
+      {selected ? <CollectionContent key={selected} path={endpoint + '/' + selected} selectedEntry={selectedEntry} onIndexChange={index.reload} />
+        : <section className="panel empty"><ClipboardList size={28} /><h2>Select a Collection or Tumor Board</h2></section>}
     </div>
   </>;
 }
@@ -155,21 +166,27 @@ function CreateCollection({ endpoint, canBoard, reload }: { endpoint: string; ca
   </details>;
 }
 
-function CollectionContent({ path, onIndexChange }: { path: string; onIndexChange: () => void }) {
+function CollectionContent({ path, selectedEntry, onIndexChange }: { path: string; selectedEntry?: string; onIndexChange: () => void }) {
   const resource = useResource<Detail>(path, true);
   const data = resource.data;
   if (!data) return <section className="panel detail-content"><LoadStatus error={resource.error} reload={resource.reload} /></section>;
+  const presented = data.entries.filter(({ presented_at }) => presented_at).length;
+  const next = data.entries.find(({ presented_at }) => !presented_at);
   return <section className="panel detail-content" aria-label="Collection Detail">
     {data.parent_id && <a className="back-link" href={href(data.parent_id)}>{data.parent_title}</a>}
     <div className="preview-label"><h2>{data.title}</h2><small>{kindLabel[data.kind]} · {roleLabel(data.role)}</small></div>
     {data.meeting_date && <p><time dateTime={data.meeting_date}>{dateLabel(data.meeting_date)}</time></p>}
     {data.can_manage_members && <Membership path={path} data={data} reload={resource.reload} />}
     {data.kind === 'board' ? <BoardMeetings path={path} data={data} reload={() => { resource.reload(); onIndexChange(); }} /> : <>
-      <div className="preview-label"><h3>{data.kind === 'meeting' ? 'Meeting Agenda' : 'Case References'}</h3>
-        {editable(data.role) && <a href="#worklist/all">Add Cases from Worklist</a>}</div>
+      <div className="preview-label"><div><h3>{data.kind === 'meeting' ? 'Meeting Agenda' : 'Case References'}</h3>
+        <p className="muted">{data.kind === 'meeting' ? `${presented}/${data.entries.length} Presented` : `${data.entries.length} References`}</p></div>
+        <div className="actions">
+          {data.kind === 'meeting' && next && <a className="button secondary" href={href(data.id, next.id)}>First Pending Item</a>}
+          {editable(data.role) && <a className="button secondary" href={`#worklist/all/collection/${data.id}`}>Add Cases from Worklist</a>}
+        </div></div>
       {data.entries.length ? <ol className="collection-entries">{data.entries.map((item, index) => <CollectionItem key={item.id}
-        entry={item} node={data} path={path + '/entries/' + item.id} first={index === 0} last={index === data.entries.length - 1}
-        reload={resource.reload} />)}</ol> : <p>No accessible case references.</p>}
+        entry={item} node={data} path={path + '/entries/' + item.id} position={index + 1} last={index === data.entries.length - 1}
+        selected={item.id === selectedEntry} reload={resource.reload} />)}</ol> : <p>No accessible case references.</p>}
     </>}
   </section>;
 }
@@ -227,29 +244,34 @@ function BoardMeetings({ path, data, reload }: { path: string; data: Detail; rel
   </section>;
 }
 
-function CollectionItem({ entry: serverEntry, node, path, first, last, reload }: {
-  entry: Entry; node: Detail; path: string; first: boolean; last: boolean; reload: () => void;
+function CollectionItem({ entry: serverEntry, node, path, position, last, selected, reload }: {
+  entry: Entry; node: Detail; path: string; position: number; last: boolean; selected: boolean; reload: () => void;
 }) {
   const changes = useMutation();
   const [draft, setDraft] = useState<{ note: string; version: number }>();
   const [linksOpen, setLinksOpen] = useState(false);
   const [committed, setCommitted] = useState<Entry>();
+  const itemRef = useRef<HTMLLIElement>(null);
+  useEffect(() => { if (selected) itemRef.current?.focus(); }, [selected]);
+  const origin = { collection: node.id, entry: serverEntry.id };
   const entry = committed && committed.version > serverEntry.version ? committed : serverEntry;
   const canEdit = editable(node.role);
   function apply(action: () => Promise<void>) { void changes.perform(async () => { await action(); reload(); }); }
   function move(direction: 'earlier' | 'later') {
     apply(async () => { await api(path + '/move', jsonBody('POST', { direction, version: node.version })); });
   }
-  return <li className="collection-entry">
-    <div className="preview-label"><a href={`#case/${entry.case_id}`}><strong>{entry.case_number}</strong></a>
-      {node.kind === 'meeting' && <span className="count">{entry.presented_at ? 'Presented' : 'Pending'}</span>}</div>
+  return <li ref={itemRef} tabIndex={-1} className="collection-entry" data-selected={selected || undefined}
+    aria-current={selected ? 'true' : undefined}>
+    <div className="preview-label"><div className="collection-entry-title"><span className="count" aria-label={`Position ${position}`}>{position}</span>
+      <a href={withCollection(`#case/${entry.case_id}`, origin)}><strong>{entry.case_number}</strong></a></div>
+      {node.kind === 'meeting' && <span className="count">{entry.presented_at && <Check size={14} aria-hidden="true" />}{entry.presented_at ? 'Presented' : 'Pending'}</span>}</div>
     {entry.note && <p className="collection-note">{entry.note}</p>}
     {entry.presented_at && <small>{new Date(entry.presented_at).toLocaleString('en-US')}</small>}
     <div className="actions">
-      <button className="button secondary" aria-expanded={linksOpen} onClick={() => setLinksOpen(!linksOpen)}>Slides and Completed Results</button>
+      <button className="button secondary" aria-expanded={linksOpen} onClick={() => setLinksOpen(!linksOpen)}><ScanLine size={15} /> Slides and Completed Results</button>
       {canEdit && <>
-        <button className="button secondary" disabled={changes.busy || first} onClick={() => move('earlier')}>Move Earlier</button>
-        <button className="button secondary" disabled={changes.busy || last} onClick={() => move('later')}>Move Later</button>
+        <button className="button secondary" disabled={changes.busy || position === 1} onClick={() => move('earlier')}><ArrowUp size={15} /> Move Earlier</button>
+        <button className="button secondary" disabled={changes.busy || last} onClick={() => move('later')}><ArrowDown size={15} /> Move Later</button>
         <button className="button secondary" disabled={changes.busy} onClick={() => setDraft({ note: entry.note, version: entry.version })}>Edit Note</button>
         {node.kind === 'meeting' && <button className="button secondary" disabled={changes.busy} onClick={() => apply(async () => {
           setCommitted(await api<Entry>(path, jsonBody('PATCH', { version: entry.version, note: entry.note, presented: !entry.presented_at })));
@@ -271,23 +293,23 @@ function CollectionItem({ entry: serverEntry, node, path, first, last, reload }:
       <div className="actions"><button className="button primary" disabled={changes.busy}>Save Note</button>
         <button className="button secondary" type="button" onClick={() => setDraft(undefined)}>Close Note</button></div>
     </form>}
-    {linksOpen && <CaseReferenceLinks path={path + '/links'} caseId={entry.case_id} />}
+    {linksOpen && <CaseReferenceLinks path={path + '/links'} caseId={entry.case_id} origin={origin} />}
   </li>;
 }
 
-function CaseReferenceLinks({ path, caseId }: { path: string; caseId: string }) {
+function CaseReferenceLinks({ path, caseId, origin }: { path: string; caseId: string; origin: CollectionOrigin }) {
   const resource = useResource<Links>(path, true);
   if (!resource.data) return <LoadStatus error={resource.error} reload={resource.reload} />;
   const { scans, requests, runs, has_approved_report: report } = resource.data;
   return <div className="collection-links">
     <section><h4>WSI</h4>{scans.length ? <ul>{scans.map((item) => <li key={item.id}>
-      <a href={`#viewer/${caseId}/${item.id}`}>{item.label} · {item.format}{item.stain ? ' · ' + item.stain : ''}</a></li>)}</ul> : <p>No viewable scans.</p>}</section>
+      <a href={withCollection(`#viewer/${caseId}/${item.id}`, origin)}>{item.label} · {item.format}{item.stain ? ' · ' + item.stain : ''}</a></li>)}</ul> : <p>No viewable scans.</p>}</section>
     <section><h4>Completed Results</h4>{requests.length || runs.length || report ? <ul>
-      {requests.map((item) => <li key={item.id}><a href={'#request/' + item.id}>{item.kind === 'consult' ? 'Completed Consultation' : 'Completed AI Request'}</a>
-        {item.snapshot && item.scan_id && <> · <a href={`#viewer/${caseId}/${item.scan_id}/${item.snapshot}`}>Open Archived Result in WSI</a></>}</li>)}
-      {runs.map((item) => <li key={item.id}><a href={'#request/' + item.request_id}>{modelNames[item.model] ?? 'Model Run'} · Attempt {item.attempt}</a>
-        {item.snapshot && <> · <a href={`#viewer/${caseId}/${item.scan_id}/${item.snapshot}`}>Open Run Result in WSI</a></>}</li>)}
-      {report && <li><a href={`#case/${caseId}/report`}>Approved Case Report</a></li>}
+      {requests.map((item) => <li key={item.id}><a href={withCollection('#request/' + item.id, origin)}>{item.kind === 'consult' ? 'Completed Consultation' : 'Completed AI Request'}</a>
+        {item.snapshot && item.scan_id && <> · <a href={withCollection(`#viewer/${caseId}/${item.scan_id}/${item.snapshot}`, origin)}>Open Archived Result in WSI</a></>}</li>)}
+      {runs.map((item) => <li key={item.id}><a href={withCollection('#request/' + item.request_id, origin)}>{modelNames[item.model] ?? 'Model Run'} · Attempt {item.attempt}</a>
+        {item.snapshot && <> · <a href={withCollection(`#viewer/${caseId}/${item.scan_id}/${item.snapshot}`, origin)}>Open Run Result in WSI</a></>}</li>)}
+      {report && <li><a href={withCollection(`#case/${caseId}/report`, origin)}>Approved Case Report</a></li>}
     </ul> : <p>No completed results.</p>}</section>
   </div>;
 }

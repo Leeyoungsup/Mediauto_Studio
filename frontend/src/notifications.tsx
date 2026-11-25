@@ -45,11 +45,15 @@ function destination(item: Delivery) {
   return undefined;
 }
 
-export function NotificationCenter({ organization }: { organization: string }) {
+export function NotificationCenter({ organization, requestId }: { organization: string; requestId?: string }) {
   const path = pathFor(organization);
   const [data, setData] = useState<Inbox>();
   const [error, setError] = useState('');
   const [pending, setPending] = useState('');
+  const [selectedRequest, setSelectedRequest] = useState<string>();
+  const filtered = !!requestId && selectedRequest === requestId;
+  const items = data?.items.filter((item) => !filtered || item.request_id === requestId) ?? [];
+  const deliveries = data?.deliveries.filter((item) => !filtered || item.request_id === requestId) ?? [];
   const refresh = useCallback(async (signal?: AbortSignal) => {
     try {
       const result = await api<Inbox>(path, { signal });
@@ -103,9 +107,11 @@ export function NotificationCenter({ organization }: { organization: string }) {
           if (details) details.open = false;
         }}>Notification Preferences</a>
       </div>
+      {requestId && <label className="notification-scope"><input type="checkbox" checked={filtered}
+        onChange={(event) => setSelectedRequest(event.target.checked ? requestId : undefined)} /> This Request Only</label>}
       {error && <p role="alert" className="form-error">{error}</p>}
       {data ? <>
-        {data.items.length ? <ul className="request-list">{data.items.map((item) => <li key={item.id}>
+        {items.length ? <ul className="request-list">{items.map((item) => <li key={item.id}>
           <strong>{actions[item.action] ?? events[item.event]}{!item.read_at && ' · Unread'}</strong>
           <small>{stamp.format(new Date(item.created_at))}</small>
           {item.request_id || item.case_id ? <button className="button secondary" type="button" disabled={!!pending} onClick={(event) => {
@@ -114,9 +120,9 @@ export function NotificationCenter({ organization }: { organization: string }) {
           }}>{item.request_id ? 'Open Request' : 'Open Case'}</button>
             : !item.read_at && <button className="button secondary" type="button" disabled={!!pending}
               onClick={() => void act(item, 'read')}>Mark as Read</button>}
-        </li>)}</ul> : <p className="empty-inline">No in-app notifications.</p>}
+        </li>)}</ul> : <p className="empty-inline">{filtered ? 'No in-app notifications for this request.' : 'No in-app notifications.'}</p>}
         <details className="delivery-activity"><summary>Delivery Status</summary>
-          {data.deliveries.length ? <ul className="request-list">{data.deliveries.map((item) => <li key={item.id}>
+          {deliveries.length ? <ul className="request-list">{deliveries.map((item) => <li key={item.id}>
             <strong>{actions[item.action] ?? events[item.event]} · {channels[item.channel]} · {states[item.status]}</strong>
             <small>{stamp.format(new Date(item.finished_at ?? item.created_at))} · Attempts {item.attempts ?? 0}</small>
             {item.error && <p>{issues[item.error] ?? 'Unable to deliver the notification.'}</p>}
@@ -126,7 +132,7 @@ export function NotificationCenter({ organization }: { organization: string }) {
             }}>{item.request_id ? 'Open Request' : 'Open Case'}</a>}
             {(item.status === 'blocked' || item.status === 'failed') && <button className="button secondary" type="button"
               disabled={!!pending} onClick={() => void act(item, 'retry')}>Retry Delivery</button>}
-          </li>)}</ul> : <p className="empty-inline">No email or Push delivery attempts.</p>}
+          </li>)}</ul> : <p className="empty-inline">{filtered ? 'No email or Push delivery attempts for this request.' : 'No email or Push delivery attempts.'}</p>}
         </details>
       </> : !error && <p role="status">Loading notifications…</p>}
     </section>

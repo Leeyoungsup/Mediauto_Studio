@@ -8,14 +8,16 @@ import { PatientHistory } from './patient-history';
 import { CaseLogs, CaseLogsDialog } from './case-logs';
 import { CaseAudit } from './case-audit';
 import { caseHref, caseTabs, notificationPreferencesHref } from './case-navigation';
+import { withCollection } from './workflow-navigation';
+import type { CollectionOrigin } from './workflow-navigation';
 import type { CaseTab } from './case-navigation';
 import { readyCount } from './demo';
 import type { DemoCase } from './demo';
 import { ScanReference, SlidePreview, StatusLabel } from './worklist';
 
-export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, onConfirm, patientIntegration, requests, report, initialTab, dates, routing, editor, selectedScan, historyEndpoint, attachmentsEndpoint, logsEndpoint, notesEndpoint, frozen, relatedEndpoint }: {
+export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, onConfirm, patientIntegration, requests, report, initialTab, collectionOrigin, dates, routing, editor, selectedScan, historyEndpoint, attachmentsEndpoint, logsEndpoint, notesEndpoint, frozen, relatedEndpoint }: {
   item: DemoCase; emr: string; onBack: () => void; onViewer: (slide?: string) => void;
-  onAssign?: () => void; onReview?: () => void; onConfirm?: () => void; patientIntegration?: ReactNode; requests?: ReactNode; report?: ReactNode; initialTab?: CaseTab; selectedScan?: string; historyEndpoint?: string; attachmentsEndpoint?: string; logsEndpoint?: string; notesEndpoint?: string; frozen?: ReactNode; relatedEndpoint?: string; dates?: ReactNode; routing?: ReactNode; editor?: ReactNode;
+  onAssign?: () => void; onReview?: () => void; onConfirm?: () => void; patientIntegration?: ReactNode; requests?: ReactNode; report?: ReactNode; initialTab?: CaseTab; collectionOrigin?: CollectionOrigin; selectedScan?: string; historyEndpoint?: string; attachmentsEndpoint?: string; logsEndpoint?: string; notesEndpoint?: string; frozen?: ReactNode; relatedEndpoint?: string; dates?: ReactNode; routing?: ReactNode; editor?: ReactNode;
 }) {
   const [showLogs, setShowLogs] = useState(false);
   const [localTab, setLocalTab] = useState<CaseTab>('slides');
@@ -41,7 +43,7 @@ export function CaseDetail({ item, emr, onBack, onViewer, onAssign, onReview, on
   const canOpenViewer = selected ? !!selected.wsi : available > 0 && (!missingScan || tab === 'editor');
 
   function selectTab(key: CaseTab) {
-    if (item.recordId) location.hash = caseHref(item.recordId, key, selected?.id);
+    if (item.recordId) location.hash = withCollection(caseHref(item.recordId, key, selected?.id), collectionOrigin);
     else setLocalTab(key);
   }
 

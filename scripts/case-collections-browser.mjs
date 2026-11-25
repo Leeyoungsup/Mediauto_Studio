@@ -97,8 +97,11 @@ try {
   await scope.getByRole('heading', { name: 'Board QA Session', exact: true }).waitFor();
   const meeting = new URL(admin.url()).hash.split('/')[1];
 
-  async function addFromWorklist(caseNumber, destination, note) {
-    await admin.goto('/#worklist/all');
+  async function addFromWorklist(caseNumber, destination, note, fromAgenda = false) {
+    if (fromAgenda) {
+      await admin.goto('/#collections/' + destination);
+      await scope.getByRole('link', { name: 'Add Cases from Worklist', exact: true }).click();
+    } else await admin.goto('/#worklist/all');
     await button(admin, 'Restore Default Worklist').click();
     const search = admin.getByRole('textbox', { name: 'Search Cases' });
     await search.fill(caseNumber);
@@ -106,15 +109,20 @@ try {
     const preview = admin.getByRole('complementary', { name: 'Selected Case Preview' });
     await button(preview, 'Add to Collection or Board').click();
     const dialog = admin.getByRole('dialog', { name: 'Add Case Reference' });
-    await dialog.getByRole('combobox', { name: 'Add To' }).selectOption(destination);
+    const picker = dialog.getByRole('combobox', { name: 'Add To' });
+    if (fromAgenda) await admin.waitForFunction((id) => document.querySelector('dialog select')?.value === id, destination);
+    else await picker.selectOption(destination);
     await dialog.getByRole('textbox', { name: 'Collection Note' }).fill(note);
     await button(dialog, 'Add Case Reference').click();
     await dialog.getByRole('status').filter({ hasText: 'Case reference saved.' }).waitFor();
-    await button(dialog, 'Close').click();
+    if (fromAgenda) {
+      await dialog.getByRole('link', { name: 'Open Destination' }).click();
+      await scope.locator('.collection-entry[aria-current="true"]').getByText(caseNumber, { exact: true }).waitFor();
+    } else await button(dialog, 'Close').click();
   }
   await addFromWorklist(target.case_number, personal, 'Synthetic personal note');
   await addFromWorklist(target.case_number, shared, 'Synthetic shared note');
-  await addFromWorklist(target.case_number, meeting, 'Synthetic conference note');
+  await addFromWorklist(target.case_number, meeting, 'Synthetic conference note', true);
   await addFromWorklist(privateCase.case_number, meeting, 'Synthetic restricted note');
 
   await admin.goto('/#collections/' + meeting);
@@ -133,6 +141,9 @@ try {
   await button(first, 'Mark Presented').click();
   await checked(presented);
   await first.getByText('Presented', { exact: true }).waitFor();
+  await scope.getByText('1/2 Presented', { exact: true }).waitFor();
+  await scope.getByRole('link', { name: 'First Pending Item', exact: true }).click();
+  await second.and(scope.locator('[aria-current="true"]')).waitFor();
   await evidence.capture(first, 'presented-agenda');
   const preparationSeconds = Math.round((performance.now() - preparation) / 100) / 10;
   const metrics = await admin.evaluate(() => window.boardMetrics);
@@ -151,11 +162,15 @@ try {
   await permitted.getByRole('link', { name: /SVS/ }).click();
   await physician.waitForFunction((id) => document.querySelector('.image-panel')?.dataset.scanId === id, scan.id);
   await physician.getByRole('button', { name: 'Pan using minimap', exact: true }).waitFor();
-  await physician.goBack();
+  await physician.getByRole('link', { name: 'Back to Collection' }).click();
+  await permitted.and(attending.locator('[aria-current="true"]')).waitFor();
   await button(permitted, 'Slides and Completed Results').click();
   await permitted.getByRole('link', { name: 'Completed Consultation', exact: true })
-    .and(physician.locator('a[href="#request/' + consult.id + '"]')).click();
+    .and(physician.locator('a[href^="#request/' + consult.id + '?collection="]')).click();
   await physician.getByText('Synthetic Board consultation completed.', { exact: true }).waitFor();
+  await physician.reload();
+  await physician.getByRole('link', { name: 'Back to Collection' }).click();
+  await permitted.and(attending.locator('[aria-current="true"]')).waitFor();
 
   await other.goto('/#collections/' + meeting);
   await other.getByRole('alert').getByText('Collection not found.').waitFor();
