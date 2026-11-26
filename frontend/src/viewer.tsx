@@ -258,6 +258,7 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, canReques
         </div>)}</div>
       </aside>
       {comparing ? <MultiView slides={available} selected={selected} active={activeComparison} cameras={comparisonCameras.current}
+        roiCaseId={canRequest ? item.recordId : undefined}
         onActive={setCompareActive} onFrame={(id, camera) => { comparisonCameras.current[id] = camera; }}
         onClose={() => closeComparison()} onSingle={closeComparison} />
         : slide?.wsi ? <ImageViewport key={slide.wsi.id + ':' + (initialSnapshot ?? initialRoi ?? '')} scan={slide.wsi} initialSnapshot={initialSnapshot}

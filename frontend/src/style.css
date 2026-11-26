@@ -1029,6 +1029,10 @@ dialog::backdrop { background: #21193575; }
 }
 .viewer-count-dock { inset: auto 10px 10px auto; }
 .viewer-annotations-dock .viewer-record-panel { border-top: 0; }
+.multi-view-pane .viewer-annotations-dock { inset: 5px 5px auto auto; max-height: calc(100% - 10px); width: min(355px, calc(100% - 52px)); }
+.multi-view-pane .viewer-tool-dock { top: 5px; left: 5px; max-height: calc(100% - 22px); }
+.multi-view-pane .viewer-tool-dock .viewer-icon-tool { width: 26px; min-height: 26px; }
+.multi-view-pane .viewer-tool-dock .viewer-icon-tool svg { width: 15px; height: 15px; }
 .viewer-record-heading { display: flex; align-items: center; justify-content: space-between; gap: 5px; }
 .viewer-record-heading h2 { font-size: 16px; }
 .viewer-record-list li[data-selected=true] { border-color: var(--accent); background: var(--accent-soft); }
@@ -1057,6 +1061,8 @@ dialog::backdrop { background: #21193575; }
   .image-surface[data-review-dock=true] .scan-images { left: 10px; }
   .viewer-drawing-controls { max-width: calc(100% - 24px); }
   .viewer-annotations-dock { position: static; width: auto; max-height: 50dvh; border-radius: 0; grid-column: 1 / -1; box-shadow: none; }
+  .multi-view-pane .viewer-annotations-dock { position: absolute; inset: 4px 4px auto; width: auto; max-height: calc(100% - 42px); }
+  .multi-view-pane .viewer-tool-dock { inset: auto 4px 4px; max-width: calc(100% - 8px); }
 }
 
 .registration-panel, .registration-decision { display: grid; gap: 12px; }

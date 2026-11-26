@@ -99,7 +99,11 @@ server_pid=$!
 ready=
 for ((attempt = 0; attempt < 40; attempt++)); do
     kill -0 "$server_pid" 2>/dev/null || break
-    if curl --noproxy '*' --fail --silent --max-time 1 "$MEDIAUTO_DEMO_URL/api/health" >/dev/null; then ready=1; break; fi
+    if [[ $(< "$sandbox/web.log") == *"Uvicorn running on $MEDIAUTO_DEMO_URL"* ]] &&
+        curl --noproxy '*' --fail --silent --max-time 1 "$MEDIAUTO_DEMO_URL/api/health" >/dev/null; then
+        ready=1
+        break
+    fi
     sleep .25
 done
 if [[ -z "$ready" ]]; then

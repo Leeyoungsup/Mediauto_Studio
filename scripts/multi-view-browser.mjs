@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 
 const { chromium } = await import(process.env.MEDIAUTO_PLAYWRIGHT_MODULE ?? 'playwright-core');
 const baseURL = process.env.MEDIAUTO_DEMO_URL ?? 'http://127.0.0.1:19920';
@@ -96,6 +97,41 @@ try {
   assert.equal(await tray.locator('input:checked').count(), 2);
   const splitBox = await canvas(1).boundingBox();
   assert.ok(splitBox.height >= 650 && splitBox.y < 220, 'Comparison should use the available height');
+  const suffix = randomUUID().slice(0, 8);
+  const annotationName = 'Multi View Test Polygon ' + suffix;
+  const distanceName = 'Multi View Test Distance ' + suffix;
+  const annotations = (i) => pane(i).getByRole('region', { name: 'Review Position and Annotations' });
+  await pane(1).getByRole('button', { name: 'Annotations', exact: true }).click();
+  await pane(1).getByRole('button', { name: 'Polygon ROI', exact: true }).click();
+  for (const [dx, dy] of [[-32, -28], [35, -24], [8, 32]]) {
+    await canvas(1).click({ position: { x: splitBox.width / 2 + dx, y: splitBox.height / 2 + dy } });
+  }
+  await pane(1).getByRole('button', { name: 'Close Polygon', exact: true }).click();
+  await annotations(1).getByRole('textbox', { name: 'Annotation Name' }).fill(annotationName);
+  const polygonSave = page.waitForResponse((response) => response.url().endsWith('/viewer-records/annotations') && response.request().method() === 'POST');
+  await annotations(1).getByRole('button', { name: 'Save Annotation', exact: true }).click();
+  const polygon = await (await polygonSave).json();
+  const overlay = (i) => pane(i).locator(`polygon[data-record="${polygon.id}"]`);
+  await annotations(1).getByText(annotationName, { exact: true }).waitFor();
+  await annotations(1).getByRole('button', { name: 'Close Annotations', exact: true }).click();
+  await overlay(1).waitFor();
+  await pane(2).getByRole('button', { name: 'Annotations', exact: true }).click();
+  assert.equal(await annotations(2).getByText(annotationName, { exact: true }).count(), 0);
+  assert.equal(await overlay(2).count(), 0);
+  await pane(2).getByRole('button', { name: 'Distance Measurement', exact: true }).click();
+  const other = await canvas(2).boundingBox();
+  await page.mouse.move(other.x + other.width / 2 - 28, other.y + other.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(other.x + other.width / 2 + 28, other.y + other.height / 2);
+  await page.mouse.up();
+  await annotations(2).getByRole('textbox', { name: 'Annotation Name' }).fill(distanceName);
+  const distanceSave = page.waitForResponse((response) => response.url().endsWith('/viewer-records/annotations') && response.request().method() === 'POST');
+  await annotations(2).getByRole('button', { name: 'Save Annotation', exact: true }).click();
+  const distance = await (await distanceSave).json();
+  assert.equal(distance.unit, 'um');
+  assert.ok(distance.length > 0);
+  await annotations(2).getByText(distanceName, { exact: true }).waitFor();
+  await annotations(2).getByRole('button', { name: 'Close Annotations', exact: true }).click();
   const unchanged = await frame(2);
   await zoom(1, 5);
   assert.deepEqual(await frame(2), unchanged);
@@ -146,6 +182,10 @@ try {
     return data && Math.abs(Number(data.viewZoom) - camera.zoom) < 1e-6 &&
       Math.abs(Number(data.viewCenterX) - camera.x) < 1 && Math.abs(Number(data.viewCenterY) - camera.y) < 1;
   }, returnCamera);
+  await open('IMS-DEMO-101');
+  await overlay(1).waitFor();
+  await pane(1).getByRole('button', { name: 'Annotations', exact: true }).click();
+  await annotations(1).getByText(annotationName, { exact: true }).waitFor();
 
   // A synthetic fifth candidate exercises the limit without importing an unrelated scan.
   await page.route('**/api/worklist/' + record.id, async (route) => {
@@ -186,7 +226,7 @@ try {
   assert.equal(await page.locator('.wsi-canvas').count(), 1);
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ result: 'PASS', maximumPanes: 6, normalized, reversed, anchored, sixPaneSync,
-    paneRetry: true, focusedPane: true, otherPanesKept: true }));
+    paneRetry: true, focusedPane: true, otherPanesKept: true, paneAnnotationsRestored: true }));
 } finally {
   await browser.close();
 }

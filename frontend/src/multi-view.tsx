@@ -20,8 +20,9 @@ export function mapCamera(source: CameraFrame, target: CameraFrame, start?: Came
   };
 }
 
-export function MultiView({ slides, selected, active, cameras, onActive, onFrame, onClose, onSingle }: {
+export function MultiView({ slides, selected, active, cameras, roiCaseId, onActive, onFrame, onClose, onSingle }: {
   slides: Slide[]; selected: string[]; active: string; cameras: Record<string, Camera>;
+  roiCaseId?: string;
   onActive: (id: string) => void; onFrame: (id: string, camera: Camera) => void;
   onClose: () => void; onSingle: (id: string, camera?: Camera) => void;
 }) {
@@ -183,6 +184,11 @@ export function MultiView({ slides, selected, active, cameras, onActive, onFrame
         return <div key={id} role="group" aria-label={`Pane ${index + 1}: ${slide.label ?? id} ${slide.wsi.format}`}
           className="multi-view-pane" data-active={active === id} hidden={focused && active !== id}
           onClickCapture={(event) => {
+            if (event.target instanceof HTMLCanvasElement && event.target.classList.contains('drawing-tool')) {
+              previousClick.current = undefined;
+              quickPair.current = false;
+              return;
+            }
             const previous = previousClick.current;
             quickPair.current = !!previous && event.button === 0 && event.target === previous.target
               && event.timeStamp >= previous.time && event.timeStamp - previous.time <= 250
@@ -195,14 +201,14 @@ export function MultiView({ slides, selected, active, cameras, onActive, onFrame
             quickPair.current = false;
             previousClick.current = undefined;
             if (!withinClickWindow || focused || picking || !loaded.includes(id)
-                || !(event.target instanceof HTMLCanvasElement)) return;
+                || !(event.target instanceof HTMLCanvasElement) || event.target.classList.contains('drawing-tool')) return;
             event.preventDefault();
             onActive(id);
             setFocused(true);
           }}
           onFocusCapture={() => onActive(id)} onPointerDownCapture={() => onActive(id)}>
           {picking && round < 8 && <span className="pane-landmark-state">{(points[id]?.length ?? 0) === round ? 'Pick Landmark' : 'Landmark Recorded'}</span>}
-          <ImageViewport scan={slide.wsi} label={slide.label ?? id} stain={slide.stain} initialCamera={cameras[id]} comparison={{
+          <ImageViewport scan={slide.wsi} label={slide.label ?? id} stain={slide.stain} initialCamera={cameras[id]} roiCaseId={roiCaseId} comparison={{
             camera: commands[id], landmarks: points[id],
             captureLandmark: picking ? (point) => recordPoint(id, point) : undefined,
             onFrame: (frame, info) => {

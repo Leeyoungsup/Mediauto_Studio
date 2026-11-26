@@ -186,6 +186,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   const [attempt, setAttempt] = useState(0);
   const endpoint = readOnlyEndpoint ?? slideEndpoint(scan);
   const compareMode = Boolean(comparison);
+  const dockReview = isFullViewer || compareMode;
   const report = useRef(comparison);
   report.current = comparison;
   const reviewFrame = useRef(sharedReview);
@@ -221,20 +222,19 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   const ihc = useIhcResults(endpoint, Boolean(info) && !readOnlyEndpoint && !compareMode && !papStain, view);
   const pdl1 = usePdl1(endpoint, Boolean(info) && !readOnlyEndpoint && !papStain, view, initialSnapshot);
   const restoreCamera = useCallback((camera: Camera) => {
-    if (!compareMode && !reviewFrame.current?.locked) {
+    if (!reviewFrame.current?.locked) {
       setAutopan(false);
       renderer.current?.restoreCamera(camera);
     }
-  }, [compareMode]);
+  }, []);
   const entryCamera = useRef(initialCamera);
   const initialFocusApplied = useRef(false);
-  const viewerRecords = useViewerRecords(endpoint, Boolean(info) && !readOnlyEndpoint, restoreCamera, !entryCamera.current);
+  const viewerRecords = useViewerRecords(endpoint, Boolean(info) && !readOnlyEndpoint, restoreCamera, !compareMode && !entryCamera.current);
   useEffect(() => {
     if (!info || !entryCamera.current || following || initialFocusApplied.current) return;
     initialFocusApplied.current = true;
-    if (compareMode) renderer.current?.restoreCamera(entryCamera.current);
-    else restoreCamera(entryCamera.current);
-  }, [info, following, compareMode, restoreCamera]);
+    restoreCamera(entryCamera.current);
+  }, [info, following, restoreCamera]);
 
   const { tool, draft, notice: recordNotice, error: recordError } = viewerRecords;
   useEffect(() => {
@@ -476,8 +476,9 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
 
   const minimap = settings?.show_minimap ?? showNavigator;
   const toggleMinimap = options?.toggleMinimap ?? (() => setShowNavigator(!showNavigator));
-  const canReview = info && !compareMode && !readOnlyEndpoint && !following;
+  const canReview = info && !readOnlyEndpoint && !following && !comparison?.captureLandmark;
   const reviewTools = canReview && <ViewerToolsBar state={viewerRecords} view={view} info={info} onChoose={chooseReviewTool} />;
+  const showToolDock = Boolean(reviewTools && (options || compareMode && (annotationsOpen || tool !== 'pan' || draft)));
   const canCountLymph = info && !compareMode && !readOnlyEndpoint && !following
     && scan.source === 'clinical' && viewerRecords.records?.can_annotate;
   const drawingPreview: Geometry | undefined = preview ?? (viewerRecords.vertices.length ? {
@@ -486,14 +487,15 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   } : undefined);
   const recordsPanel = canReview && <ViewerRecordsPanel state={viewerRecords} info={info}
     selectedId={selectedAnnotation} showMarkup={showMarkup} onToggleMarkup={() => setShowMarkup(!showMarkup)}
-    onClose={options ? () => { setAnnotationsOpen(false); annotationsButton.current?.focus({ preventScroll: true }); } : undefined}
+    onClose={dockReview ? () => { setAnnotationsOpen(false); annotationsButton.current?.focus({ preventScroll: true }); } : undefined}
     searchHref={roiCaseId && scan.source === 'clinical' ? (roiId) => roiSearchHref({ caseId: roiCaseId, scanId: scan.id, roiId }) : undefined}
     move={(id, points, zoom) => {
       if (!view) return;
       setSelectedAnnotation(id);
       setShowMarkup(true);
       navigate((viewer) => viewer.restoreCamera(cameraFor(points, view, zoom)));
-      if (options && window.matchMedia('(max-width: 760px)').matches) canvas.current?.focus();
+      if (compareMode) setAnnotationsOpen(false);
+      if (compareMode || options && window.matchMedia('(max-width: 760px)').matches) canvas.current?.focus();
     }} />;
   function closeAnalysis() {
     analysis?.change(false);
@@ -607,13 +609,14 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
             setAutopan(false);
             setViewportSnapshot(snapshotViewport(canvas.current, info?.mpp_x ? viewportScale(info.mpp_x, view.zoom) : undefined));
           }}><Download size={16} aria-hidden="true" /> Export Current View</button>}
-        {options && canReview && <button type="button" ref={annotationsButton} className="button secondary viewer-annotations-toggle"
+        {dockReview && canReview && <button type="button" ref={annotationsButton} aria-label="Annotations" title="Annotations"
+          className={compareMode ? 'icon-button viewer-annotations-toggle' : 'button secondary viewer-annotations-toggle'}
           aria-expanded={annotationsOpen && !analysis?.open}
           onClick={() => {
             setLymphOpen(false);
             if (analysis?.open) { analysis.change(false); setAnnotationsOpen(true); }
             else setAnnotationsOpen(!annotationsOpen);
-          }}><List size={17} aria-hidden="true" /> Annotations{viewerRecords.records?.annotations.length ? <small aria-hidden="true">{viewerRecords.records.annotations.length}</small> : null}</button>}
+          }}><List size={17} aria-hidden="true" />{!compareMode && <> Annotations{viewerRecords.records?.annotations.length ? <small aria-hidden="true">{viewerRecords.records.annotations.length}</small> : null}</>}</button>}
         {options && canCountLymph && <button ref={lymphButton} type="button" className="button secondary"
           aria-expanded={lymphOpen && !analysis?.open} onClick={() => {
             setAnnotationsOpen(false);
@@ -635,10 +638,10 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         {!options && navigationControls}
       </div>
     </div>
-    {!options && reviewTools}
+    {!dockReview && reviewTools}
     <div className={!presenting && canOpenPap && showPap ? 'analysis-workspace pap-workspace' : 'analysis-workspace'}
       data-results-dock={Boolean(dockedResult)}>
-    <div ref={fit.surface} className="image-surface" data-review-dock={Boolean(options && reviewTools)}
+    <div ref={fit.surface} className="image-surface" data-review-dock={showToolDock}
       style={options && fit.height ? { height: fit.height } : undefined}>
       <canvas className={presenting || (viewerRecords.tool === 'pan' && !ihc.picking && !skin.mode) ? 'wsi-canvas' : 'wsi-canvas drawing-tool'} ref={canvas} tabIndex={0} aria-label="WSI Canvas"
         onContextMenu={(event) => {
@@ -815,7 +818,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         <button type="button" className="icon-button" aria-label="Fit to Window" disabled={!info} onClick={() => navigate((viewer) => viewer.fitToWindow())}><LocateFixed size={18} /></button>
       </div>}
       {canReview && <DrawingControls state={viewerRecords} info={info} preview={drawingPreview} shortcuts={settings?.shortcuts !== false} />}
-      {options && reviewTools && <div className="viewer-tool-dock">{reviewTools}</div>}
+      {showToolDock && <div className="viewer-tool-dock">{reviewTools}</div>}
       {cellMenu && dockedResult === 'ihc' && !following && view && ihc.picked && <IhcCellMenu state={ihc}
         x={Math.max(4, Math.min((ihc.picked[0] - view.x) * view.zoom, view.width * view.zoom - 208))}
         y={Math.max(4, Math.min((ihc.picked[1] - view.y) * view.zoom, view.height * view.zoom - 272))}
@@ -834,7 +837,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         <PapGallery state={pap} following={following} onReview={() => openPapPanel('review')} />
       </Suspense>
     </div>}
-    {options && annotationsOpen && !analysis?.open && recordsPanel && <div className="viewer-annotations-dock" ref={annotationsDock}>{recordsPanel}</div>}
+    {dockReview && annotationsOpen && !analysis?.open && recordsPanel && <div className="viewer-annotations-dock" ref={annotationsDock}>{recordsPanel}</div>}
     {options && lymphOpen && !analysis?.open && canCountLymph && <div className="viewer-annotations-dock viewer-count-dock" ref={lymphDock}>
       <LymphCounts endpoint={endpoint} scanId={scan.id} reportHref={options.reportHref}
         onClose={() => { setLymphOpen(false); lymphButton.current?.focus({ preventScroll: true }); }} />
@@ -876,7 +879,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       }} />}
     {roiUnavailable && <p className="notice" role="status">The linked ROI is unavailable. The scan is still open.</p>}
     {viewportSnapshot && <ViewportExport snapshot={viewportSnapshot} endpoint={endpoint} onClose={() => setViewportSnapshot(undefined)} />}
-    {!options && recordsPanel}
+    {!dockReview && recordsPanel}
     {!options && canCountLymph && <LymphCounts endpoint={endpoint} scanId={scan.id} />}
     {!options && info && !compareMode && !readOnlyEndpoint && !papStain && <>
       <div className="clinical-panel-focus" ref={pdlPanel} tabIndex={-1}>{pdlResults}</div>
