@@ -51,3 +51,55 @@ export function useTissueRegistrationStorage(endpoint: string | undefined, selec
   }
   return { key, catalog, save, error, savePending, reload: () => setAttempt((value) => value + 1) };
 }
+
+
+type ComparisonPosition = {
+  profile: string | null;
+  sync: boolean;
+  positions: Record<string, Camera>;
+  anchors?: Record<string, Camera>;
+};
+
+export function useComparisonPosition(account: string, selected: string[]) {
+  const key = `comparison-position:${account}:${[...selected].sort().join(',')}`;
+  const pending = useRef<{ key: string; value: ComparisonPosition }>(undefined);
+  const timer = useRef<number>(undefined);
+
+  function flush() {
+    window.clearTimeout(timer.current);
+    const entry = pending.current;
+    pending.current = undefined;
+    if (entry) {
+      try { sessionStorage.setItem(entry.key, JSON.stringify(entry.value)); }
+      catch { /* The comparison remains usable with browser storage disabled. */ }
+    }
+  }
+
+  useEffect(() => {
+    window.addEventListener('pagehide', flush);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      flush();
+    };
+  }, [key]);
+
+  return {
+    read(profile: string | null) {
+      try {
+        const saved = JSON.parse(sessionStorage.getItem(key) ?? 'null') as ComparisonPosition | null;
+        if (saved?.profile === profile && selected.every((id) => saved.positions[id])) return saved;
+      } catch { /* A missing or invalid browser entry starts a new comparison. */ }
+    },
+    remember(value: ComparisonPosition) {
+      if (pending.current && pending.current.key !== key) flush();
+      pending.current = { key, value };
+      window.clearTimeout(timer.current);
+      timer.current = window.setTimeout(flush, 180);
+    },
+    discard() {
+      flush();
+      try { sessionStorage.removeItem(key); }
+      catch { /* Browser storage is optional. */ }
+    },
+  };
+}

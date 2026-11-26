@@ -38,3 +38,9 @@ Multi View에는 선택한 정합점을 저장할 서버 기록이 없었다. �
 격리 PostgreSQL과 Chrome에서 폭이 다른 SVS 두 장을 파일로 접수한 뒤 **Tissue Registration → Use Current Positions as Alignment Points → Sync Position**을 실행했다. 팬 이동의 기준점 매핑 오차는 측정상 0px였고, 새로고침 뒤 저장 위치와 배율이 복원됐다. 다른 접수 케이스에 속한 스캔으로 조회할 때 404를 확인했다. `scripts/verify-integration.sh --demo ihc`를 통과했다.
 
 9920에서 제보한 네 스캔 조합의 접수 케이스 카탈로그와 Tissue 선택 메뉴를 읽기 전용으로 확인했다.
+
+## 같은 네 슬라이드 조합을 새로고침할 때 Sync Position 복원
+
+같은 탭에서 같은 계정으로 동일한 슬라이드 조합을 다시 선택하면 마지막으로 동기화해 본 중심과 배율을 복원한다. 여러 pane의 위치를 수동으로 맞춘 뒤 일반 **Sync Position**을 처음 켜는 경우 그 위치를 동기화 기준으로 잡는다. 선택된 저장 정합이 있으면 현재 프로필과 일치하는 탭의 위치를 사용한다. 마지막 위치는 탭의 브라우저 세션에 보관하며 DB 스키마 변경은 없다.
+
+`scripts/verify-integration.sh --demo ihc`로 격리 Chrome에서 파일 접수 케이스의 네 SVS를 개별 조정하고 **Sync Position**, 이동, 새로고침, 같은 네 스캔 재선택, Sync Off/On을 실행했다. 네 pane 모두 중심 차이 0.01px 미만과 배율 차이 0.00001 미만을 확인했다.

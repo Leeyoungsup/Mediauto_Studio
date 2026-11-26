@@ -4,7 +4,7 @@ import { ImageViewport } from './image-viewport';
 import type { Slide } from './demo';
 import { fitTissue, identity, project, unproject } from './tissue-registration';
 import type { Transform } from './tissue-registration';
-import { useTissueRegistrationStorage, type LandmarkRegistration, type TissueRegistration } from './tissue-registration-storage';
+import { useComparisonPosition, useTissueRegistrationStorage, type LandmarkRegistration, type TissueRegistration } from './tissue-registration-storage';
 import type { CameraFrame, SlideInfo } from './tile-viewer';
 import type { Camera, Point } from './viewer-tools';
 
@@ -28,9 +28,9 @@ export function mapCamera(source: CameraFrame, target: CameraFrame, start?: Came
 
 const tissueSlots = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 
-export function MultiView({ slides, selected, active, cameras, tissueEndpoint, roiCaseId, onActive, onFrame, onClose, onSingle }: {
+export function MultiView({ slides, selected, active, cameras, account, tissueEndpoint, roiCaseId, onActive, onFrame, onClose, onSingle }: {
   slides: Slide[]; selected: string[]; active: string; cameras: Record<string, Camera>;
-  tissueEndpoint?: string; roiCaseId?: string;
+  account: string; tissueEndpoint?: string; roiCaseId?: string;
   onActive: (id: string) => void; onFrame: (id: string, camera: Camera) => void;
   onClose: () => void; onSingle: (id: string, camera?: Camera) => void;
 }) {
@@ -47,7 +47,11 @@ export function MultiView({ slides, selected, active, cameras, tissueEndpoint, r
   const restoredScope = useRef<string>(undefined);
   const entryCameras = useRef(new Set(Object.keys(cameras)));
   const storage = useTissueRegistrationStorage(tissueEndpoint, selected);
+  const comparison = useComparisonPosition(account, selected);
   const profiles = storage.catalog?.profiles;
+  const savedTissue = storage.catalog?.active;
+  const profileKey = savedTissue ? `${savedTissue}:${profiles?.[savedTissue]?.saved_at}` : null;
+  const movedPanes = useRef(new Set<string>());
   const nextSlot = tissueSlots.find((slot) => !profiles?.[slot]);
   const slot = tissueEndpoint ? tissueSlot ?? storage.catalog?.active ?? nextSlot : undefined;
   const storageLoading = Boolean(tissueEndpoint && !storage.catalog && !storage.error);
@@ -136,32 +140,49 @@ export function MultiView({ slides, selected, active, cameras, tissueEndpoint, r
       setTissueSlot(tissue);
       return;
     }
-    if (await storage.save(tissue, synchronized)) apply(profile, tissue, synchronized);
+    if (await storage.save(tissue, synchronized)) {
+      comparison.discard();
+      apply(profile, tissue, synchronized);
+    }
   }
 
   async function useRegistration() {
     if (!validated) return;
     const group = { reference: referenceScan, points };
     if (tissueEndpoint && (!slot || !await storage.save(slot, false, group))) return;
+    comparison.discard();
     apply(group, slot, false, false);
   }
 
-  async function saveAlignmentPositions() {
-    if (anchors) { await clearRegistration(); return; }
-    const positions = Object.fromEntries(selected.map((id) => {
+  function currentPositions() {
+    return Object.fromEntries(selected.map((id) => {
       const { x, y, zoom } = frames.current[id];
       return [id, { x, y, zoom }];
     }));
-    const group = { anchors: positions };
+  }
+
+  function rememberPosition(sync: boolean, alignment = anchors) {
+    comparison.remember({ profile: profileKey, sync, positions: currentPositions(),
+      anchors: profileKey === null ? alignment : undefined });
+  }
+
+  async function saveAlignmentPositions() {
+    if (anchors && tissueSlot) { await clearRegistration(); return; }
+    const group = { anchors: currentPositions() };
     if (tissueEndpoint && (!slot || !await storage.save(slot, false, group))) return;
+    comparison.discard();
     apply(group, slot, false, false);
   }
 
   async function changeSync() {
     const next = !synchronized;
-    if (tissueEndpoint && (registered || anchors) && slot && !await storage.save(slot, next)) return;
+    if (tissueEndpoint && (registered || anchors) && tissueSlot && !await storage.save(tissueSlot, next)) return;
+    const alignment = anchors ?? (next && !registered && movedPanes.current.size > 1 ? currentPositions() : undefined);
+    setAnchors(alignment);
     setSynchronized(next);
-    if (next && frames.current[active]) publish(active, frames.current[active]);
+    movedPanes.current.clear();
+    rememberPosition(next, alignment);
+    if (next && frames.current[active]) publish(active, frames.current[active], registered, false, alignment);
     else setCommands({});
   }
 
@@ -172,6 +193,7 @@ export function MultiView({ slides, selected, active, cameras, tissueEndpoint, r
       return;
     }
     if (!picking && tissueEndpoint && !await storage.save(null, false)) return;
+    comparison.discard();
     clearWorkingRegistration();
     setTissueSlot(undefined);
   }
@@ -211,14 +233,22 @@ export function MultiView({ slides, selected, active, cameras, tissueEndpoint, r
     setFocused(false);
     setTissueSlot(undefined);
     restoredScope.current = undefined;
+    movedPanes.current.clear();
   }, [selectionKey]);
 
   useEffect(() => {
-    if (picking || !allReady || !storage.key || !storage.catalog || restoredScope.current === storage.key) return;
-    restoredScope.current = storage.key;
-    const { active: tissue, profiles, sync } = storage.catalog;
-    if (tissue) apply(profiles[tissue], tissue, sync, !selected.every((id) => entryCameras.current.has(id)));
-  }, [allReady, picking, storage.key, storage.catalog]);
+    if (picking || !allReady || storageLoading || restoredScope.current === selectionKey) return;
+    restoredScope.current = selectionKey;
+    const saved = comparison.read(profileKey);
+    if (savedTissue && profiles) {
+      apply(profiles[savedTissue], savedTissue, storage.catalog!.sync,
+        !saved && !selected.every((id) => entryCameras.current.has(id)));
+    } else if (saved) {
+      setAnchors(saved.anchors);
+      setSynchronized(saved.sync);
+    }
+    if (saved) setCommands(saved.positions);
+  }, [allReady, picking, selectionKey, storageLoading, storage.catalog]);
 
   const grid = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -282,7 +312,7 @@ export function MultiView({ slides, selected, active, cameras, tissueEndpoint, r
             <div className="actions">
               <button className="button secondary" disabled={!allReady || synchronized || focused || picking || !!registered || storage.savePending || !!tissueEndpoint && (!storage.catalog || !slot)}
                 onClick={() => void saveAlignmentPositions()}>
-                {anchors ? 'Clear Alignment Points' : 'Use Current Positions as Alignment Points'}</button>
+                {anchors && tissueSlot ? 'Clear Alignment Points' : 'Use Current Positions as Alignment Points'}</button>
               <button className="button secondary" disabled={!allReady || synchronized || focused || picking || storage.savePending} onClick={() => {
                 setAnchors(undefined); setRegistered(undefined); setReference(selected[0]); setPoints({}); setPicking(true);
               }}>Pick Tissue Landmarks</button>
@@ -352,10 +382,12 @@ export function MultiView({ slides, selected, active, cameras, tissueEndpoint, r
               if (!frames.current[id]) setLoaded((current) => [...current, id]);
               frames.current[id] = frame;
               onFrame(id, frame);
+              if (synchronized && !focused && selected.every((scanId) => frames.current[scanId])) rememberPosition(true);
             },
             onNavigate: (frame) => {
               onActive(id);
               if (synchronized && !focused) publish(id, frame);
+              else if (!focused && !picking) movedPanes.current.add(id);
             },
           }} />
         </div>;

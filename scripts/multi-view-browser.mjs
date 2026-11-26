@@ -164,10 +164,10 @@ try {
 
   const beforeToggle = [await frame(1), await frame(2)];
   const keepCameras = async (expected) => {
-    for (const index of [0, 1]) {
+    for (const [index, camera] of expected.entries()) {
       const actual = await frame(index + 1);
-      assert.ok(Math.hypot(actual.x - expected[index].x, actual.y - expected[index].y) < 0.01);
-      assert.ok(Math.abs(actual.zoom - expected[index].zoom) < 0.00001);
+      assert.ok(Math.hypot(actual.x - camera.x, actual.y - camera.y) < 0.01);
+      assert.ok(Math.abs(actual.zoom - camera.zoom) < 0.00001);
     }
   };
   await page.getByText('Tissue Registration', { exact: true }).click();
@@ -266,7 +266,7 @@ try {
   // File-intake cases offer the same Tissue slots when their scan extents differ.
   const fileCase = 'QA-FILE-TISSUE';
   const intake = await (await page.request.get('/api/intake/slides')).json();
-  const files = ['I-HR', 'I-KI'].map((stain) => intake.find(
+  const files = ['I-HR', 'I-KI', 'I-PR', 'S-TP'].map((stain) => intake.find(
     (row) => row.filename === `CODIPAI-BRCA-SS-00194-${stain}-01.svs`));
   for (const [index, file] of files.entries()) {
     const response = await page.request.put('/api/intake/slides/' + file.id, {
@@ -274,26 +274,33 @@ try {
     });
     assert.equal(response.status(), 200, await response.text());
   }
+  const chooseOtherSlides = async () => {
+    for (const index of [1, 2, 3]) await compare('QA-' + index + ' · SVS').check();
+  };
   await page.goto('/#file-viewer/' + fileCase + '/' + files[0].id);
   await page.reload();
-  await compare('QA-1 · SVS').check();
-  await zoom(1, 4);
-  await zoom(2, 3);
-  await drag(2, -25, 16);
-  const intakeAnchors = [await frame(1), await frame(2)];
-  await page.getByText('Tissue Registration', { exact: true }).click();
-  await page.getByLabel('Tissue', { exact: true }).waitFor();
-  await button('Use Current Positions as Alignment Points').click();
-  await page.getByText(/Manual Alignment Points.*Tissue A.*Sync Off/).waitFor();
-  await page.getByText('Tissue Registration', { exact: true }).click();
+  await chooseOtherSlides();
+  for (const index of [1, 2, 3, 4]) {
+    await zoom(index, index + 2);
+    await drag(index, -25 + index * 3, 16 - index * 2);
+  }
+  const readFour = () => Promise.all([1, 2, 3, 4].map(frame));
+  const intakeAnchors = await readFour();
   await sync.click();
-  await page.getByText(/Manual Alignment Points.*Tissue A.*Sync On/).waitFor();
+  await page.getByText(/Manual Alignment Points.*Sync On/).waitFor();
+  await keepCameras(intakeAnchors);
   await drag(1, 55, 25);
   const intakeAlignment = report(await frame(1), await frame(2), brcaDimensions[0], brcaDimensions[1], intakeAnchors);
+  const beforeReload = await readFour();
   await page.reload();
-  await compare('QA-1 · SVS').check();
-  await page.getByText(/Manual Alignment Points.*Tissue A.*Sync On/).waitFor();
-  await keepCameras(intakeAnchors);
+  await chooseOtherSlides();
+  await page.getByText(/Manual Alignment Points.*Sync On/).waitFor();
+  await keepCameras(beforeReload);
+  await sync.click();
+  await page.getByText(/Manual Alignment Points.*Sync Off/).waitFor();
+  await sync.click();
+  await page.getByText(/Manual Alignment Points.*Sync On/).waitFor();
+  await keepCameras(beforeReload);
   const invalidGroup = await page.request.get('/api/viewer/file-cases/WRONG-CASE/tissue-registrations',
     { params: new URLSearchParams(files.map((file) => ['scan_ids', file.id])) });
   assert.equal(invalidGroup.status(), 404);
