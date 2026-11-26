@@ -60,8 +60,8 @@ type ComparisonPosition = {
   anchors?: Record<string, Camera>;
 };
 
-export function useComparisonPosition(account: string, selected: string[]) {
-  const key = `comparison-position:${account}:${[...selected].sort().join(',')}`;
+export function useComparisonPosition(account: string, scope: string, selected: string[]) {
+  const key = `comparison-position:${account}:${scope}:${[...selected].sort().join(',')}`;
   const pending = useRef<{ key: string; value: ComparisonPosition }>(undefined);
   const timer = useRef<number>(undefined);
 

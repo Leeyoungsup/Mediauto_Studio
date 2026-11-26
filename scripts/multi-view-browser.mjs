@@ -287,25 +287,53 @@ try {
   const readFour = () => Promise.all([1, 2, 3, 4].map(frame));
   const intakeAnchors = await readFour();
   await sync.click();
-  await page.getByText(/Manual Alignment Points.*Sync On/).waitFor();
+  await page.getByText(/Session Alignment.*Sync On/).waitFor();
   await keepCameras(intakeAnchors);
   await drag(1, 55, 25);
   const intakeAlignment = report(await frame(1), await frame(2), brcaDimensions[0], brcaDimensions[1], intakeAnchors);
   const beforeReload = await readFour();
   await page.reload();
   await chooseOtherSlides();
-  await page.getByText(/Manual Alignment Points.*Sync On/).waitFor();
+  await page.getByText(/Session Alignment.*Sync On/).waitFor();
   await keepCameras(beforeReload);
   await sync.click();
-  await page.getByText(/Manual Alignment Points.*Sync Off/).waitFor();
+  await page.getByText(/Session Alignment.*Sync Off/).waitFor();
   await sync.click();
-  await page.getByText(/Manual Alignment Points.*Sync On/).waitFor();
+  await page.getByText(/Session Alignment.*Sync On/).waitFor();
   await keepCameras(beforeReload);
   const invalidGroup = await page.request.get('/api/viewer/file-cases/WRONG-CASE/tissue-registrations',
     { params: new URLSearchParams(files.map((file) => ['scan_ids', file.id])) });
   assert.equal(invalidGroup.status(), 404);
+
+  const fileQuery = new URLSearchParams(files.map((file) => ['scan_ids', file.id]));
+  const endpoint = '/api/viewer/file-cases/' + fileCase + '/tissue-registrations';
+  const catalog = await (await page.request.get(endpoint, { params: fileQuery })).json();
+  assert.deepEqual({ active: catalog.active, profiles: catalog.profiles, version: catalog.version },
+    { active: null, profiles: {}, version: 0 });
+  const registration = page.getByText('Tissue Registration', { exact: true });
+  await registration.click();
+  const tissue = page.getByLabel('Tissue', { exact: true });
+  assert.equal(await tissue.inputValue(), '');
+  assert.equal(await tissue.locator('option:checked').textContent(), 'No Saved Tissue Registration');
+  assert.equal(await tissue.locator('optgroup[label="Saved Tissues"]').count(), 0);
+  await registration.click();
+
+  const otherCase = 'QA-FILE-TISSUE-OTHER';
+  for (const [index, file] of files.entries()) {
+    const response = await page.request.put('/api/intake/slides/' + file.id, {
+      data: { version: (file.entry?.version ?? 0) + 1, fields: { case_id: otherCase, slide_id: 'QA-' + index } },
+    });
+    assert.equal(response.status(), 200, await response.text());
+  }
+  await page.goto('/#file-viewer/' + otherCase + '/' + files[0].id);
+  await page.reload();
+  await chooseOtherSlides();
+  await sync.and(page.locator(':enabled')).waitFor();
+  await page.getByText(/Normalized Image Coordinates.*Sync Off/).waitFor();
+  await page.getByText('Tissue Registration', { exact: true }).click();
+  assert.equal(await tissue.locator('option:checked').textContent(), 'No Saved Tissue Registration');
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ result: 'PASS', maximumPanes: 6, normalized, reversed, anchored, manualAlignmentRestore: true, intakeAlignment, sixPaneSync,
+  console.log(JSON.stringify({ result: 'PASS', maximumPanes: 6, normalized, reversed, anchored, manualAlignmentRestore: true, intakeAlignment, separateFileCases: true, sixPaneSync,
     paneRetry: true, focusedPane: true, otherPanesKept: true, paneAnnotationsRestored: true }));
 } finally {
   await browser.close();

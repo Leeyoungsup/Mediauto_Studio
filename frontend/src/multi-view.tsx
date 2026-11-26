@@ -47,13 +47,16 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
   const restoredScope = useRef<string>(undefined);
   const entryCameras = useRef(new Set(Object.keys(cameras)));
   const storage = useTissueRegistrationStorage(tissueEndpoint, selected);
-  const comparison = useComparisonPosition(account, selected);
+  const comparison = useComparisonPosition(account, tissueEndpoint ?? 'unregistered', selected);
   const profiles = storage.catalog?.profiles;
   const savedTissue = storage.catalog?.active;
   const profileKey = savedTissue ? `${savedTissue}:${profiles?.[savedTissue]?.saved_at}` : null;
   const movedPanes = useRef(new Set<string>());
+  const savedSlots = Object.keys(profiles ?? {}).sort();
   const nextSlot = tissueSlots.find((slot) => !profiles?.[slot]);
-  const slot = tissueEndpoint ? tissueSlot ?? storage.catalog?.active ?? nextSlot : undefined;
+  const selectedTissue = tissueSlot ?? savedTissue;
+  const slot = tissueEndpoint ? selectedTissue ?? nextSlot : undefined;
+  const appliedTissue = tissueSlot && profiles?.[tissueSlot] ? tissueSlot : undefined;
   const storageLoading = Boolean(tissueEndpoint && !storage.catalog && !storage.error);
   const frames = useRef<Frames>({});
   const metadata = useRef<Record<string, SlideInfo>>({});
@@ -71,6 +74,8 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
   const formatError = (value: number, unit: string) => unit === 'µm' && value >= 1000
     ? `${(value / 1000).toFixed(2)} mm` : `${value.toFixed(2)} ${unit}`;
   const waitingFor = picking ? selected.flatMap((id, index) => (points[id]?.length ?? 0) === round ? [`Pane ${index + 1}`] : []) : [];
+  const alignmentLabel = registered ? 'Tissue Landmark Registration'
+    : appliedTissue && anchors ? 'Manual Alignment Points' : anchors ? 'Session Alignment' : 'Normalized Image Coordinates';
   const allReady = selected.length >= 2 && selected.every((id) => loaded.includes(id));
 
   function publish(driver: string, frame: CameraFrame, transforms = registered, retainDriver = false, alignment = anchors) {
@@ -135,6 +140,11 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
 
   async function chooseTissue(tissue: string) {
     const profile = profiles?.[tissue];
+    if (!tissue) {
+      if (savedTissue) await clearRegistration();
+      else setTissueSlot(undefined);
+      return;
+    }
     if (!profile) {
       clearWorkingRegistration();
       setTissueSlot(tissue);
@@ -162,12 +172,13 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
   }
 
   function rememberPosition(sync: boolean, alignment = anchors) {
-    comparison.remember({ profile: profileKey, sync, positions: currentPositions(),
-      anchors: profileKey === null ? alignment : undefined });
+    const activeProfileKey = appliedTissue === savedTissue ? profileKey : null;
+    comparison.remember({ profile: activeProfileKey, sync, positions: currentPositions(),
+      anchors: activeProfileKey === null ? alignment : undefined });
   }
 
   async function saveAlignmentPositions() {
-    if (anchors && tissueSlot) { await clearRegistration(); return; }
+    if (anchors && appliedTissue) { await clearRegistration(); return; }
     const group = { anchors: currentPositions() };
     if (tissueEndpoint && (!slot || !await storage.save(slot, false, group))) return;
     comparison.discard();
@@ -176,7 +187,7 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
 
   async function changeSync() {
     const next = !synchronized;
-    if (tissueEndpoint && (registered || anchors) && tissueSlot && !await storage.save(tissueSlot, next)) return;
+    if (tissueEndpoint && (registered || anchors) && appliedTissue && !await storage.save(appliedTissue, next)) return;
     const alignment = anchors ?? (next && !registered && movedPanes.current.size > 1 ? currentPositions() : undefined);
     setAnchors(alignment);
     setSynchronized(next);
@@ -300,11 +311,13 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
           <summary>Tissue Registration</summary>
           <div className="registration-popover">
             {tissueEndpoint && <label className="form-field">Tissue
-              <select aria-label="Tissue" value={slot ?? ''} disabled={!storage.catalog || !allReady || storage.savePending || picking || focused}
+              <select aria-label="Tissue" value={selectedTissue ?? ''} disabled={!storage.catalog || !allReady || storage.savePending || picking || focused}
                 onChange={(event) => void chooseTissue(event.target.value)}>
                 {!storage.catalog && <option value="">{storage.error ? 'Saved tissues unavailable' : 'Loading saved tissues…'}</option>}
-                {storage.catalog && !slot && <option value="">Select Tissue</option>}
-                {Object.keys(profiles ?? {}).sort().map((letter) => <option key={letter} value={letter}>Tissue {letter}</option>)}
+                {storage.catalog && <option value="">{savedSlots.length ? 'No Active Tissue' : 'No Saved Tissue Registration'}</option>}
+                {savedSlots.length > 0 && <optgroup label="Saved Tissues">
+                  {savedSlots.map((letter) => <option key={letter} value={letter}>Tissue {letter}</option>)}
+                </optgroup>}
                 {storage.catalog && nextSlot && <option value={nextSlot}>New Tissue {nextSlot}</option>}
               </select>
             </label>}
@@ -312,7 +325,7 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
             <div className="actions">
               <button className="button secondary" disabled={!allReady || synchronized || focused || picking || !!registered || storage.savePending || !!tissueEndpoint && (!storage.catalog || !slot)}
                 onClick={() => void saveAlignmentPositions()}>
-                {anchors && tissueSlot ? 'Clear Alignment Points' : 'Use Current Positions as Alignment Points'}</button>
+                {anchors && appliedTissue ? 'Clear Alignment Points' : 'Use Current Positions as Alignment Points'}</button>
               <button className="button secondary" disabled={!allReady || synchronized || focused || picking || storage.savePending} onClick={() => {
                 setAnchors(undefined); setRegistered(undefined); setReference(selected[0]); setPoints({}); setPicking(true);
               }}>Pick Tissue Landmarks</button>
@@ -326,7 +339,7 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
               </>}
               {(picking || registered) && <button className="button secondary" disabled={storage.savePending}
                 onClick={() => void clearRegistration()}>{picking ? 'Cancel Landmark Picking' : 'Deactivate Tissue Registration'}</button>}
-              {(registered || anchors) && <button className="button secondary" onClick={goToTissue}>Go to Tissue</button>}
+              {(registered || anchors) && <button className="button secondary" onClick={goToTissue}>{anchors && !appliedTissue ? 'Go to Sync Origin' : 'Go to Tissue'}</button>}
             </div>
             {storage.error && <div className="notice" role="alert">{storage.error}
               <button className="button secondary" onClick={() => { restoredScope.current = undefined; storage.reload(); }}>Reload Saved Tissues</button></div>}
@@ -341,7 +354,7 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
           </div>
         </details>
       </div>
-      <span className="multi-view-sync-status muted" role="status">{registered ? `Tissue Landmark Registration${slot ? ' · Tissue ' + slot : ''}` : anchors ? `Manual Alignment Points${slot ? ' · Tissue ' + slot : ''}` : 'Normalized Image Coordinates'} · {focused ? 'Sync Paused While Expanded' : synchronized ? 'Sync On' : 'Sync Off'}</span>
+      <span className="multi-view-sync-status muted" role="status">{alignmentLabel}{appliedTissue && (registered || anchors) ? ' · Tissue ' + appliedTissue : ''} · {focused ? 'Sync Paused While Expanded' : synchronized ? 'Sync On' : 'Sync Off'}</span>
     </div>
     <div ref={grid} className="multi-view-grid" data-count={selected.length} data-focused={focused}>
       {selected.map((id, index) => {
