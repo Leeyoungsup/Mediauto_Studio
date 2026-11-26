@@ -551,7 +551,9 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
             self.assertEqual(response.json()["snapshot"]["id"], original)
             self.assertNotIn("score", response.json()["snapshot"])
             self.assertEqual((await self.client.get(f"{url}/{original}/cells{args}")).json()["points"], [[20, 25, 0]])
-            overlay = await self.client.get(f"{url}/{original}/overlay")
+            legacy = await self.client.get(f"{url}/{original}/overlay")
+            self.assertEqual(legacy.json(), {"step": 512, "bins": [[0, 0, 0, 1]]})
+            overlay = await self.client.get(f"{url}/{original}/overlay", params={"format": "packed"})
             self.assertEqual(overlay.status_code, 200, overlay.text)
             self.assertEqual(overlay.headers["x-cell-stride"], "3")
             self.assertEqual(list(struct.iter_unpack("<ddd", overlay.content)), [(20, 25, 0)])
@@ -1469,7 +1471,9 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
             self.assertEqual(state["history"][0]["actor"], actor.display_name)
             points = (await get_json(detail + "/cells", {**box, "version": 1}))["points"]
             self.assertEqual(points, [[50, 60, 3, 0, 0.44, 0, True], [80, 90, 4, 1, 0.9, 1, True]])
-            overlay = await self.client.get(detail + "/overlay", params={"version": 1})
+            self.assertEqual(await get_json(detail + "/overlay", {"version": 1}),
+                             {"step": 512, "bins": [[0, 0, 3, 1], [0, 0, 4, 1]]})
+            overlay = await self.client.get(detail + "/overlay", params={"version": 1, "format": "packed"})
             self.assertEqual(overlay.status_code, 200, overlay.text)
             self.assertEqual(overlay.headers["x-cell-stride"], "7")
             self.assertEqual(list(struct.iter_unpack("<7d", overlay.content)), [tuple(point) for point in points])

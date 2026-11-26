@@ -1,6 +1,7 @@
 """Spatial rendering payloads. Diagnostic scoring stays in the model contracts."""
 
 from array import array
+from collections import Counter
 import gzip
 import sys
 
@@ -32,6 +33,22 @@ def cell_buffer_response(request: Request, compressed: bytes, stride: int):
         headers["Content-Encoding"] = "gzip"
     return Response(compressed if use_gzip else gzip.decompress(compressed),
                     media_type="application/octet-stream", headers=headers)
+
+
+def legacy_density_grid(buckets, dimensions, point_for):
+    """Return the overview shape expected by Viewer tabs open before packed overlays."""
+    step = 512
+    while max(dimensions) > step * 256:
+        step *= 2
+    counts = Counter()
+    for bucket in buckets.values():
+        for entry in bucket:
+            point = point_for(entry)
+            if point is not None:
+                x, y, grade = point[:3]
+                counts[int(x) // step, int(y) // step, grade] += 1
+    return {"step": step, "bins": [[bx * step, by * step, grade, count]
+                                    for (bx, by, grade), count in counts.items()]}
 
 
 def tile_page(bucket, offset, point_for):

@@ -124,6 +124,7 @@ try {
     json: { ...archive, results: [{ ...source, point_count: 6200 }] },
   }));
   await page.route('**' + overlayURL + '*', (route) => {
+    assert.equal(new URL(route.request().url()).searchParams.get('format'), 'packed');
     requests++;
     return route.fulfill({ body: packed, contentType: 'application/octet-stream', headers: { 'X-Cell-Stride': '7' } });
   });

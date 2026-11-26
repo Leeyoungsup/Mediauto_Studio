@@ -57,7 +57,7 @@ async function loadCells(url: string, stride: 3 | 7, signal: AbortSignal) {
 }
 
 export function useCellOverlay(base: string | undefined, version: number | undefined, stride: 3 | 7, enabled: boolean, attempt: number) {
-  const url = base && `${base}/overlay${version === undefined ? '' : '?version=' + version}`;
+  const url = base && `${base}/overlay?format=packed${version === undefined ? '' : '&version=' + version}`;
   const [resource, setResource] = useState<{ url: string; attempt: number; cells?: CellIndex; failed?: boolean }>();
   const current = url && resource?.url === url && resource.attempt === attempt ? resource : undefined;
 

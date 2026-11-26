@@ -14,3 +14,11 @@ SaaS 베이스 `d3741bc`의 `frontend/js/tile-viewer.js`에 있는 `_renderDense
 - 격리 PostgreSQL에서 6,131개 점의 바이너리 좌표·클래스 보존, 상세 페이지의 완결성, PD-L1 역할 구분, IHC 수정본 클래스·임계값·원본 복원 4개 백엔드 테스트를 실행했다.
 - `scripts/verify-integration.sh --demo ihc` 통과. 6,200개 세포 픽스처에서 떨어진 두 세포 좌표에 점이 보이고 그 사이 픽셀이 투명한 것을 확인했다. Ki-67·ER·PR, HER2, PD-L1와 Multi View 회귀 검증을 함께 실행했다.
 - 9920 Chrome 테스트에서 보관 PD-L1 결과의 41,373개 세포를 확인했다. Fit에서 점, 20×에서 테두리를 확인했고 40×를 거쳐 Fit으로 돌아갈 때까지 동일 결과의 오버레이 요청은 1회였다.
+
+## 구버전 탭 호환 수정
+
+기존 Viewer 탭이 같은 `/overlay` 주소에서 JSON을 읽는 동안 서버가 바이너리를 반환해 IHC 오류가 표시될 수 있었다. 현재 Viewer는 `format=packed`를 명시한다. 형식을 지정하지 않은 요청의 JSON과 영역별 페이지는 기존 계약을 유지한다. 패치 도중 이미 열린 탭에서 오류를 봤다면 새로고침 후 IHC Results를 열어 현재 번들을 적용한다. DB 변경은 없다.
+
+격리 PostgreSQL에서 IHC·PD-L1의 JSON과 바이너리 응답 및 접근 권한을 확인했다. `scripts/verify-integration.sh --demo ihc`로 Chrome의 IHC 세포 좌표, 수정·복원, 확대 요청 횟수와 분석 실행 경로를 검증했다.
+
+9920 Chrome에서 보관된 Ki-67·HER2·PR 원본의 두 응답 형식을 확인했다. PD-L1 Viewer도 41,373개 세포를 불러와 Fit → 20× → 40× → Fit 동안 오버레이 요청 1회를 유지했다.

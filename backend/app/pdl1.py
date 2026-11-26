@@ -8,7 +8,7 @@ import re
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 import openslide
@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException, Path as RoutePath, Query, Request,
 
 from app.auth import CurrentUser, Session
 from app.biomarker_evidence import validation_records
-from app.cell_overlay import BUCKET, cell_buffer_response, packed_cells, tile_page
+from app.cell_overlay import BUCKET, cell_buffer_response, legacy_density_grid, packed_cells, tile_page
 from app.pdl1_policy import display_policy
 from app.wsi import PRIVATE, Source, registered_path
 
@@ -164,10 +164,16 @@ def cached_cell_buffer(path, modified_ns):
     return packed_cells(load_cell_index(path, modified_ns), tuple)
 
 
-def build_overlay(folder, snapshot_id, role, bx, by, offset):
-    path, _ = overlay_source(folder, snapshot_id, role)
+@lru_cache(maxsize=12)
+def cached_legacy_density(path, modified_ns, dimensions):
+    return legacy_density_grid(load_cell_index(path, modified_ns), dimensions, tuple)
+
+
+def build_overlay(folder, snapshot_id, role, bx, by, offset, packed):
+    path, dimensions = overlay_source(folder, snapshot_id, role)
     if bx is None:
-        return cached_cell_buffer(path, path.stat().st_mtime_ns)
+        modified_ns = path.stat().st_mtime_ns
+        return cached_cell_buffer(path, modified_ns) if packed else cached_legacy_density(path, modified_ns, tuple(dimensions))
     return tile_page(cell_index(path).get((bx, by), ()), offset, tuple)
 
 
@@ -175,10 +181,12 @@ def build_overlay(folder, snapshot_id, role, bx, by, offset):
 async def overlay(source: Source, scan_id: UUID, snapshot_id: SnapshotId, user: CurrentUser, session: Session,
                   request: Request, response: Response, bx: Annotated[int, Query(ge=0, le=500_000)] | None = None,
                   by: Annotated[int, Query(ge=0, le=500_000)] | None = None,
-                  offset: Annotated[int, Query(ge=0)] = 0):
+                  offset: Annotated[int, Query(ge=0)] = 0,
+                  format: Literal["packed"] | None = None):
     response.headers.update(PRIVATE)
     if (bx is None) != (by is None) or (bx is None and offset):
         raise HTTPException(422, "Check the overlay tile.")
     folder = await directory_for(source, scan_id, user, session)
-    result = await asyncio.to_thread(build_overlay, folder, snapshot_id, user.role, bx, by, offset)
-    return cell_buffer_response(request, result, 3) if bx is None else result
+    packed = bx is None and format == "packed"
+    result = await asyncio.to_thread(build_overlay, folder, snapshot_id, user.role, bx, by, offset, packed)
+    return cell_buffer_response(request, result, 3) if packed else result
