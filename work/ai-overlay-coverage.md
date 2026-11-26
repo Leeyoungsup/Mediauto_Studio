@@ -22,3 +22,11 @@ SaaS 베이스 `d3741bc`의 `frontend/js/tile-viewer.js`에 있는 `_renderDense
 격리 PostgreSQL에서 IHC·PD-L1의 JSON과 바이너리 응답 및 접근 권한을 확인했다. `scripts/verify-integration.sh --demo ihc`로 Chrome의 IHC 세포 좌표, 수정·복원, 확대 요청 횟수와 분석 실행 경로를 검증했다.
 
 9920 Chrome에서 보관된 Ki-67·HER2·PR 원본의 두 응답 형식을 확인했다. PD-L1 Viewer도 41,373개 세포를 불러와 Fit → 20× → 40× → Fit 동안 오버레이 요청 1회를 유지했다.
+
+## 확대 이동 성능
+
+20×에서 같은 세포 테두리를 드래그 프레임마다 Path2D로 다시 그리던 작업을 화면 픽셀 기준 256 × 256 영역의 캔버스 캐시로 바꿨다. 뷰가 이동하면 남아 있는 영역을 재사용한다. 배율, 분석 결과나 색상이 바뀌면 새 캐시를 사용한다. 레퍼런스의 세포별 점·테두리와 스캔 좌표 계약은 그대로 적용한다.
+
+9920에서 Chrome 146 headless, 1440 × 980으로 같은 PD-L1 슬라이드의 화면 중앙에 합성 세포 22,500개를 배열했다. 20×에서 100개 연속 pointermove 프레임의 requestAnimationFrame 간격을 측정했다. 중앙값은 200 → 16.7 ms, 95백분위수는 216.7 → 16.8 ms, 20 ms 초과 프레임은 61 → 0개였다. 이 수치는 측정한 확대·이동 경로의 결과다.
+
+`scripts/verify-integration.sh --demo ihc`에서 확대 상태로 드래그한 뒤 세포 테두리가 같은 슬라이드 좌표에 표시되고 오버레이 요청이 1회로 유지되는 것을 확인했다. Multi View 동기화와 주석 복원, IHC 수정·원본 복원도 통과했다.

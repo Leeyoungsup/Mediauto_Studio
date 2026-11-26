@@ -346,14 +346,17 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       try {
         const metadata = await api<SlideInfo>(endpoint, { signal, headers: { 'X-Audit-Attempt': auditId } });
         if (!element || signal.aborted) return;
+        let previousView: Viewport | undefined;
         renderer.current = new TileViewer(element, metadata, endpoint, (viewport) => {
-          setView((current) => current && current.zoom === viewport.zoom && current.x === viewport.x && current.y === viewport.y
-            && current.width === viewport.width && current.height === viewport.height ? current : viewport);
-          const viewer = renderer.current;
-          if (viewer) {
-            report.current?.onFrame(viewer.cameraFrame(), metadata);
-            reviewFrame.current?.onFrame(viewer.cameraFrame());
-            onCamera.current?.(viewer.cameraFrame());
+          if (previousView && previousView.zoom === viewport.zoom && previousView.x === viewport.x && previousView.y === viewport.y
+              && previousView.width === viewport.width && previousView.height === viewport.height) return;
+          previousView = viewport;
+          setView(viewport);
+          const frame = renderer.current?.cameraFrame();
+          if (frame) {
+            report.current?.onFrame(frame, metadata);
+            reviewFrame.current?.onFrame(frame);
+            onCamera.current?.(frame);
           }
         }, (status) => {
           setTileStatus(status);
