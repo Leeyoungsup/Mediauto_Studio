@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
-import { AlertTriangle, ChevronLeft, ChevronRight, Image, Layers, List, LocateFixed, Map, Minus, Pause, Play, Plus, ScanLine, Tag, Tally5 } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, ChevronRight, Download, Image, Layers, List, LocateFixed, Map, Minus, Pause, Play, Plus, ScanLine, Tag, Tally5 } from 'lucide-react';
 import type { CollectionOrigin } from './workflow-navigation';
 import type { WsiScan } from './demo';
 import { api, auditAttemptId, jsonBody, request } from './session';
@@ -18,15 +18,14 @@ import { AnnotationOverlay, DrawingControls, ViewerRecordsPanel, ViewerToolsBar,
 import type { Camera, Geometry, Point, Tool } from './viewer-tools';
 import type { ViewerSettings } from './viewer-preferences';
 import { ScanReference, slideEndpoint } from './worklist';
+import { ViewportExport, snapshotViewport, viewportScale } from './viewport-export';
+import type { ViewportSnapshot } from './viewport-export';
 
 function ScaleBar({ mpp, zoom }: { mpp: number | null; zoom?: number }) {
   if (!zoom) return null;
   if (!mpp) return <span className="scale-bar">Pixel size unavailable</span>;
-  const target = 120 * mpp / zoom;
-  const power = 10 ** Math.floor(Math.log10(target));
-  const length = (target >= 5 * power ? 5 : target >= 2 * power ? 2 : 1) * power;
-  const label = length >= 1000 ? `${length / 1000} mm` : `${Number(length.toPrecision(3))} µm`;
-  return <div className="scale-bar" aria-label={`Scale bar ${label}`}><span>{label}</span><i style={{ width: length * zoom / mpp }} /></div>;
+  const { label, width } = viewportScale(mpp, zoom);
+  return <div className="scale-bar" aria-label={`Scale bar ${label}`}><span>{label}</span><i style={{ width }} /></div>;
 }
 
 const PapReview = lazy(() => import('./pap-review'));
@@ -70,6 +69,7 @@ export type PaneComparison = {
 type ViewerOptions = {
   settings: ViewerSettings;
   active: boolean;
+  presenting?: boolean;
   onCamera?: (camera: Camera) => void;
   reportHref?: string;
   position: { index: number; total: number };
@@ -171,11 +171,13 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   const [showProstate, setShowProstate] = useState(false);
   const [autopanNotice, setAutopanNotice] = useState('');
   const settings = options?.settings;
+  const presenting = options?.presenting === true;
   const autopanSpeed = settings?.autopan_speed;
   const autopanDirection = settings?.autopan_direction;
   const [showNavigator, setShowNavigator] = useState(true);
   const [failure, setFailure] = useState('');
   const [tileStatus, setTileStatus] = useState<'loading' | 'ok' | 'partial' | 'unavailable'>('loading');
+  const [viewportSnapshot, setViewportSnapshot] = useState<ViewportSnapshot>();
   const [attempt, setAttempt] = useState(0);
   const endpoint = readOnlyEndpoint ?? slideEndpoint(scan);
   const compareMode = Boolean(comparison);
@@ -561,6 +563,12 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       <div className={options ? 'image-actions viewer-scan-actions' : 'image-actions'}>{analysis && <button type="button" ref={analysisButton} className="button primary"
         aria-expanded={analysis.open} aria-controls={analysis.open ? 'viewer-analysis-panel' : undefined}
         onClick={() => { setLymphOpen(false); analysis.change(!analysis.open); }}>Analysis</button>}{extraAction}
+        {options && !readOnlyEndpoint && viewerRecords.records?.can_export && <button type="button" className="button secondary"
+          disabled={!view || tileStatus !== 'ok' || Boolean(failure)} onClick={() => {
+            if (!canvas.current?.clientWidth || !view) return;
+            setAutopan(false);
+            setViewportSnapshot(snapshotViewport(canvas.current, info?.mpp_x ? viewportScale(info.mpp_x, view.zoom) : undefined));
+          }}><Download size={16} aria-hidden="true" /> Export Current View</button>}
         {options && canReview && <button type="button" ref={annotationsButton} className="button secondary viewer-annotations-toggle"
           aria-expanded={annotationsOpen && !analysis?.open}
           onClick={() => {
@@ -588,10 +596,10 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       </div>
     </div>
     {!options && reviewTools}
-    <div className={canOpenPap && showPap ? 'analysis-workspace pap-workspace' : 'analysis-workspace'}>
+    <div className={!presenting && canOpenPap && showPap ? 'analysis-workspace pap-workspace' : 'analysis-workspace'}>
     <div ref={fit.surface} className="image-surface" data-review-dock={Boolean(options && reviewTools)}
       style={options && fit.height ? { height: fit.height } : undefined}>
-      <canvas className={viewerRecords.tool === 'pan' && !ihc.picking && !skin.mode ? 'wsi-canvas' : 'wsi-canvas drawing-tool'} ref={canvas} tabIndex={0} aria-label="WSI Canvas"
+      <canvas className={presenting || (viewerRecords.tool === 'pan' && !ihc.picking && !skin.mode) ? 'wsi-canvas' : 'wsi-canvas drawing-tool'} ref={canvas} tabIndex={0} aria-label="WSI Canvas"
         onPointerDown={(event) => {
           if (following || event.button !== 0 || !info || drag.current || drawing.current) return;
           setAutopan(false);
@@ -601,17 +609,17 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
             if (point) report.current.captureLandmark(point);
             return;
           }
-          if (showSkin && skin.mode) {
+          if (!presenting && showSkin && skin.mode) {
             const point = getPoint(event, false);
             if (point) skin.place(point);
             return;
           }
-          if (ihc.picking) {
+          if (!presenting && ihc.picking) {
             const point = getPoint(event, false);
             if (point) ihc.pickAt(...point);
             return;
           }
-          const tool = viewerRecords.tool;
+          const tool = presenting ? 'pan' : viewerRecords.tool;
           if (tool !== 'pan') {
             const start = getPoint(event, false);
             if (!start) return;
@@ -642,7 +650,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
             }
             return;
           }
-          if (!following && (tool === 'polygon' || tool === 'path') && viewerRecords.vertices.length) setVertexGuide(getPoint(event, false) ?? undefined);
+          if (!presenting && !following && (tool === 'polygon' || tool === 'path') && viewerRecords.vertices.length) setVertexGuide(getPoint(event, false) ?? undefined);
           const last = drag.current;
           if (following || !last || last.id !== event.pointerId) return;
           navigate((viewer) => viewer.pan(event.clientX - last.x, event.clientY - last.y));
@@ -683,13 +691,13 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
             viewerRecords.chooseTool('pan');
             return;
           }
-          if (hasVertices(tool) && (key === 'enter' || key === 'backspace')) {
+          if (!presenting && hasVertices(tool) && (key === 'enter' || key === 'backspace')) {
             event.preventDefault();
             if (key === 'enter') viewerRecords.finishVertices();
             else viewerRecords.undoVertex();
             return;
           }
-          if (options && ['f', 'm', 'g', ' '].includes(key)) {
+          if (options && !presenting && ['f', 'm', 'g', ' '].includes(key)) {
             event.preventDefault();
             if (event.repeat) return;
             if (key === 'f') void options.toggleFullscreen();
@@ -728,7 +736,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       {info && !readOnlyEndpoint && !papStain && <Pdl1Badge state={pdl1} />}
       {tileStatus === 'loading' && !failure && <div className="wsi-overlay image-empty" role="status">Opening slide…</div>}
       {(failure || tileStatus === 'unavailable') && <div className="wsi-overlay image-empty" role="alert"><AlertTriangle size={25} />
-        <strong>Unable to open the slide.</strong><p>{failure || 'Unable to load tiles.'}</p>
+        <strong>Unable to open the slide.</strong><p>{presenting ? 'Try loading the slide again.' : failure || 'Unable to load tiles.'}</p>
         <button className="button secondary" onClick={() => setAttempt((value) => value + 1)}>Retry</button>
       </div>}
       {info && view && minimap && overview && <Navigator src={overview} info={info} view={view} dynamic={settings?.dynamic_minimap} onMove={(x, y) => navigate((viewer) => viewer.centerAt(x, y))} />}
@@ -744,6 +752,11 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         </div>}
       </aside>}
       {info && <ScaleBar mpp={info.mpp_x} zoom={view?.zoom} />}
+      {presenting && <div className="presentation-zoom" role="group" aria-label="Slide Zoom">
+        <button type="button" className="icon-button" aria-label="Zoom Out" disabled={!info} onClick={() => navigate((viewer) => viewer.magnify(0.7))}><Minus size={18} /></button>
+        <button type="button" className="icon-button" aria-label="Zoom In" disabled={!info} onClick={() => navigate((viewer) => viewer.magnify(1.4))}><Plus size={18} /></button>
+        <button type="button" className="icon-button" aria-label="Fit to Window" disabled={!info} onClick={() => navigate((viewer) => viewer.fitToWindow())}><LocateFixed size={18} /></button>
+      </div>}
       {canReview && <DrawingControls state={viewerRecords} info={info} preview={drawingPreview} shortcuts={settings?.shortcuts !== false} />}
       {options && reviewTools && <div className="viewer-tool-dock">{reviewTools}</div>}
     </div>
@@ -794,6 +807,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         canvas.current?.scrollIntoView({ block: 'nearest' });
       }} />}
     {roiUnavailable && <p className="notice" role="status">The linked ROI is unavailable. The scan is still open.</p>}
+    {viewportSnapshot && <ViewportExport snapshot={viewportSnapshot} endpoint={endpoint} onClose={() => setViewportSnapshot(undefined)} />}
     {!options && recordsPanel}
     {!options && canCountLymph && <LymphCounts endpoint={endpoint} scanId={scan.id} />}
     {info && !compareMode && !readOnlyEndpoint && !papStain && <div className="clinical-panel-focus" ref={pdlPanel} tabIndex={-1}>

@@ -4,6 +4,7 @@ import { api, jsonBody } from './session';
 
 export type ViewerSettings = {
   tray_orientation: 'vertical' | 'horizontal';
+  tray_sort: 'case' | 'label' | 'stain';
   tray_visible: boolean;
   gallery: boolean;
   show_label: boolean;
@@ -18,7 +19,7 @@ export type ViewerSettings = {
 type Preference = { version: number; settings: ViewerSettings };
 const endpoint = '/api/viewer/preferences';
 const defaults: ViewerSettings = {
-  tray_orientation: 'vertical', tray_visible: true, gallery: false, show_label: false, show_overview: false,
+  tray_orientation: 'vertical', tray_sort: 'case', tray_visible: true, gallery: false, show_label: false, show_overview: false,
   show_minimap: true, dynamic_minimap: false, shortcuts: true, autopan_speed: 120, autopan_direction: 'right',
 };
 

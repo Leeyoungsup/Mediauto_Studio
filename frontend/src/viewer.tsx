@@ -22,6 +22,7 @@ import { ScanReference, SlidePreview, StatusLabel } from './worklist';
 import { WorkspaceTabs } from './workspace-tabs';
 
 type ViewerTab = 'slides' | 'analysis' | 'history' | 'media' | 'gross' | 'notes' | 'logs' | 'requests';
+const trayCollator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
 
 export function Viewer({ item, activeSlide, onSlide, onBack, onReview, canRequest, hasFrozenWorkflow, initialSnapshot, initialRoi, roiOrigin, historyEndpoint, attachmentsEndpoint, logsEndpoint, notesEndpoint, reviewEndpoint, viewerAccount, relatedEndpoint, analysisEndpoint, organization, openRequests, openReview, openAnalysis, papMode, collectionOrigin }: {
   item: DemoCase; activeSlide?: string; onSlide: (id: string) => void; onBack: (scan?: string) => void; onReview?: () => void; canRequest?: boolean; hasFrozenWorkflow?: boolean; initialSnapshot?: string; initialRoi?: string; roiOrigin?: RoiLocation; historyEndpoint?: string; attachmentsEndpoint?: string; logsEndpoint?: string; notesEndpoint?: string; reviewEndpoint?: string; relatedEndpoint?: string; viewerAccount: string;
@@ -29,6 +30,7 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, canReques
 }) {
   const [contextTab, setContextTab] = useState<Exclude<ViewerTab, 'analysis'>>(openRequests && canRequest ? 'requests' : 'slides');
   const [comparing, setComparing] = useState(false);
+  const [presenting, setPresenting] = useState(false);
   const [analysisOpen, setAnalysisOpen] = useState(!!openAnalysis);
   const [reviewSelection, setReviewSelection] = useState<string>();
   const review = useCollaborativeReview(reviewEndpoint, viewerAccount, openReview);
@@ -45,6 +47,8 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, canReques
   const root = useRef<HTMLElement>(null);
   const reviewButton = useRef<HTMLButtonElement>(null);
   const trayList = useRef<HTMLDivElement>(null);
+  const presentationButton = useRef<HTMLButtonElement>(null);
+  const exitPresentation = useRef<HTMLButtonElement>(null);
   const singleCamera = useRef<{ id: string; camera: SlideCamera }>(undefined);
   const [returnCamera, setReturnCamera] = useState<{ id: string; camera: SlideCamera }>();
   const preferences = useViewerPreferences();
@@ -84,7 +88,11 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, canReques
     change('gallery', !trayVisible || !settings.gallery);
     if (!trayVisible) change('tray_visible', true);
   }
-  const available = item.slides.filter(({ wsi }) => wsi);
+  const traySlides = settings.tray_sort === 'case' ? item.slides : [...item.slides].sort((a, b) => (
+    (settings.tray_sort === 'stain' ? trayCollator.compare(a.stain, b.stain) : 0)
+      || trayCollator.compare(a.label ?? a.id, b.label ?? b.id)
+  ));
+  const available = traySlides.filter(({ wsi }) => wsi);
   const requested = followingFrame?.scan_id ?? reviewSelection ?? activeSlide;
   const slide = requested
     ? item.slides.find(({ id }) => id === requested)
@@ -95,9 +103,9 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, canReques
     onSlide(id);
   }
 
-  const slideIndex = slide ? item.slides.indexOf(slide) : -1;
-  const previous = slideIndex >= 0 ? item.slides.slice(0, slideIndex).reverse().find((entry) => entry.wsi) : undefined;
-  const next = slideIndex >= 0 ? item.slides.slice(slideIndex + 1).find((entry) => entry.wsi) : undefined;
+  const slideIndex = slide ? traySlides.indexOf(slide) : -1;
+  const previous = slideIndex >= 0 ? traySlides.slice(0, slideIndex).reverse().find((entry) => entry.wsi) : undefined;
+  const next = slideIndex >= 0 ? traySlides.slice(slideIndex + 1).find((entry) => entry.wsi) : undefined;
 
   useEffect(() => {
     const list = trayList.current;
@@ -107,7 +115,7 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, canReques
     const item = active.getBoundingClientRect();
     const delta = (start: number, end: number, min: number, max: number) => start < min ? start - min : Math.max(0, end - max);
     list.scrollBy({ left: delta(item.left, item.right, bounds.left, bounds.right), top: delta(item.top, item.bottom, bounds.top, bounds.bottom) });
-  }, [slide?.id, trayVisible, comparing, settings.gallery, settings.tray_orientation]);
+  }, [slide?.id, trayVisible, comparing, settings.gallery, settings.tray_orientation, settings.tray_sort]);
 
   const canAnalyze = Boolean(analysisEndpoint && slide?.wsi?.source === 'clinical' && !review.following && !comparing);
   const activeTab: ViewerTab = analysisOpen && canAnalyze ? 'analysis' : contextTab;
@@ -133,7 +141,21 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, canReques
   </section>;
   const reportHref = canRequest && item.recordId ? withCollection(caseHref(item.recordId, 'report', slide?.id), collectionOrigin) : undefined;
   const documentHref = item.recordId && contextTab !== 'slides' ? withCollection(caseHref(item.recordId, contextTab, slide?.id), collectionOrigin) : undefined;
-  return <section ref={root} className="viewer-workbench" aria-label="Slide Review">
+  return <section ref={root} className="viewer-workbench" aria-label="Slide Review" data-presenting={presenting}
+    onKeyDownCapture={(event) => {
+      if (presenting && event.key === 'Escape') {
+        event.stopPropagation();
+        setPresenting(false);
+        requestAnimationFrame(() => presentationButton.current?.focus());
+      }
+    }}>
+    {presenting && <div className="viewer-presentation-bar">
+      <strong>Slide Presentation</strong>
+      <button ref={exitPresentation} type="button" className="button secondary" onClick={() => {
+        setPresenting(false);
+        requestAnimationFrame(() => presentationButton.current?.focus());
+      }}>Exit Presentation</button>
+    </div>}
     <div className="page-heading viewer-heading">
       <div className="viewer-context">
         <button className="back-link" onClick={() => onBack(slide?.id)}><ArrowLeft size={16} /> Case Details</button>
@@ -164,6 +186,12 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, canReques
         {fullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
       </button>
       {!comparing && <button className="button secondary" disabled={available.length < 2 || inReview} onClick={() => setComparing(true)}><GalleryHorizontalEnd size={16} /> Multi View</button>}
+      {!comparing && <button ref={presentationButton} type="button" className="button secondary" disabled={!slide?.wsi || inReview}
+        onClick={() => {
+          selectTab('slides');
+          setPresenting(true);
+          requestAnimationFrame(() => exitPresentation.current?.focus());
+        }}><Maximize size={16} /> Present Slide</button>}
       {item.recordId && <a className="button secondary viewer-editor-link" href={withCollection(caseHref(item.recordId, 'editor', slide?.id), collectionOrigin)}><SquarePen size={15} /> Case Editor</a>}
       {reportHref && <a className="button secondary" href={reportHref}><ClipboardList size={16} /> Report Draft</a>}
       {hasFrozenWorkflow && item.recordId && <a className="button secondary" href={caseHref(item.recordId, 'frozen', slide?.id)}><ClipboardList size={16} /> Frozen Section</a>}
@@ -175,7 +203,7 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, canReques
       {!comparing && onReview && <button className="button secondary" disabled={!slide?.wsi} onClick={onReview}>{item.status === 'In Review' ? 'Review Complete' : 'Start Review'}</button>}</div></div>
     <WorkspaceTabs label="Viewer Workspace" tabs={tabs} active={activeTab} onSelect={selectTab} panelId="viewer-workspace-panel" />
     {fullscreenError && <p className="notice" role="alert">{fullscreenError}</p>}
-    <div id="viewer-workspace-panel" role="tabpanel" aria-labelledby={'viewer-workspace-panel-tab-' + activeTab} className="viewer-stage" data-document={isDocument}>
+    <div id="viewer-workspace-panel" role={presenting ? undefined : 'tabpanel'} aria-labelledby={presenting ? undefined : 'viewer-workspace-panel-tab-' + activeTab} className="viewer-stage" data-document={isDocument}>
         {review.open && reviewEndpoint && <CollaborativeReview review={review} sessionHref={item.recordId ? `#viewer/${item.recordId}?review=1` : undefined}
         onClose={() => { review.toggle(); reviewButton.current?.focus(); }} />}
       <div inert={isDocument} className="viewer-scan-stage">
@@ -184,7 +212,11 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, canReques
       setComparing(false);
     }} onSingle={(id, camera) => { selectSlide(id, camera); setComparing(false); }} /> : <div className="viewer-layout" data-tray={trayVisible} data-orientation={settings.tray_orientation}>
       <aside className="panel viewer-tray" id="viewer-slide-tray" hidden={!trayVisible}><div className="panel-title"><h2>Slide Tray</h2><span className="count" title="Viewable scans">{available.length}/{item.slides.length}</span></div>
-        <div ref={trayList} className="tray-items" data-gallery={settings.gallery}>{item.slides.map((entry) => <button className="tray-item" data-scan-id={entry.wsi?.id} key={entry.id} onClick={() => selectSlide(entry.id)} aria-pressed={slide?.id === entry.id} disabled={!entry.wsi || review.following}>
+        <label className="tray-sort">Sort Tray <select value={settings.tray_sort}
+          onChange={(event) => change('tray_sort', event.target.value as typeof settings.tray_sort)}>
+          <option value="case">Case Order</option><option value="label">Slide Label</option><option value="stain">Stain</option>
+        </select></label>
+        <div ref={trayList} className="tray-items" data-gallery={settings.gallery}>{traySlides.map((entry) => <button className="tray-item" data-scan-id={entry.wsi?.id} key={entry.id} onClick={() => selectSlide(entry.id)} aria-pressed={slide?.id === entry.id} disabled={!entry.wsi || review.following}>
           <span className="slide-image"><SlidePreview slide={entry} /></span><span className="tray-scan-label"><strong>{entry.label ?? entry.id}</strong><small>{entry.wsi?.format ?? entry.state} · {entry.stain}</small><ScanReference scan={entry.wsi} /></span>
         </button>)}</div>
       </aside>
@@ -203,7 +235,7 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, canReques
         caseRequestsHref={canRequest && item.recordId ? withCollection(caseHref(item.recordId, 'requests', slide.id) + '?ihc=1', collectionOrigin) : undefined}
         extraAction={relatedEndpoint && item.recordId ? <RelatedCasesControl compact endpoint={relatedEndpoint}
           caseId={item.recordId} scanId={slide.wsi.id} /> : undefined}
-        options={{ settings, active: !isDocument,
+        options={{ settings, active: !isDocument, presenting,
           onCamera: (camera) => { singleCamera.current = { id: slide.id, camera }; },
           reportHref,
           position: { index: slideIndex + 1, total: item.slides.length }, toggleFullscreen, toggleGallery,

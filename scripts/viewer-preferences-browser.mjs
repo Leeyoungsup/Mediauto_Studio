@@ -61,6 +61,8 @@ try {
     else await route.continue();
   });
   const tray = page.locator('.viewer-tray');
+  await tray.getByLabel('Sort Tray').selectOption('stain');
+  assert.equal(await tray.getByLabel('Sort Tray').inputValue(), 'stain');
   await tray.locator(`[data-scan-id="${ndpiId}"]`).click();
   await button(page, 'Retry Overview').waitFor();
   assert.equal(await panel.getAttribute('data-scan-id'), ndpiId);
@@ -94,6 +96,22 @@ try {
   } else {
     await page.getByText(/No embedded label image/).waitFor();
   }
+  await button(page, 'Present Slide').click();
+  await page.getByText('Slide Presentation', { exact: true }).waitFor();
+  assert.equal(await page.getByText('IMS-DEMO-101', { exact: false }).first().isVisible(), false);
+  assert.equal(await page.locator('.scan-images').isVisible(), false);
+  assert.equal(await page.getByRole('tablist', { name: 'Viewer Workspace' }).isVisible(), false);
+  assert.equal(await page.getByLabel('WSI Canvas', { exact: true }).isVisible(), true);
+  const presentationZoom = page.getByRole('group', { name: 'Slide Zoom', exact: true });
+  const presentationBefore = Number(await panel.getAttribute('data-view-zoom'));
+  await button(presentationZoom, 'Zoom In').click();
+  await page.waitForFunction((zoom) => Number(document.querySelector('.image-panel').dataset.viewZoom) > zoom, presentationBefore);
+  await button(presentationZoom, 'Fit to Window').click();
+  await page.keyboard.press('Escape');
+  await button(page, 'Present Slide').waitFor();
+  await page.getByRole('tablist', { name: 'Viewer Workspace' }).waitFor();
+  await page.waitForFunction(() => document.activeElement?.textContent?.trim() === 'Present Slide');
+  assert.equal(await panel.getAttribute('data-scan-id'), ndpiId);
   assert.equal(await panel.getAttribute('data-autopan'), 'false');
   const initialWidth = (await minimap.boundingBox()).width;
   await button(page, 'Start Autopan').click();
@@ -141,6 +159,7 @@ try {
   const reopened = await signIn();
   await reopened.goto(page.url());
   await button(reopened, 'Pan using minimap').waitFor();
+  assert.equal(await reopened.locator('.viewer-tray').getByLabel('Sort Tray').inputValue(), 'stain');
   await button(reopened, 'Viewer Settings').click();
   const restored = reopened.getByRole('form', { name: 'Viewer Settings' });
   assert.equal(await restored.getByLabel('Slide Tray Orientation').inputValue(), 'horizontal');

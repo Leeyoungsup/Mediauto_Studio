@@ -69,6 +69,7 @@ SCAN_OPERATIONS = {
     "index_roi_reference": ("roi_reference_saved", "roi_similarity"),
     "remove_roi_reference": ("roi_reference_removed", "roi_similarity"),
     "export_roi": ("roi_capture_exported", "annotation"),
+    "record_viewport_export": ("viewport_exported", "scan"),
     "save_lymph_count": ("lymph_node_count_saved", "lymph_node_count"),
     "create_annotation": ("annotation_registered", "annotation"),
     "edit_annotation": ("annotation_updated", "annotation"),

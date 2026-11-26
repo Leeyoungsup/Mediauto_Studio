@@ -133,8 +133,10 @@ try {
   await page.route('**/api/worklist/' + record.id, async (route) => {
     const response = await route.fetch();
     const item = await response.json();
-    const fifth = { ...item.slides[0], id: 'synthetic-fifth', label: 'SYNTH LIMIT' };
-    await route.fulfill({ response, json: { ...item, slides: [...item.slides, fifth] } });
+    const extra = ['SYNTH FIVE', 'SYNTH SIX', 'SYNTH LIMIT'].map((label, index) => ({
+      ...item.slides[0], id: 'synthetic-' + index, label,
+    }));
+    await route.fulfill({ response, json: { ...item, slides: [...item.slides, ...extra] } });
   });
   await open(caseNumber);
   const lastScan = scans['S-TP'];
@@ -143,25 +145,27 @@ try {
   await page.route(failurePath, reject);
   await page.getByRole('checkbox', { name: 'I-PR · SVS', exact: true }).check();
   await page.getByRole('checkbox', { name: 'S-TP · SVS', exact: true }).check();
-  await page.getByText('4 / 4 panes').waitFor();
+  await page.getByRole('checkbox', { name: 'SYNTH FIVE · SVS', exact: true }).check();
+  await page.getByRole('checkbox', { name: 'SYNTH SIX · SVS', exact: true }).check();
+  await page.getByText('6 / 6 panes').waitFor();
   assert.ok(await page.getByRole('checkbox', { name: 'SYNTH LIMIT · SVS', exact: true }).isDisabled());
   await pane(4).getByText('QA pane error').waitFor();
   await pane(1).getByRole('button', { name: 'Pan using minimap' }).waitFor();
   assert.ok(await sync.isDisabled());
   await page.unroute(failurePath, reject);
   await pane(4).getByRole('button', { name: 'Retry', exact: true }).click();
-  for (const index of [1, 2, 3, 4]) await pane(index).getByRole('button', { name: 'Pan using minimap' }).waitFor();
+  for (const index of [1, 2, 3, 4, 5, 6]) await pane(index).getByRole('button', { name: 'Pan using minimap' }).waitFor();
   await sync.click();
   await zoom(1, 5);
   await drag(1, 40, 30);
   const brcaDimensions = [[117836, 82278], [87127, 82682], [85106, 82076], [79651, 82884]];
-  const fourPaneSync = [];
-  for (const i of [2, 3, 4]) fourPaneSync.push(report(await frame(1), await frame(i), brcaDimensions[0], brcaDimensions[i - 1]));
+  const sixPaneSync = [];
+  for (const i of [2, 3, 4, 5, 6]) sixPaneSync.push(report(await frame(1), await frame(i), brcaDimensions[0], brcaDimensions[i - 1] ?? brcaDimensions[0]));
   await button('Close Comparison').click();
   await page.getByRole('button', { name: 'Multi View', exact: true }).waitFor();
   assert.equal(await page.locator('.wsi-canvas').count(), 1);
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ result: 'PASS', maximumPanes: 4, normalized, reversed, anchored, fourPaneSync,
+  console.log(JSON.stringify({ result: 'PASS', maximumPanes: 6, normalized, reversed, anchored, sixPaneSync,
     paneRetry: true, focusedPane: true, otherPanesKept: true }));
 } finally {
   await browser.close();

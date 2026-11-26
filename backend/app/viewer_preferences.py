@@ -17,6 +17,7 @@ class ViewerSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tray_orientation: Literal["vertical", "horizontal"] = "vertical"
+    tray_sort: Literal["case", "label", "stain"] = "case"
     tray_visible: bool = True
     gallery: bool = False
     show_label: bool = False

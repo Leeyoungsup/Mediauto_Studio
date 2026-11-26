@@ -241,6 +241,16 @@ async def delete_annotation(source: Source, scan_id: UUID, annotation_id: UUID, 
 
 
 
+@router.post("/viewport-export", status_code=204)
+async def record_viewport_export(source: Source, scan_id: UUID, request: Request, user: CurrentUser, session: Session):
+    require_roles(user, ANNOTATORS)
+    await registered_file(source, scan_id, user, session)
+    async with session.begin():
+        case_id = await write_scope(source, scan_id, session, user)
+        if case_id:
+            await record_activity(session, user, case_id, "viewport_exported", "scan", scan_id, attempt_id(request))
+
+
 @router.get("/annotations/{annotation_id}/capture.png")
 async def export_roi(source: Source, scan_id: UUID, annotation_id: UUID, request: Request,
                      user: CurrentUser, session: Session, annotations: bool = True, scale_bar: bool = True):

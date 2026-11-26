@@ -55,6 +55,29 @@ try {
   await page.unroute('**' + path + '/annotations', reject);
   await page.getByRole('button',{name:'Save Annotation',exact:true}).click();
   await page.getByText('Synthetic ROI',{exact:true}).waitFor();
+  await page.getByRole('button', { name: 'Export Current View', exact: true }).click();
+  const exportDialog = page.getByRole('dialog', { name: 'Export Current View' });
+  const preview = exportDialog.getByRole('img', { name: 'Current slide view preview' });
+  await preview.waitFor();
+  const annotatedPreview = await preview.getAttribute('src');
+  assert.equal(await exportDialog.getByLabel('Include Saved Annotations').isChecked(), true);
+  await exportDialog.getByLabel('Include Saved Annotations').uncheck();
+  await page.waitForFunction((url) => !!document.querySelector('.viewport-export-preview img')?.src
+    && document.querySelector('.viewport-export-preview img').src !== url, annotatedPreview);
+  await exportDialog.getByLabel('Format').selectOption('image/jpeg');
+  await exportDialog.getByLabel('Resolution').selectOption('0.5');
+  const expectedImageWidth = Number((await exportDialog.getByLabel('Resolution').locator('option:checked').textContent()).split(' ')[0]);
+  await page.waitForFunction((width) => document.querySelector('.viewport-export-preview img')?.naturalWidth === width, expectedImageWidth);
+  await exportDialog.getByRole('slider', { name: 'Preview Zoom' }).focus();
+  await page.keyboard.press('End');
+  await exportDialog.getByText('300%', { exact: true }).waitFor();
+  const download = page.waitForEvent('download');
+  await exportDialog.getByRole('button', { name: 'Download Image' }).click();
+  assert.equal((await download).suggestedFilename(), 'slide-current-view.jpg');
+  const logged = await page.request.get(`/api/clinical/local/cases/${record.record_id}/logs`, { params: { action: 'viewport_exported' } });
+  assert.equal(logged.status(), 200);
+  assert.ok(JSON.stringify(await logged.json()).includes('viewport_exported'));
+  await exportDialog.getByRole('button', { name: 'Close', exact: true }).click();
   const roi = (await records()).annotations[0];
   const fit = Math.min(Math.round(region.width) / metadata.dimensions[0],Math.round(region.height) / metadata.dimensions[1]);
   // Browser pointer coordinates are expressed in CSS pixels, then projected to level 0.
@@ -118,5 +141,5 @@ try {
   assert.deepEqual((await records()).annotations.find(a=>a.kind==='distance').points,distance.points);
   assert.deepEqual(errors,[]);
   console.log(JSON.stringify({result:'PASS',zoomBefore:fit,zoomAfter:read.position.zoom,lengthUm:distance.length,
-    displayLength:readable, savedRoi:roi.points,reload:true,reLogin:true,annotationRetry:true,otherScanSeparated:true}));
+    displayLength:readable, savedRoi:roi.points,reload:true,reLogin:true,annotationRetry:true,otherScanSeparated:true,viewportExport:true}));
 } finally {await browser.close();}

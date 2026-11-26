@@ -9,7 +9,7 @@ import { ScanReference } from './worklist';
 import type { Camera, Point } from './viewer-tools';
 
 const MIN_PANES = 2;
-const MAX_PANES = 4;
+const MAX_PANES = 6;
 type Frames = Record<string, CameraFrame>;
 
 export function mapCamera(source: CameraFrame, target: CameraFrame, start?: CameraFrame, end?: CameraFrame): Camera {
@@ -105,7 +105,7 @@ export function MultiView({ slides, primary, onClose, onSingle }: {
         <div className="multi-view-status">
           <p><strong>Active {active ? `Pane ${selected.indexOf(active) + 1}` : 'Pane'}</strong>
             {activeScan?.wsi && <> · {activeScan.label ?? activeScan.id} · {activeScan.wsi.format} <ScanReference scan={activeScan.wsi} /></>}</p>
-          <p className="muted">Compare 2–4 scans from this case.</p>
+          <p className="muted">Compare {MIN_PANES}–{MAX_PANES} scans from this case.</p>
         </div>
         <fieldset className="multi-view-slides" disabled={focused}><legend>Scans in This Case</legend>
           {slides.map((slide) => {

@@ -2,6 +2,8 @@
 
 기능 ID와 쪽은 PDF §8 원문 9–12쪽에서 추출해 43번과 집합 일치를 확인했다. 43번 판정은 기준선이며 51번은 최종 프런트의 대응 경로를 기준으로 다시 분류했다. 화면 34개와 최종 재현 절차는 [51번 전체 검증](pdf-frontend-review-51.md)에 있다. [PDF](../reference/Techcyte_IMS_Demo_Screen_Analysis.pdf) · [43번 기준표](pdf-frontend-feature-matrix-43.md)
 
+51번 이후의 Tray 정렬, 발표 화면, 6 pane과 현재 화면 내보내기는 [24개 녹화 대조 및 후속 검증](recorded-demo-comparison.md)에 기록했다.
+
 | 판정 | 적용 기준 |
 |---|---|
 | 동작 | 최종 앱에서 해당 사용자 흐름이 열리고, 표기한 자동화 또는 화면 근거가 있다. |

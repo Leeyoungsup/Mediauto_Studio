@@ -14,6 +14,7 @@ const timestamp = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeSt
 const resultLabels = { success: 'Succeeded', failed: 'Failed', denied: 'Denied' };
 const names: Record<string, string> = {
   case_opened: 'Opened Case', scan_viewed: 'Viewed Scan', annotation_registered: 'Created Annotation',
+  viewport_exported: 'Exported Current View',
   annotation_updated: 'Updated Annotation', annotation_deleted: 'Deleted Annotation',
   attachment_opened: 'Opened Attachment', patient_history_opened: 'Opened Clinical Record',
   assigned: 'Assigned Case', reassigned: 'Reassigned Case', registered: 'Registered',

@@ -339,7 +339,7 @@ export function AnnotationOverlay({ view, annotations, draft, drawing, guide, cl
     </g>;
   };
   return <svg className="annotation-overlay" aria-label="Review Annotation Overlay" viewBox={`0 0 ${view.width * view.zoom} ${view.height * view.zoom}`}>
-    {annotations.map((item) => <g key={item.id} data-selected-annotation={item.id === selectedId || undefined}>
+    {annotations.map((item) => <g key={item.id} data-saved-annotation="" data-selected-annotation={item.id === selectedId || undefined}>
       {display(item, false, item.id, item.length !== null && item.unit ? formatLength(item.length, item.unit) : undefined)}
     </g>)}
     {draft && display(draft, true, draft.id)}
