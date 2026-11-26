@@ -26,8 +26,6 @@ export function mapCamera(source: CameraFrame, target: CameraFrame, start?: Came
   };
 }
 
-const tissueSlots = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
-
 export function MultiView({ slides, selected, active, cameras, account, tissueEndpoint, roiCaseId, onActive, onFrame, onClose, onSingle }: {
   slides: Slide[]; selected: string[]; active: string; cameras: Record<string, Camera>;
   account: string; tissueEndpoint?: string; roiCaseId?: string;
@@ -43,20 +41,14 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
   const [points, setPoints] = useState<Record<string, Point[]>>({});
   const [registered, setRegistered] = useState<Record<string, Transform>>();
   const [reference, setReference] = useState<string>();
-  const [tissueSlot, setTissueSlot] = useState<string>();
   const restoredScope = useRef<string>(undefined);
   const entryCameras = useRef(new Set(Object.keys(cameras)));
   const storage = useTissueRegistrationStorage(tissueEndpoint, selected);
   const comparison = useComparisonPosition(account, tissueEndpoint ?? 'unregistered', selected);
-  const profiles = storage.catalog?.profiles;
   const savedTissue = storage.catalog?.active;
-  const profileKey = savedTissue ? `${savedTissue}:${profiles?.[savedTissue]?.saved_at}` : null;
+  const savedRegistration = savedTissue ? storage.catalog?.profiles[savedTissue] : undefined;
+  const profileKey = savedRegistration ? `${savedTissue}:${savedRegistration.saved_at}` : null;
   const movedPanes = useRef(new Set<string>());
-  const savedSlots = Object.keys(profiles ?? {}).sort();
-  const nextSlot = tissueSlots.find((slot) => !profiles?.[slot]);
-  const selectedTissue = tissueSlot ?? savedTissue;
-  const slot = tissueEndpoint ? selectedTissue ?? nextSlot : undefined;
-  const appliedTissue = tissueSlot && profiles?.[tissueSlot] ? tissueSlot : undefined;
   const storageLoading = Boolean(tissueEndpoint && !storage.catalog && !storage.error);
   const frames = useRef<Frames>({});
   const metadata = useRef<Record<string, SlideInfo>>({});
@@ -75,7 +67,7 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
     ? `${(value / 1000).toFixed(2)} mm` : `${value.toFixed(2)} ${unit}`;
   const waitingFor = picking ? selected.flatMap((id, index) => (points[id]?.length ?? 0) === round ? [`Pane ${index + 1}`] : []) : [];
   const alignmentLabel = registered ? 'Tissue Landmark Registration'
-    : appliedTissue && anchors ? 'Manual Alignment Points' : anchors ? 'Session Alignment' : 'Normalized Image Coordinates';
+    : savedRegistration && anchors ? 'Manual Alignment Points' : anchors ? 'Session Alignment' : 'Normalized Image Coordinates';
   const allReady = selected.length >= 2 && selected.every((id) => loaded.includes(id));
 
   function publish(driver: string, frame: CameraFrame, transforms = registered, retainDriver = false, alignment = anchors) {
@@ -98,13 +90,12 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
     setCommands(commands);
   }
 
-  function apply(group: TissueRegistration, tissue: string | undefined, sync: boolean, restorePosition = true) {
+  function apply(group: TissueRegistration, sync: boolean, restorePosition = true) {
     if ('anchors' in group) {
       setAnchors(group.anchors);
       setPoints({});
       setReference(undefined);
       setRegistered(undefined);
-      setTissueSlot(tissue);
       setPicking(false);
       setSynchronized(sync);
       if (restorePosition) setCommands({ ...group.anchors });
@@ -119,7 +110,6 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
     setPoints(group.points);
     setReference(group.reference);
     setRegistered(transforms);
-    setTissueSlot(tissue);
     setPicking(false);
     setSynchronized(sync);
     const camera = restorePosition ? tissueCamera(active, group.points) : undefined;
@@ -138,30 +128,12 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
     setCommands({});
   }
 
-  async function chooseTissue(tissue: string) {
-    const profile = profiles?.[tissue];
-    if (!tissue) {
-      if (savedTissue) await clearRegistration();
-      else setTissueSlot(undefined);
-      return;
-    }
-    if (!profile) {
-      clearWorkingRegistration();
-      setTissueSlot(tissue);
-      return;
-    }
-    if (await storage.save(tissue, synchronized)) {
-      comparison.discard();
-      apply(profile, tissue, synchronized);
-    }
-  }
-
   async function useRegistration() {
     if (!validated) return;
     const group = { reference: referenceScan, points };
-    if (tissueEndpoint && (!slot || !await storage.save(slot, false, group))) return;
+    if (tissueEndpoint && !await storage.save(savedTissue ?? 'A', false, group)) return;
     comparison.discard();
-    apply(group, slot, false, false);
+    apply(group, false, false);
   }
 
   function currentPositions() {
@@ -172,22 +144,20 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
   }
 
   function rememberPosition(sync: boolean, alignment = anchors) {
-    const activeProfileKey = appliedTissue === savedTissue ? profileKey : null;
-    comparison.remember({ profile: activeProfileKey, sync, positions: currentPositions(),
-      anchors: activeProfileKey === null ? alignment : undefined });
+    comparison.remember({ profile: profileKey, sync, positions: currentPositions(),
+      anchors: profileKey === null ? alignment : undefined });
   }
 
   async function saveAlignmentPositions() {
-    if (anchors && appliedTissue) { await clearRegistration(); return; }
     const group = { anchors: currentPositions() };
-    if (tissueEndpoint && (!slot || !await storage.save(slot, false, group))) return;
+    if (tissueEndpoint && !await storage.save(savedTissue ?? 'A', false, group)) return;
     comparison.discard();
-    apply(group, slot, false, false);
+    apply(group, false, false);
   }
 
   async function changeSync() {
     const next = !synchronized;
-    if (tissueEndpoint && (registered || anchors) && appliedTissue && !await storage.save(appliedTissue, next)) return;
+    if (tissueEndpoint && (registered || anchors) && savedTissue && !await storage.save(savedTissue, next)) return;
     const alignment = anchors ?? (next && !registered && movedPanes.current.size > 1 ? currentPositions() : undefined);
     setAnchors(alignment);
     setSynchronized(next);
@@ -198,15 +168,13 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
   }
 
   async function clearRegistration() {
-    const savedSlot = storage.catalog?.active;
-    if (picking && savedSlot && profiles?.[savedSlot]) {
-      apply(profiles[savedSlot], savedSlot, storage.catalog?.sync ?? false, false);
+    if (picking && savedRegistration) {
+      apply(savedRegistration, storage.catalog?.sync ?? false, false);
       return;
     }
     if (!picking && tissueEndpoint && !await storage.save(null, false)) return;
     comparison.discard();
     clearWorkingRegistration();
-    setTissueSlot(undefined);
   }
 
   function tissueCamera(scan: string, landmarks: Record<string, Point[]>) {
@@ -242,7 +210,6 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
     setLoaded((previous) => previous.filter((id) => current.has(id)));
     clearWorkingRegistration();
     setFocused(false);
-    setTissueSlot(undefined);
     restoredScope.current = undefined;
     movedPanes.current.clear();
   }, [selectionKey]);
@@ -251,8 +218,8 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
     if (picking || !allReady || storageLoading || restoredScope.current === selectionKey) return;
     restoredScope.current = selectionKey;
     const saved = comparison.read(profileKey);
-    if (savedTissue && profiles) {
-      apply(profiles[savedTissue], savedTissue, storage.catalog!.sync,
+    if (savedRegistration) {
+      apply(savedRegistration, storage.catalog?.sync ?? false,
         !saved && !selected.every((id) => entryCameras.current.has(id)));
     } else if (saved) {
       setAnchors(saved.anchors);
@@ -310,22 +277,11 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
         <details className="tissue-registration">
           <summary>Tissue Registration</summary>
           <div className="registration-popover">
-            {tissueEndpoint && <label className="form-field">Tissue
-              <select aria-label="Tissue" value={selectedTissue ?? ''} disabled={!storage.catalog || !allReady || storage.savePending || picking || focused}
-                onChange={(event) => void chooseTissue(event.target.value)}>
-                {!storage.catalog && <option value="">{storage.error ? 'Saved tissues unavailable' : 'Loading saved tissues…'}</option>}
-                {storage.catalog && <option value="">{savedSlots.length ? 'No Active Tissue' : 'No Saved Tissue Registration'}</option>}
-                {savedSlots.length > 0 && <optgroup label="Saved Tissues">
-                  {savedSlots.map((letter) => <option key={letter} value={letter}>Tissue {letter}</option>)}
-                </optgroup>}
-                {storage.catalog && nextSlot && <option value={nextSlot}>New Tissue {nextSlot}</option>}
-              </select>
-            </label>}
-            <p className="muted">Pick the same feature in each pane. The first two landmarks fit the alignment. Use a different feature for each additional check.</p>
+            {picking && <p className="muted">Pick the same feature in each pane. Use the first two landmarks to fit the alignment and another landmark to check it.</p>}
             <div className="actions">
-              <button className="button secondary" disabled={!allReady || synchronized || focused || picking || !!registered || storage.savePending || !!tissueEndpoint && (!storage.catalog || !slot)}
+              <button className="button secondary" disabled={!allReady || synchronized || focused || picking || !!registered || storage.savePending || !!tissueEndpoint && !storage.catalog}
                 onClick={() => void saveAlignmentPositions()}>
-                {anchors && appliedTissue ? 'Clear Alignment Points' : 'Use Current Positions as Alignment Points'}</button>
+                {anchors && savedRegistration ? 'Update Alignment Positions' : 'Use Current Positions as Alignment Points'}</button>
               <button className="button secondary" disabled={!allReady || synchronized || focused || picking || storage.savePending} onClick={() => {
                 setAnchors(undefined); setRegistered(undefined); setReference(selected[0]); setPoints({}); setPicking(true);
               }}>Pick Tissue Landmarks</button>
@@ -334,15 +290,15 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
                   const last = Math.max(...Object.values(points).map((list) => list.length));
                   setPoints(Object.fromEntries(selected.map((id) => [id, (points[id] ?? []).slice(0, last - 1)])));
                 }}>Undo Landmark Round</button>
-                <button className="button primary" disabled={!validated || storage.savePending || !!tissueEndpoint && (!storage.catalog || !slot)}
-                  onClick={() => void useRegistration()}>{slot && profiles?.[slot] ? 'Update Tissue Registration' : 'Use Tissue Registration'}</button>
+                <button className="button primary" disabled={!validated || storage.savePending || !!tissueEndpoint && !storage.catalog}
+                  onClick={() => void useRegistration()}>{savedRegistration ? 'Update Tissue Registration' : 'Use Tissue Registration'}</button>
               </>}
-              {(picking || registered) && <button className="button secondary" disabled={storage.savePending}
+              {(picking || registered || anchors && savedRegistration) && <button className="button secondary" disabled={storage.savePending}
                 onClick={() => void clearRegistration()}>{picking ? 'Cancel Landmark Picking' : 'Deactivate Tissue Registration'}</button>}
-              {(registered || anchors) && <button className="button secondary" onClick={goToTissue}>{anchors && !appliedTissue ? 'Go to Sync Origin' : 'Go to Tissue'}</button>}
+              {(registered || anchors) && <button className="button secondary" onClick={goToTissue}>{anchors && !savedRegistration ? 'Go to Sync Origin' : 'Go to Tissue'}</button>}
             </div>
             {storage.error && <div className="notice" role="alert">{storage.error}
-              <button className="button secondary" onClick={() => { restoredScope.current = undefined; storage.reload(); }}>Reload Saved Tissues</button></div>}
+              <button className="button secondary" onClick={() => { restoredScope.current = undefined; storage.reload(); }}>Reload Registration</button></div>}
             {picking && <p role="status" className="landmark-progress"><Crosshair size={15} aria-hidden="true" />
               {round < 8 ? `Landmark ${round + 1} · ${round < 2 ? 'Fit' : 'Independent Check'} · Waiting for ${waitingFor.join(', ')}` : 'Eight landmarks recorded'}
             </p>}
@@ -354,7 +310,7 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
           </div>
         </details>
       </div>
-      <span className="multi-view-sync-status muted" role="status">{alignmentLabel}{appliedTissue && (registered || anchors) ? ' · Tissue ' + appliedTissue : ''} · {focused ? 'Sync Paused While Expanded' : synchronized ? 'Sync On' : 'Sync Off'}</span>
+      <span className="multi-view-sync-status muted" role="status">{alignmentLabel} · {focused ? 'Sync Paused While Expanded' : synchronized ? 'Sync On' : 'Sync Off'}</span>
     </div>
     <div ref={grid} className="multi-view-grid" data-count={selected.length} data-focused={focused}>
       {selected.map((id, index) => {

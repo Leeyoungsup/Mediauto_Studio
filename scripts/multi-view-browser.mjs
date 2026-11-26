@@ -171,18 +171,18 @@ try {
     }
   };
   await page.getByText('Tissue Registration', { exact: true }).click();
-  await page.getByLabel('Tissue', { exact: true }).waitFor();
+  assert.equal(await page.getByLabel('Tissue', { exact: true }).count(), 0);
   await page.getByText('Tissue Registration', { exact: true }).click();
   await sync.click();
-  await page.getByText(/Manual Alignment Points.*Tissue A.*Sync Off/).waitFor();
+  await page.getByText(/Manual Alignment Points.*Sync Off/).waitFor();
   await sync.click();
-  await page.getByText(/Manual Alignment Points.*Tissue A.*Sync On/).waitFor();
+  await page.getByText(/Manual Alignment Points.*Sync On/).waitFor();
   await keepCameras(beforeToggle);
 
   await button('Close Comparison').click();
   await page.getByRole('region', { name: 'Multi View' }).waitFor({ state: 'detached' });
   await compare('SYNTH-01 · SVS').check();
-  await page.getByText(/Manual Alignment Points.*Tissue A.*Sync On/).waitFor();
+  await page.getByText(/Manual Alignment Points.*Sync On/).waitFor();
   await keepCameras(beforeToggle);
 
   const reopened = await browser.newPage({ baseURL, viewport: page.viewportSize() });
@@ -193,7 +193,7 @@ try {
   await reopened.goto(page.url());
   const restoredTray = reopened.getByRole('complementary', { name: 'Slide Tray', exact: true });
   await restoredTray.getByRole('checkbox', { name: 'Compare SYNTH-01 · SVS', exact: true }).check();
-  await reopened.getByText(/Manual Alignment Points.*Tissue A.*Sync On/).waitFor();
+  await reopened.getByText(/Manual Alignment Points.*Sync On/).waitFor();
   await reopened.waitForFunction((expected) => [...document.querySelectorAll('.multi-view-pane .image-panel')]
     .every((panel, index) => Math.hypot(Number(panel.dataset.viewCenterX) - expected[index].x,
       Number(panel.dataset.viewCenterY) - expected[index].y) < 0.01
@@ -263,7 +263,7 @@ try {
   for (const label of ['SYNTH SIX', 'SYNTH FIVE', 'S-TP', 'I-PR', 'I-KI']) await compare(label + ' · SVS').uncheck();
   await page.getByRole('region', { name: 'Multi View' }).waitFor({state: 'detached'});
   assert.equal(await page.locator('.wsi-canvas').count(), 1);
-  // File-intake cases offer the same Tissue slots when their scan extents differ.
+  // File-intake cases preserve session alignment even when their scan extents differ.
   const fileCase = 'QA-FILE-TISSUE';
   const intake = await (await page.request.get('/api/intake/slides')).json();
   const files = ['I-HR', 'I-KI', 'I-PR', 'S-TP'].map((stain) => intake.find(
@@ -313,9 +313,8 @@ try {
   const registration = page.getByText('Tissue Registration', { exact: true });
   await registration.click();
   const tissue = page.getByLabel('Tissue', { exact: true });
-  assert.equal(await tissue.inputValue(), '');
-  assert.equal(await tissue.locator('option:checked').textContent(), 'No Saved Tissue Registration');
-  assert.equal(await tissue.locator('optgroup[label="Saved Tissues"]').count(), 0);
+  assert.equal(await tissue.count(), 0);
+  await button('Go to Sync Origin').waitFor();
   await registration.click();
 
   const otherCase = 'QA-FILE-TISSUE-OTHER';
@@ -331,7 +330,9 @@ try {
   await sync.and(page.locator(':enabled')).waitFor();
   await page.getByText(/Normalized Image Coordinates.*Sync Off/).waitFor();
   await page.getByText('Tissue Registration', { exact: true }).click();
-  assert.equal(await tissue.locator('option:checked').textContent(), 'No Saved Tissue Registration');
+  assert.equal(await tissue.count(), 0);
+  assert.equal(await button('Go to Tissue').count(), 0);
+  assert.equal(await button('Go to Sync Origin').count(), 0);
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ result: 'PASS', maximumPanes: 6, normalized, reversed, anchored, manualAlignmentRestore: true, intakeAlignment, separateFileCases: true, sixPaneSync,
     paneRetry: true, focusedPane: true, otherPanesKept: true, paneAnnotationsRestored: true }));

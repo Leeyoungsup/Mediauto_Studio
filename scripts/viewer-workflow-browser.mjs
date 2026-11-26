@@ -208,12 +208,13 @@ try {
   const results = await tissueError.textContent();
   const endpoint = `/api/viewer/cases/${record.record_id}/tissue-registrations`;
   const query = new URLSearchParams([['scan_ids', ndpi.id], ['scan_ids', svs.id]]);
-  const tissue = page.getByLabel('Tissue', { exact: true });
   const savedA = await (await page.request.get(`${endpoint}?${query}`)).json();
   assert.equal(savedA.active, 'A');
   assert.equal(savedA.sync, true);
   assert.equal(savedA.profiles.A.points[ndpi.id].length, 4);
-  await tissue.selectOption('B');
+  assert.equal(await page.getByLabel('Tissue', { exact: true }).count(), 0);
+  await button(page, 'Sync Position').click();
+  await page.getByText(/Tissue Landmark Registration.*Sync Off/).waitFor();
   await page.getByText('Tissue Registration', { exact: true }).click();
   for (const index of [1, 2]) await button(pane(index), 'Fit to Window').click();
   await page.getByText('Tissue Registration', { exact: true }).click();
@@ -222,14 +223,15 @@ try {
     await landmark(0, [normalized[0][i][0] + 20, normalized[0][i][1] + 20]);
     await landmark(1, [normalized[1][i][0] + 15, normalized[1][i][1] + 20]);
   }
-  await button(page, 'Use Tissue Registration').click();
-  await page.getByText(/Tissue Landmark Registration.*Tissue B.*Sync Off/).waitFor();
+  await button(page, 'Update Tissue Registration').click();
+  await page.getByText(/Tissue Landmark Registration.*Sync Off/).waitFor();
   await button(page, 'Sync Position').click();
-  await page.getByText(/Tissue Landmark Registration.*Tissue B.*Sync On/).waitFor();
-  const both = await (await page.request.get(`${endpoint}?${query}`)).json();
-  assert.deepEqual(Object.keys(both.profiles).sort(), ['A', 'B']);
-  assert.equal(both.profiles.B.points[svs.id].length, 3);
-  assert.notDeepEqual(both.profiles.A.points[ndpi.id][0], both.profiles.B.points[ndpi.id][0]);
+  await page.getByText(/Tissue Landmark Registration.*Sync On/).waitFor();
+  const updated = await (await page.request.get(`${endpoint}?${query}`)).json();
+  assert.equal(updated.active, 'A');
+  assert.deepEqual(Object.keys(updated.profiles), ['A']);
+  assert.equal(updated.profiles.A.points[svs.id].length, 3);
+  assert.notDeepEqual(savedA.profiles.A.points[ndpi.id][0], updated.profiles.A.points[ndpi.id][0]);
   const stale = await page.request.put(endpoint, { data: { scan_ids: [ndpi.id, svs.id], version: savedA.version, active: 'A' } });
   assert.equal(stale.status(), 409);
   const mismatched = await page.request.get(`${endpoint}?scan_ids=${ndpi.id}&scan_ids=${randomUUID()}`);
@@ -243,16 +245,15 @@ try {
   await reopened.goto('/#viewer/' + record.record_id + '/' + svs.id);
   const reopenedTray = reopened.getByRole('complementary', { name: 'Slide Tray', exact: true });
   await reopenedTray.getByRole('checkbox', { name: / · NDPI$/ }).check();
-  await reopened.getByText(/Tissue Landmark Registration.*Tissue B.*Sync On/).waitFor();
+  await reopened.getByText(/Tissue Landmark Registration.*Sync On/).waitFor();
   const reopenedFirst = reopened.getByRole('group', { name: /^Pane 1:.*SVS$/ });
   await reopenedFirst.locator('svg[aria-label="Tissue Landmarks"]').waitFor();
   await reopened.getByText('Tissue Registration', { exact: true }).click();
-  await reopened.getByLabel('Tissue', { exact: true }).selectOption('A');
-  await reopened.getByText(/Tissue Landmark Registration.*Tissue A.*Sync On/).waitFor();
+  assert.equal(await reopened.getByLabel('Tissue', { exact: true }).count(), 0);
   await button(reopened, 'Go to Tissue').click();
   const restored = await (await reopened.request.get(`${endpoint}?${query}`)).json();
   assert.equal(restored.active, 'A');
-  assert.deepEqual(restored.profiles.A, savedA.profiles.A);
+  assert.deepEqual(restored.profiles.A, updated.profiles.A);
   const otherAccount = await browser.newPage({ baseURL });
   assert.equal((await otherAccount.request.post('/api/auth/login', { data: {
     organization: 'local', username: 'integration-viewer-admin', password: 'synthetic-test-password',
