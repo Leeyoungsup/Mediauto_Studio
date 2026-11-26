@@ -491,6 +491,8 @@ dialog::backdrop { background: #21193575; }
 .multi-view-grid[data-focused=false] .minimap { max-width: 84px; }
 .viewport-tile-status { position: absolute; z-index: 2; right: 7px; bottom: 7px; padding: 3px 7px; border-radius: 4px;
   background: var(--surface); color: var(--ink); font-size: 11px; }
+.cell-overlay-status { position: absolute; right: 7px; bottom: 37px; padding: 3px 6px; border-radius: 4px;
+  background: var(--surface); color: var(--ink); font-size: 11px; pointer-events: none; }
 .viewer-workbench[data-comparison=true] .viewer-heading { margin-bottom: 3px; }
 .viewer-workbench[data-comparison=true] .viewer-title h1 { font-size: 15px; }
 .viewer-workbench[data-comparison=true] .viewer-title p { margin: 0; }

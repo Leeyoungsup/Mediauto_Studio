@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { BiomarkerEvidence, type AssayInput, type ValidationEvidence } from './biomarker-evidence';
 import { CellOverlay } from './cell-overlay';
+import { useCellOverlay } from './cell-overlay-data';
 import { api } from './session';
 import type { Viewport } from './tile-viewer';
 
 type Point = [x: number, y: number, category: number];
-type Cells = { points: Point[]; truncated: boolean };
 type Audit = { action: string; actor: string; occurred_at: string; source: 'ims' | 'exported'; reference?: string };
 type ScoreStatus = 'archived' | 'native' | 'validated_original' | 'validated_pair' | 'input_unverified' | 'invalid_saved_score' | 'edited_score_unverified';
 type Comparison = {
@@ -27,9 +27,8 @@ type Result = {
 const typeLabel = { original: 'Original', edited: 'User Edit' };
 const number = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
 const date = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' });
-const rangeSize = 512;
 
-export function usePdl1(endpoint: string, ready: boolean, view: Viewport | undefined, initialSnapshot?: string) {
+export function usePdl1(endpoint: string, ready: boolean, view: Viewport | undefined, mpp: number | null | undefined, initialSnapshot?: string) {
   const [data, setData] = useState<{ results: Result[]; comparison: Comparison }>();
   const results = data?.results;
   const [selected, selectResult] = useState(initialSnapshot ?? '');
@@ -47,17 +46,10 @@ export function usePdl1(endpoint: string, ready: boolean, view: Viewport | undef
   }
   const [enabled, setEnabled] = useState(true);
   const [error, setError] = useState(false);
-  const [overlayError, setOverlayError] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const [overlay, setOverlay] = useState<{ id: string; cells: Cells }>();
   const result = results?.find((item) => item.id === selected);
-  const width = result?.dimensions[0] ?? 0;
-  const height = result?.dimensions[1] ?? 0;
-  const snapStart = (value: number) => Math.max(0, Math.floor(value / rangeSize) * rangeSize);
-  const left = view ? snapStart(view.x) : 0;
-  const top = view ? snapStart(view.y) : 0;
-  const right = view ? Math.min(width, Math.ceil((view.x + view.width) / rangeSize) * rangeSize) : 0;
-  const bottom = view ? Math.min(height, Math.ceil((view.y + view.height) / rangeSize) * rangeSize) : 0;
+  const overlay = useCellOverlay<Point>(result && endpoint + '/pdl1/' + result.id, undefined, result?.dimensions,
+    result?.point_count, ready && enabled, view, mpp, attempt);
 
   useEffect(() => {
     if (!ready) return;
@@ -74,29 +66,18 @@ export function usePdl1(endpoint: string, ready: boolean, view: Viewport | undef
     return () => controller.abort();
   }, [endpoint, ready, attempt, requested]);
 
-  useEffect(() => {
-    if (!ready || !selected || !enabled || left >= right || top >= bottom) return;
-    const controller = new AbortController();
-    setOverlayError(false);
-    const query = new URLSearchParams({ left: String(left), top: String(top), right: String(right), bottom: String(bottom) });
-    const timer = window.setTimeout(() => {
-      api<Cells>(`${endpoint}/pdl1/${selected}/cells?${query}`, { signal: controller.signal })
-        .then((cells) => { if (!controller.signal.aborted) setOverlay({ id: selected, cells }); })
-        .catch(() => { if (!controller.signal.aborted) { setOverlay(undefined); setOverlayError(true); } });
-    }, 100);
-    return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [endpoint, ready, selected, enabled, left, top, right, bottom, attempt]);
-
-  return { results, result, referenceMissing: Boolean(requested && selected === requested && results && !result), comparison: data?.comparison, selected, setSelected, openSnapshot, enabled, setEnabled, error, overlayError,
-    retry: () => setAttempt((count) => count + 1), cells: ready && enabled && overlay?.id === selected ? overlay.cells : undefined };
+  return { results, result, referenceMissing: Boolean(requested && selected === requested && results && !result),
+    comparison: data?.comparison, selected, setSelected, openSnapshot, enabled, setEnabled, error, overlay,
+    retry: () => setAttempt((count) => count + 1) };
 }
 
 type Pdl1State = ReturnType<typeof usePdl1>;
 
-export function Pdl1Overlay({ view, result, cells, mpp }: { view?: Viewport; result?: Result; cells?: Cells; mpp?: number | null }) {
+export function Pdl1Overlay({ view, state, mpp }: { view?: Viewport; state: Pdl1State; mpp?: number | null }) {
+  const { result, overlay } = state;
   const colors = useMemo(() => Object.fromEntries(Object.entries(result?.classes ?? {})
     .map(([key, value]) => [key, value.color])), [result]);
-  return <CellOverlay view={view} colors={colors} points={result ? cells?.points : undefined} label="PD-L1 Cell Overlay" mpp={mpp} />;
+  return <CellOverlay view={view} colors={colors} points={overlay.points} density={overlay.density} label="PD-L1 Cell Overlay" mpp={mpp} />;
 }
 
 const scoreStatusLabel: Record<ScoreStatus, string> = {
@@ -127,7 +108,7 @@ export function Pdl1Badge({ state }: { state: Pdl1State }) {
 }
 
 export function Pdl1Panel({ state, reportHref, onSlide }: { state: Pdl1State; reportHref?: string; onSlide: () => void }) {
-  const { results, result, selected, setSelected, enabled, setEnabled, error, overlayError, retry, cells, comparison, referenceMissing } = state;
+  const { results, result, selected, setSelected, enabled, setEnabled, error, retry, overlay, comparison, referenceMissing } = state;
   return <section className="pdl1-panel" aria-label="PD-L1 Results">
     <div className="pdl1-heading"><h2>PD-L1</h2>
       <div className="actions">
@@ -172,8 +153,8 @@ export function Pdl1Panel({ state, reportHref, onSlide }: { state: Pdl1State; re
         <ul className="pdl1-legend">{Object.entries(result.classes).map(([key, item]) => <li key={key}><i style={{ background: item.color }} />
           <span>{item.label}{key in result.counts && ` · ${number.format(result.counts[key])}`}</span>
         </li>)}</ul>
-        {enabled && cells?.truncated && <p role="status">Only some cell markers are visible in this area. Zoom in to see more.</p>}
-        {enabled && overlayError && <p role="alert">Unable to load cell markers. <button className="button secondary" onClick={retry}>Reload</button></p>}
+        {enabled && overlay.density && <p role="status">{overlay.loading ? 'Loading individual cells…' : 'Cell density overview · Zoom in for individual cells.'}</p>}
+        {enabled && overlay.failed && <p role="alert">Unable to load cell markers. <button className="button secondary" onClick={retry}>Reload</button></p>}
         <details className="pdl1-audit"><summary>Audit History</summary>
           {result.audit.filter((entry) => entry.source === 'exported').length === 0 && <p>No source audit history is available.</p>}
           <ul className="timeline">{result.audit.map((entry, index) => <li key={`${entry.occurred_at}-${index}`}>

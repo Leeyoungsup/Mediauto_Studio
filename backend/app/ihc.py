@@ -3,6 +3,7 @@
 import asyncio
 import json
 import re
+from functools import lru_cache
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
@@ -12,11 +13,12 @@ from pydantic import Field, StringConstraints
 from sqlalchemy import String, select
 
 from app.auth import CurrentUser, Session
+from app.cell_overlay import BUCKET, density_grid, tile_page
 from app.clinical import ClinicalInput, add_event
 from app.her2 import SCHEMAS, clinical_display
-from app.ihc_archive import approved_rule, aggregate, archive_cells, archive_folder, counts_at, digest
+from app.ihc_archive import approved_rule, aggregate, archive_cells, archive_folder, counts_at, digest, load_cells
 from app.models import AuthUser, Case, IhcResultRevision, Slide, SlideScan
-from app.pdl1 import BUCKET, MAX_POINTS, Coordinate, SnapshotId, scan_signature
+from app.pdl1 import MAX_POINTS, Coordinate, SnapshotId, scan_signature
 from app.scan_quality import BLOCKED_QC
 from app.viewer_records import ANNOTATORS
 from app.wsi import PRIVATE, Source, lock_scan_case, registered_path, verified_scan_path, visible_scan
@@ -154,32 +156,31 @@ async def details(source: Source, scan_id: UUID, source_id: SnapshotId, user: Cu
     return {**state, "version": version, "latest_version": latest, "history": history}
 
 
-def visible_cells(folder, original, revision, left, top, right, bottom):
-    rows, buckets, _ = load_index(folder / original["id"])
-    threshold = revision.threshold if revision else original["default_threshold"]
-    overrides = revision.overrides if revision else {}
+def review_point(rows, index, threshold, overrides):
+    x, y, base_grade, confidence = rows[index]
+    override = overrides.get(index)
+    if override is None and confidence < threshold:
+        return None
+    return [x, y, base_grade if override is None else override, index, confidence, base_grade, override is not None]
+
+
+def visible_cells(folder, threshold, overrides, left, top, right, bottom):
+    rows, buckets, _ = load_index(folder)
     points = []
     for (bx, by), indices in buckets.items():
-        if ((bx + 1) * BUCKET <= left or (by + 1) * BUCKET <= top or bx * BUCKET >= right or by * BUCKET >= bottom):
+        if (bx + 1) * BUCKET <= left or (by + 1) * BUCKET <= top or bx * BUCKET >= right or by * BUCKET >= bottom:
             continue
         for index in indices:
-            x, y, base_grade, confidence = rows[index]
-            override = overrides.get(str(index))
-            if (override is None and confidence < threshold) or not (left <= x < right and top <= y < bottom):
+            point = review_point(rows, index, threshold, overrides)
+            if point is None or not (left <= point[0] < right and top <= point[1] < bottom):
                 continue
             if len(points) == MAX_POINTS:
                 return {"points": points, "truncated": True}
-            points.append([x, y, base_grade if override is None else override, index, confidence, base_grade, override is not None])
+            points.append(point)
     return {"points": points, "truncated": False}
 
 
-@router.get("/{source}/{scan_id}/ihc/{source_id}/cells")
-async def cells(source: Source, scan_id: UUID, source_id: SnapshotId, user: CurrentUser, session: Session,
-                response: Response, left: Coordinate, top: Coordinate, right: Coordinate, bottom: Coordinate,
-                version: Annotated[int, Query(ge=0)] = 0):
-    response.headers.update(PRIVATE)
-    if left >= right or top >= bottom:
-        raise HTTPException(422, "Check the display area.")
+async def overlay_context(source, scan_id, source_id, user, session, version):
     path = await registered_path(source, scan_id, user, session)
     folder = await asyncio.to_thread(find_archive, path, user.organization)
     if folder is None:
@@ -189,7 +190,52 @@ async def cells(source: Source, scan_id: UUID, source_id: SnapshotId, user: Curr
     if source == "clinical" and case_id is None:
         raise HTTPException(404, "Registered WSI not found.")
     revision = await selected_revision(session, user, case_id, scan_id, source_id, version)
-    return await asyncio.to_thread(visible_cells, folder, original, revision, left, top, right, bottom)
+    threshold = revision.threshold if revision else original["default_threshold"]
+    overrides = {int(index): grade for index, grade in revision.overrides.items()} if revision else {}
+    await session.rollback()
+    return folder / source_id, tuple(original["dimensions"]), threshold, overrides
+
+
+@router.get("/{source}/{scan_id}/ihc/{source_id}/cells")
+async def cells(source: Source, scan_id: UUID, source_id: SnapshotId, user: CurrentUser, session: Session,
+                response: Response, left: Coordinate, top: Coordinate, right: Coordinate, bottom: Coordinate,
+                version: Annotated[int, Query(ge=0)] = 0):
+    response.headers.update(PRIVATE)
+    if left >= right or top >= bottom:
+        raise HTTPException(422, "Check the display area.")
+    folder, _, threshold, overrides = await overlay_context(source, scan_id, source_id, user, session, version)
+    return await asyncio.to_thread(visible_cells, folder, threshold, overrides, left, top, right, bottom)
+
+
+@lru_cache(maxsize=12)
+def cached_density(path, modified_ns, dimensions, threshold, edits):
+    rows, buckets, _ = load_cells(path, modified_ns)
+    overrides = dict(edits)
+    return density_grid(buckets, dimensions, lambda index: review_point(rows, index, threshold, overrides))
+
+
+def build_overlay(folder, dimensions, threshold, overrides, bx, by, offset):
+    if bx is None:
+        path = folder / "cells.json"
+        try:
+            return cached_density(path, path.stat().st_mtime_ns, dimensions, threshold, tuple(sorted(overrides.items())))
+        except (OSError, ValueError):
+            raise HTTPException(503, "IHC cell data is unavailable.") from None
+    rows, buckets, _ = load_index(folder)
+    return tile_page(buckets.get((bx, by), ()), offset, lambda index: review_point(rows, index, threshold, overrides))
+
+
+@router.get("/{source}/{scan_id}/ihc/{source_id}/overlay")
+async def overlay(source: Source, scan_id: UUID, source_id: SnapshotId, user: CurrentUser, session: Session,
+                  response: Response, version: Annotated[int, Query(ge=0)] = 0,
+                  bx: Annotated[int, Query(ge=0, le=500_000)] | None = None,
+                  by: Annotated[int, Query(ge=0, le=500_000)] | None = None,
+                  offset: Annotated[int, Query(ge=0)] = 0):
+    response.headers.update(PRIVATE)
+    if (bx is None) != (by is None) or (bx is None and offset):
+        raise HTTPException(422, "Check the overlay tile.")
+    context = await overlay_context(source, scan_id, source_id, user, session, version)
+    return await asyncio.to_thread(build_overlay, *context, bx, by, offset)
 
 
 @router.post("/{source}/{scan_id}/ihc/{source_id}/revisions")

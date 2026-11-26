@@ -550,6 +550,11 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
             self.assertEqual(response.json()["snapshot"]["id"], original)
             self.assertNotIn("score", response.json()["snapshot"])
             self.assertEqual((await self.client.get(f"{url}/{original}/cells{args}")).json()["points"], [[20, 25, 0]])
+            density = await self.client.get(f"{url}/{original}/overlay")
+            self.assertEqual(density.status_code, 200, density.text)
+            self.assertEqual(density.json(), {"step": 512, "bins": [[0, 0, 0, 1]]})
+            tile = await self.client.get(f"{url}/{edited}/overlay?bx=0&by=0")
+            self.assertEqual(tile.json(), {"points": [[30, 32, 0]], "next_offset": None})
             self.assertEqual((await self.client.get(f"{url}/{edited}/cells{args}")).json()["points"], [[30, 32, 0]])
             self.assertEqual((await self.client.get(f"{url}/{edited}/cells?left=85&top=85&right=90&bottom=90")).json()["points"], [])
             raw["cells"] = [[100, 0, 0, 0.9]]
@@ -564,6 +569,7 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
             await login(self.client, self.org, labeler.username)
             self.assertEqual([entry["id"] for entry in (await self.client.get(url)).json()["results"]], [original])
             self.assertEqual((await self.client.get(f"{url}/{edited}/cells{args}")).status_code, 404)
+            self.assertEqual((await self.client.get(f"{url}/{edited}/overlay")).status_code, 404)
             doctor = await create_account(self.org, "pdl1-doctor", "doctor")
             await login(self.client, self.org, doctor.username)
             self.assertEqual((await self.client.get(url)).status_code, 404)
@@ -1461,8 +1467,13 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
             self.assertEqual(state["history"][0]["actor"], actor.display_name)
             points = (await get_json(detail + "/cells", {**box, "version": 1}))["points"]
             self.assertEqual(points, [[50, 60, 3, 0, 0.44, 0, True], [80, 90, 4, 1, 0.9, 1, True]])
+            self.assertEqual(await get_json(detail + "/overlay", {"version": 1}),
+                             {"step": 512, "bins": [[0, 0, 3, 1], [0, 0, 4, 1]]})
+            self.assertEqual(await get_json(detail + "/overlay", {"version": 1, "bx": 0, "by": 0}),
+                             {"points": points, "next_offset": None})
             await login(self.client, self.org, labeler.username)
             await get_json(detail + "/cells", {**box, "version": 1}, 404)
+            await get_json(detail + "/overlay", {"version": 1}, 404)
             self.assertEqual((await get_json(detail))["latest_version"], 0)
             await login(self.client, self.org, actor.username)
             await revise({"action": "restore", "expected_version": 1, "request_key": str(uuid4()), "reason": "Restore source"})

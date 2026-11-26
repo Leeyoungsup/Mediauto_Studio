@@ -16,11 +16,11 @@ from fastapi import APIRouter, HTTPException, Path as RoutePath, Query, Response
 
 from app.auth import CurrentUser, Session
 from app.biomarker_evidence import validation_records
+from app.cell_overlay import BUCKET, density_grid, tile_page
 from app.pdl1_policy import display_policy
 from app.wsi import PRIVATE, Source, registered_path
 
 router = APIRouter(prefix="/api/wsi", tags=["PD-L1"])
-BUCKET = 2048
 MAX_POINTS = 5000
 
 
@@ -51,12 +51,16 @@ def scan_signature(path, size, modified):
 
 
 @lru_cache(maxsize=8)
-def cell_index(path):
+def load_cell_index(path, modified_ns):
     buckets = defaultdict(list)
     with path.open(encoding="utf-8") as stream:
         for x, y, category in json.load(stream):
             buckets[int(x) // BUCKET, int(y) // BUCKET].append((x, y, category))
     return buckets
+
+
+def cell_index(path):
+    return load_cell_index(path, path.stat().st_mtime_ns)
 
 
 async def directory_for(source, scan_id, user, session):
@@ -117,17 +121,22 @@ SnapshotId = Annotated[str, RoutePath(pattern=r"^[a-f0-9]{64}$")]
 Coordinate = Annotated[float, Query(ge=0, le=1_000_000_000, allow_inf_nan=False)]
 
 
-def visible_cells(folder, snapshot_id, role, left, top, right, bottom):
+def overlay_source(folder, snapshot_id, role):
     snapshot = folder / snapshot_id if folder else None
     result = read_summary(snapshot / "summary.json", role) if snapshot else None
     if result is None:
         raise HTTPException(404, "PD-L1 result not found.")
-    width, height = result["dimensions"]
+    return snapshot / "cells.json", tuple(result["dimensions"])
+
+
+def visible_cells(folder, snapshot_id, role, left, top, right, bottom):
+    path, dimensions = overlay_source(folder, snapshot_id, role)
+    width, height = dimensions
     right, bottom = min(right, width), min(bottom, height)
     if left >= right or top >= bottom:
         return {"points": [], "truncated": False}
     points = []
-    indexed = cell_index(snapshot / "cells.json")
+    indexed = cell_index(path)
     for (x, y), bucket in indexed.items():
         if (x + 1) * BUCKET <= left or (y + 1) * BUCKET <= top or x * BUCKET >= right or y * BUCKET >= bottom:
             continue
@@ -147,3 +156,28 @@ async def cells(source: Source, scan_id: UUID, snapshot_id: SnapshotId, user: Cu
         raise HTTPException(422, "Check the display area.")
     folder = await directory_for(source, scan_id, user, session)
     return await asyncio.to_thread(visible_cells, folder, snapshot_id, user.role, left, top, right, bottom)
+
+
+
+@lru_cache(maxsize=12)
+def cached_density(path, modified_ns, dimensions):
+    return density_grid(load_cell_index(path, modified_ns), dimensions, tuple)
+
+
+def build_overlay(folder, snapshot_id, role, bx, by, offset):
+    path, dimensions = overlay_source(folder, snapshot_id, role)
+    if bx is None:
+        return cached_density(path, path.stat().st_mtime_ns, dimensions)
+    return tile_page(cell_index(path).get((bx, by), ()), offset, tuple)
+
+
+@router.get("/{source}/{scan_id}/pdl1/{snapshot_id}/overlay")
+async def overlay(source: Source, scan_id: UUID, snapshot_id: SnapshotId, user: CurrentUser, session: Session,
+                  response: Response, bx: Annotated[int, Query(ge=0, le=500_000)] | None = None,
+                  by: Annotated[int, Query(ge=0, le=500_000)] | None = None,
+                  offset: Annotated[int, Query(ge=0)] = 0):
+    response.headers.update(PRIVATE)
+    if (bx is None) != (by is None) or (bx is None and offset):
+        raise HTTPException(422, "Check the overlay tile.")
+    folder = await directory_for(source, scan_id, user, session)
+    return await asyncio.to_thread(build_overlay, folder, snapshot_id, user.role, bx, by, offset)

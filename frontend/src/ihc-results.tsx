@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { BiomarkerEvidence, type AssayInput, type ValidationEvidence } from './biomarker-evidence';
 import { CellOverlay } from './cell-overlay';
+import { useCellOverlay } from './cell-overlay-data';
 import { api, jsonBody } from './session';
 import type { Viewport } from './tile-viewer';
 
@@ -8,7 +9,7 @@ type Marker = 'ki67' | 'er' | 'pr' | 'her2';
 type Source = {
   id: string; marker: Marker; model: string; model_version: string; analysis_version: string;
   score_schema?: 'her2-intensity-v1' | 'her2-membrane-patterns-v1'; input_context?: AssayInput | null;
-  checkpoint_sha256: string | null; default_threshold: number; dimensions: [number, number];
+  checkpoint_sha256: string | null; default_threshold: number; point_count: number; dimensions: [number, number];
 };
 type Revision = { version: number; action: 'edit' | 'restore'; reason: string; created_at: string; actor: string | null; threshold: number };
 type Aggregate = { kind: 'ki67' | 'allred'; percent: number; positive: number; total: number; score?: number; proportion?: number; intensity?: number } | { kind: 'her2-intensity-v1' | 'her2-membrane-patterns-v1'; value: number; unit: string | null };
@@ -20,7 +21,6 @@ type Details = {
   approval: string | null; rule: string | null; aggregate: Aggregate | null;
 };
 type Point = [x: number, y: number, grade: number, id: number, confidence: number, original: number, reviewed: boolean];
-type Cells = { points: Point[]; truncated: boolean };
 
 const markers = { ki67: 'Ki-67', er: 'ER', pr: 'PR', her2: 'HER2' };
 const stainingLabels = ['Negative', 'Weak (1+)', 'Moderate (2+)', 'Strong (3+)', 'Other / Excluded'];
@@ -41,16 +41,14 @@ function reviewKey() {
   return Array.from(bytes, (value, index) => ([4, 6, 8, 10].includes(index) ? '-' : '') + value.toString(16).padStart(2, '0')).join('');
 }
 
-export function useIhcResults(endpoint: string, ready: boolean, view?: Viewport) {
+export function useIhcResults(endpoint: string, ready: boolean, view?: Viewport, mpp?: number | null) {
   const [list, setList] = useState<{ endpoint: string; results: Source[]; can_review: boolean }>();
   const [data, setData] = useState<{ key: string; details: Details }>();
-  const [overlay, setOverlay] = useState<{ key: string; cells: Cells }>();
   const [sourceId, setSourceId] = useState('');
   const [version, setVersion] = useState<number>();
   const [enabled, setEnabled] = useState(true);
   const [listError, setListError] = useState(false);
   const [detailsError, setDetailsError] = useState(false);
-  const [overlayError, setOverlayError] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [picking, setPicking] = useState(false);
   const [picked, setPicked] = useState<Point>();
@@ -61,12 +59,8 @@ export function useIhcResults(endpoint: string, ready: boolean, view?: Viewport)
   const detailKey = base && base + (version === undefined ? '' : '?version=' + version);
   const details = data?.key === detailKey ? data?.details : undefined;
   const { x, y, width, height } = view ?? defaultViewport;
-  const left = Math.max(0, Math.floor(x / 512) * 512);
-  const top = Math.max(0, Math.floor(y / 512) * 512);
-  const right = Math.min(source?.dimensions[0] ?? 0, Math.ceil((x + width) / 512) * 512);
-  const bottom = Math.min(source?.dimensions[1] ?? 0, Math.ceil((y + height) / 512) * 512);
-  const cellKey = base && details && `${base}/cells?version=${details.version}&left=${left}&top=${top}&right=${right}&bottom=${bottom}`;
-  const cells = enabled && overlay?.key === cellKey ? overlay?.cells : undefined;
+  const overlay = useCellOverlay<Point>(details ? base : undefined, details?.version, source?.dimensions,
+    source?.point_count, ready && enabled, view, mpp, attempt);
 
   useEffect(() => {
     if (!ready) return;
@@ -88,18 +82,6 @@ export function useIhcResults(endpoint: string, ready: boolean, view?: Viewport)
     return () => controller.abort();
   }, [ready, detailKey, attempt]);
 
-  useEffect(() => {
-    if (!ready || !enabled || !cellKey || left >= right || top >= bottom) return;
-    const controller = new AbortController();
-    setOverlayError(false);
-    const timer = window.setTimeout(() => {
-      api<Cells>(cellKey, { signal: controller.signal })
-        .then((cells) => { if (!controller.signal.aborted) setOverlay({ key: cellKey, cells }); })
-        .catch(() => { if (!controller.signal.aborted) setOverlayError(true); });
-    }, 100);
-    return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [ready, enabled, cellKey, left, top, right, bottom, attempt]);
-
   function resetSelection() {
     setPicking(false);
     setPicked(undefined);
@@ -107,10 +89,10 @@ export function useIhcResults(endpoint: string, ready: boolean, view?: Viewport)
   }
 
   function pickAt(x: number, y: number) {
-    if (!view || !cells) return;
+    if (!view || !overlay.points) return;
     let nearest: Point | undefined;
     let distance = 9;
-    for (const point of cells.points) {
+    for (const point of overlay.points) {
       const current = Math.hypot(point[0] - x, point[1] - y) * view.zoom;
       if (current < distance) { nearest = point; distance = current; }
     }
@@ -118,10 +100,14 @@ export function useIhcResults(endpoint: string, ready: boolean, view?: Viewport)
     return nearest;
   }
 
-  const visible = (cells?.points ?? []).filter(([px, py]) => px >= x && px < x + width && py >= y && py < y + height);
-  return { source, results, details, base, cells, visible, picking, pickAt, picked, setPicking, setPicked, decision, setDecision,
+  const visible: Point[] = [];
+  for (const point of overlay.points ?? []) {
+    if (point[0] >= x && point[0] < x + width && point[1] >= y && point[1] < y + height) visible.push(point);
+    if (visible.length === 100) break;
+  }
+  return { source, results, details, base, overlay, visible, picking, pickAt, picked, setPicking, setPicked, decision, setDecision,
     canReview: list?.endpoint === endpoint && list.can_review && version === undefined,
-    enabled, version, failed: listError || detailsError || overlayError,
+    enabled, version, failed: listError || detailsError || overlay.failed,
     setEnabled(value: boolean) { resetSelection(); setEnabled(value); },
     selectSource(id: string) { resetSelection(); setVersion(undefined); setSourceId(id); },
     selectVersion(value?: number) { resetSelection(); setVersion(value); },
@@ -137,7 +123,7 @@ export function IhcOverlay({ state, view, mpp }: { state: IhcState; view?: Viewp
   const previewGrade = picked && decision && decision.id === picked[3] && decision.grade !== ''
     ? decision.grade === 'original' ? picked[5] : Number(decision.grade)
     : undefined;
-  return <CellOverlay view={view} points={state.cells?.points} colors={colors}
+  return <CellOverlay view={view} points={state.overlay.points} density={state.overlay.density} colors={colors}
     label={markers[state.source.marker] + ' Cell Overlay'} selected={picked} previewGrade={previewGrade} mpp={mpp} />;
 }
 
@@ -231,17 +217,17 @@ function ReviewForm({ state, details, onPickStart }: { state: IhcState; details:
       <input type="number" min="0" max="1" step="any" value={threshold} required disabled={busy} onChange={(event) => setThreshold(event.target.value)} />
     </label>
     <div className="ihc-cell-actions">
-      <button type="button" className="button secondary" aria-pressed={state.picking} disabled={!state.enabled || busy}
+      <button type="button" className="button secondary" aria-pressed={state.picking} disabled={!state.enabled || !state.overlay.points || busy}
         onClick={() => { if (!state.picking) onPickStart(); state.setPicking(!state.picking); }}>
         {state.picking ? 'Stop Picking Cells' : 'Pick Cell on Slide'}
       </button>
       <label className="form-field">Visible Cell
-        <select value={picked?.[3] ?? ''} disabled={!state.enabled || busy} onChange={(event) => {
+        <select value={picked?.[3] ?? ''} disabled={!state.enabled || !state.overlay.points || busy} onChange={(event) => {
           state.setPicked(state.visible.find((point) => String(point[3]) === event.target.value)); setDecision(undefined);
         }}>
           <option value="">Choose a Cell</option>
-          {picked && !state.visible.slice(0, 100).some((cell) => cell[3] === picked[3]) && <option value={picked[3]}>Cell {picked[3] + 1}</option>}
-          {state.visible.slice(0, 100).map((cell) => <option value={cell[3]} key={cell[3]}>Cell {cell[3] + 1} · {grades[cell[2]]}</option>)}
+          {picked && !state.visible.some((cell) => cell[3] === picked[3]) && <option value={picked[3]}>Cell {picked[3] + 1}</option>}
+          {state.visible.map((cell) => <option value={cell[3]} key={cell[3]}>Cell {cell[3] + 1} · {grades[cell[2]]}</option>)}
         </select>
       </label>
       {picked && <div><small>Cell {picked[3] + 1} · Original {grades[picked[5]]} · Confidence {picked[4].toFixed(4)}</small>
@@ -306,7 +292,7 @@ export function IhcPanel({ state, readOnly, onPickStart, showEmpty, caseRequests
       <ul className="pdl1-legend" aria-label="Included IHC Cell Counts">{grades.map((grade, index) =>
         <li key={grade}><i style={{ background: colors[index] }} />{grade} · {number.format(details.counts[index])}</li>)}</ul>
       {details.status === 'source_replay_unverified' && <p>Markers near the stored confidence cutoff may differ from the original count.</p>}
-      {state.cells?.truncated && <p role="status">Cell display is limited in this area. Zoom in for additional markers.</p>}
+      {state.overlay.density && <p role="status">{state.overlay.loading ? 'Loading individual cells…' : 'Cell density overview · Zoom in for individual cells.'}</p>}
       <details className="pdl1-audit"><summary>Model and Source</summary>
         <p>{source.model} · {source.model_version}</p><p>Analysis {source.analysis_version}</p>
         <p className="ihc-digest">Source {source.id}</p>

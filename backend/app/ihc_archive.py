@@ -8,7 +8,8 @@ from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
 
-from app.pdl1 import BUCKET, signature_key
+from app.cell_overlay import BUCKET
+from app.pdl1 import signature_key
 
 MARKERS = {"ki67": "KI_67", "er": "ER_PR", "pr": "ER_PR", "her2": "HER2"}
 RULES = {"ki67": "quanti-ki67-index-v1", "er": "quanti-allred-v1", "pr": "quanti-allred-v1"}

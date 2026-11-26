@@ -108,9 +108,56 @@ try {
     await read(page.request.post(sourceUrl + '/revisions', { data: { action: 'edit', expected_version: 1,
       request_key: randomUUID(), threshold: 0.4, reason: 'Stale browser tab' } }), 409);
   }
+  const denseScan = record.slides.find((scan) => scan.label === 'I-KI').id;
+  const densePath = '/api/wsi/clinical/' + denseScan + '/ihc';
+  const archive = await read(page.request.get(densePath));
+  const source = archive.results[0];
+  const [cx, cy] = source.dimensions.map((dimension) => Math.floor(dimension / 2));
+  const bx = Math.floor(cx / 2048);
+  const by = Math.floor(cy / 2048);
+  const overlayURL = densePath + '/' + source.id + '/overlay';
+  const requests = [];
+  let finishDetail;
+  const detailGate = new Promise((resolve) => { finishDetail = resolve; });
+  await page.route('**' + densePath, (route) => route.fulfill({
+    json: { ...archive, results: [{ ...source, point_count: 6200 }] },
+  }));
+  await page.route('**' + overlayURL + '*', async (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    requests.push(query.toString());
+    if (!query.has('bx')) return route.fulfill({
+      json: { step: 512, bins: [[Math.floor(cx / 512) * 512, Math.floor(cy / 512) * 512, 1, 6200]] },
+    });
+    if (Number(query.get('bx')) !== bx || Number(query.get('by')) !== by) return route.fulfill({
+      json: { points: [], next_offset: null },
+    });
+    const offset = Number(query.get('offset'));
+    if (offset) await detailGate;
+    const points = Array.from({ length: offset ? 1200 : 5000 }, (_, index) => [cx, cy, 1, offset + index, .9, 1, false]);
+    return route.fulfill({ json: { points, next_offset: offset ? null : 5000 } });
+  });
+  await page.goto('/#viewer/' + caseId + '/' + denseScan);
+  await page.reload();
+  const layer = page.getByLabel('Ki-67 Cell Overlay', { exact: true });
+  await page.waitForFunction(() => document.querySelector('canvas[aria-label="Ki-67 Cell Overlay"]')?.dataset.overlayMode === 'density');
+  const zoom = page.getByLabel('Calibrated Magnification');
+  const secondPage = page.waitForRequest((request) => request.url().includes(overlayURL) && request.url().includes('offset=5000'));
+  await zoom.selectOption('20');
+  await secondPage;
+  assert.equal(await layer.getAttribute('data-overlay-mode'), 'density');
+  finishDetail();
+  await page.waitForFunction(() => document.querySelector('canvas[aria-label="Ki-67 Cell Overlay"]')?.dataset.overlayMode === 'cells');
+  const before = requests.length;
+  await zoom.selectOption('40');
+  await page.waitForFunction(() => document.querySelector('.wsi-magnification')?.selectedOptions[0]?.textContent === '40×');
+  await page.waitForTimeout(250);
+  await page.getByRole('button', { name: 'Fit to Window', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('canvas[aria-label="Ki-67 Cell Overlay"]')?.dataset.overlayMode === 'density');
+  assert.equal(requests.length, before, 'Zooming inside cached detail and back to overview must reuse existing data');
+  assert.equal(requests.filter((query) => !query.includes('bx=')).length, 1);
   assert.deepEqual(errors, []);
   await evidence.finish();
-  console.log('PASS: Ki-67, ER and PR cards and overlays, approved aggregation, missing approval, cell picking, threshold, revision reload and original restore');
+  console.log('PASS: IHC cards, editing, restore, density fallback, complete paged detail and zoom cache');
 } finally {
   await browser.close();
 }

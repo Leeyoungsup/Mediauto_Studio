@@ -143,6 +143,7 @@ try {
   await doctor.getByRole('link', { name: 'Back to Slide Analysis' }).click();
   await button(completed, 'Show Result on Slide').waitFor();
   await button(analysis, 'Close Slide Analysis').click();
+  await doctor.waitForFunction(() => Number(document.querySelector('.image-panel')?.dataset.viewZoom) > 0);
   const beforeZoom = (await camera())[0];
   await button(doctor, 'Zoom In').click();
   await doctor.waitForFunction((zoom) => Number(document.querySelector('.image-panel')?.dataset.viewZoom) > Number(zoom), beforeZoom);

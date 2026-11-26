@@ -139,6 +139,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   const pdlPanel = useRef<HTMLDivElement>(null);
   const ihcPanel = useRef<HTMLDivElement>(null);
   const [resultDock, setResultDock] = useState<'ihc' | 'pdl1' | null>();
+  const [selectedOverlay, setSelectedOverlay] = useState<'ihc' | 'pdl1'>();
   const [cellMenu, setCellMenu] = useState(false);
   const papReviewPanel = useRef<HTMLDivElement>(null);
   const papGalleryPanel = useRef<HTMLDivElement>(null);
@@ -219,8 +220,8 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   const appliedPapFocus = useRef<typeof pap.focus>(undefined);
   const skin = useSkinReview(endpoint, canOpenSlideReview && !papStain && showSkin);
   const prostate = useProstateResults(endpoint, canOpenSlideReview && !papStain && showProstate);
-  const ihc = useIhcResults(endpoint, Boolean(info) && !readOnlyEndpoint && !compareMode && !papStain, view);
-  const pdl1 = usePdl1(endpoint, Boolean(info) && !readOnlyEndpoint && !papStain, view, initialSnapshot);
+  const ihc = useIhcResults(endpoint, Boolean(info) && !readOnlyEndpoint && !papStain, view, info?.mpp_x);
+  const pdl1 = usePdl1(endpoint, Boolean(info) && !readOnlyEndpoint && !papStain, view, info?.mpp_x, initialSnapshot);
   const restoreCamera = useCallback((camera: Camera) => {
     if (!reviewFrame.current?.locked) {
       setAutopan(false);
@@ -346,7 +347,8 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         const metadata = await api<SlideInfo>(endpoint, { signal, headers: { 'X-Audit-Attempt': auditId } });
         if (!element || signal.aborted) return;
         renderer.current = new TileViewer(element, metadata, endpoint, (viewport) => {
-          setView(viewport);
+          setView((current) => current && current.zoom === viewport.zoom && current.x === viewport.x && current.y === viewport.y
+            && current.width === viewport.width && current.height === viewport.height ? current : viewport);
           const viewer = renderer.current;
           if (viewer) {
             report.current?.onFrame(viewer.cameraFrame(), metadata);
@@ -532,16 +534,18 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   const showIhcJump = canOpenSlideReview && !papStain && (ihcStain || ihc.source || ihc.failed);
   const showPdlJump = canOpenSlideReview && !papStain && (stainKey === 'pdl1' || pdl1.result || pdl1.error || pdl1.referenceMissing);
   const mpp = info?.mpp_x;
-  const resultMode = resultDock === undefined ? (
-    pdl1.result && (initialSnapshot || stainKey === 'pdl1') ? 'pdl1'
-      : ihc.source || ihcStain ? 'ihc' : pdl1.result ? 'pdl1' : null
-  ) : resultDock;
+  const defaultOverlay = pdl1.result && (initialSnapshot || stainKey === 'pdl1') ? 'pdl1'
+    : ihc.source ? 'ihc' : pdl1.result ? 'pdl1' : null;
+  const resultMode = resultDock === undefined ? defaultOverlay ?? (ihcStain ? 'ihc' : null) : resultDock;
+  const overlayMode = selectedOverlay ?? defaultOverlay;
+  const currentOverlay = overlayMode === 'ihc' ? ihc.overlay : overlayMode === 'pdl1' ? pdl1.overlay : undefined;
   const dockedResult = options && !presenting && !analysis?.open && !annotationsOpen && !lymphOpen && !showPap
     && info && !readOnlyEndpoint && !papStain ? resultMode : null;
 
   function openResult(mode: 'ihc' | 'pdl1', focus = true) {
     if (!options) { (mode === 'ihc' ? ihcPanel : pdlPanel).current?.focus(); return; }
     setResultDock(mode);
+    setSelectedOverlay(mode);
     setAnnotationsOpen(false);
     setLymphOpen(false);
     setShowPap(false);
@@ -555,10 +559,10 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     onPickStart={() => { setAutopan(false); skin.setMode(undefined); viewerRecords.chooseTool('pan'); canvas.current?.focus({ preventScroll: true }); }} />;
 
   const navigationControls = <>
-        <button className="icon-button" title="Zoom Out" aria-label="Zoom Out" disabled={!info || following} onClick={() => navigate((viewer) => viewer.magnify(0.7))}><Minus size={18} /></button>
+        <button className="icon-button" title="Zoom Out" aria-label="Zoom Out" disabled={!view || following} onClick={() => navigate((viewer) => viewer.magnify(0.7))}><Minus size={18} /></button>
         <output aria-label="Zoom relative to scan" className="zoom-value">{view ? `${(view.zoom * 100).toFixed(view.zoom < 0.01 ? 2 : view.zoom < 0.1 ? 1 : 0)}%` : '—'}</output>
-        <button className="icon-button" title="Zoom In" aria-label="Zoom In" disabled={!info || following} onClick={() => navigate((viewer) => viewer.magnify(1.4))}><Plus size={18} /></button>
-        <button className="icon-button" title="Fit to Window" aria-label="Fit to Window" disabled={!info || following} onClick={() => navigate((viewer) => viewer.fitToWindow())}><LocateFixed size={17} /></button>
+        <button className="icon-button" title="Zoom In" aria-label="Zoom In" disabled={!view || following} onClick={() => navigate((viewer) => viewer.magnify(1.4))}><Plus size={18} /></button>
+        <button className="icon-button" title="Fit to Window" aria-label="Fit to Window" disabled={!view || following} onClick={() => navigate((viewer) => viewer.fitToWindow())}><LocateFixed size={17} /></button>
         {mpp && view && <select className="wsi-magnification" aria-label="Calibrated Magnification" title="Calibrated Magnification"
           value="" disabled={following} onChange={(event) => {
             const value = Number(event.target.value);
@@ -645,7 +649,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       style={options && fit.height ? { height: fit.height } : undefined}>
       <canvas className={presenting || (viewerRecords.tool === 'pan' && !ihc.picking && !skin.mode) ? 'wsi-canvas' : 'wsi-canvas drawing-tool'} ref={canvas} tabIndex={0} aria-label="WSI Canvas"
         onContextMenu={(event) => {
-          if (!options || presenting || following || !ihc.canReview || !ihc.enabled || viewerRecords.tool !== 'pan' || skin.mode) return;
+          if (!options || presenting || following || overlayMode !== 'ihc' || !ihc.canReview || !ihc.enabled || viewerRecords.tool !== 'pan' || skin.mode) return;
           const box = event.currentTarget.getBoundingClientRect();
           const x = event.clientX - box.left;
           const y = event.clientY - box.top;
@@ -771,8 +775,11 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
           event.preventDefault();
         }}
       />
-      {!papStain && <Pdl1Overlay view={view} result={pdl1.result} cells={pdl1.cells} mpp={mpp} />}
-      {!papStain && <IhcOverlay state={ihc} view={view} mpp={mpp} />}
+      {!papStain && overlayMode === 'pdl1' && <Pdl1Overlay view={view} state={pdl1} mpp={mpp} />}
+      {!papStain && overlayMode === 'ihc' && <IhcOverlay state={ihc} view={view} mpp={mpp} />}
+      {!dockedResult && currentOverlay?.density && <span className="cell-overlay-status" role="status">
+        {currentOverlay.loading ? 'Loading individual cells…' : 'Cell density overview'}
+      </span>}
       {canOpenSlideReview && !papStain && showSkin && <Suspense fallback={null}><SkinOverlay state={skin} view={view} /></Suspense>}
       {canOpenSlideReview && !papStain && showProstate && <ProstateOverlay state={prostate} view={view} />}
       {showPap && view && pap.selected && <svg className="annotation-overlay pap-candidate-overlay" aria-label="Selected Pap Candidate"
