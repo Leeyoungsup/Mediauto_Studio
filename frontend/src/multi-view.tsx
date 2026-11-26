@@ -42,6 +42,9 @@ export function MultiView({ slides, primary, onClose, onSingle }: {
   const [registered, setRegistered] = useState<Record<string, Transform>>();
   const frames = useRef<Frames>({});
   const metadata = useRef<Record<string, SlideInfo>>({});
+  // Adapted from the SaaS MultiViewFocus gesture. Slow double-clicks and controls retain their usual behavior.
+  const previousClick = useRef<{ target: EventTarget; time: number; x: number; y: number }>(undefined);
+  const quickPair = useRef(false);
   const round = Math.min(...selected.map((id) => points[id]?.length ?? 0));
   const completeRound = selected.every((id) => (points[id]?.length ?? 0) === round);
   const pairs = completeRound && round >= 3 ? selected.slice(1).map((id) => ({
@@ -175,6 +178,24 @@ export function MultiView({ slides, primary, onClose, onSingle }: {
         if (!slide?.wsi) return null;
         return <div key={id} role="group" aria-label={`Pane ${index + 1}: ${slide.label ?? id} ${slide.wsi.format}`}
           className="multi-view-pane" data-active={active === id} hidden={focused && active !== id}
+          onClickCapture={(event) => {
+            const previous = previousClick.current;
+            quickPair.current = !!previous && event.button === 0 && event.target === previous.target
+              && event.timeStamp >= previous.time && event.timeStamp - previous.time <= 250
+              && Math.hypot(event.clientX - previous.x, event.clientY - previous.y) <= 8;
+            previousClick.current = event.button === 0
+              ? { target: event.target, time: event.timeStamp, x: event.clientX, y: event.clientY } : undefined;
+          }}
+          onDoubleClickCapture={(event) => {
+            const withinClickWindow = quickPair.current;
+            quickPair.current = false;
+            previousClick.current = undefined;
+            if (!withinClickWindow || focused || picking || !loaded.includes(id)
+                || !(event.target instanceof HTMLCanvasElement)) return;
+            event.preventDefault();
+            setActiveId(id);
+            setFocused(true);
+          }}
           onFocusCapture={() => setActiveId(id)} onPointerDownCapture={() => setActiveId(id)}>
           <button type="button" className="multi-view-activate" aria-pressed={active === id} onClick={() => setActiveId(id)}>
             Pane {index + 1}{active === id ? ' · Active' : ''}

@@ -5,6 +5,9 @@ import { request } from './session';
 const tileSize = 1024;
 const downsamples = [1, 4, 8];
 const singleViewerLimits = { loads: 4, tiles: 64 };
+export const wheelZoomStep = 1.1;
+// Reference calibration from the SaaS TileViewer: 40× at 0.25 µm per CSS pixel.
+export const referenceMagnification = 40 * 0.25;
 
 export type SlideInfo = { dimensions: [number, number]; mpp_x: number | null; mpp_y: number | null };
 export type CameraFrame = { x: number; y: number; zoom: number; fitZoom: number; dimensions: [number, number] };
@@ -39,7 +42,7 @@ export class TileViewer {
 
   constructor(private canvas: HTMLCanvasElement, private slide: SlideInfo, private endpoint: string,
     private onView: (viewport: Viewport) => void, private onTileStatus: (state: 'loading' | 'ok' | 'partial' | 'unavailable') => void,
-    private readonly limits = singleViewerLimits) {
+    private readonly limits: { loads: number; tiles: number; keepCameraOnResize?: boolean } = singleViewerLimits) {
     const context = canvas.getContext('2d', { alpha: false });
     if (!context) throw new Error('This browser cannot open the slide canvas.');
     this.context = context;
@@ -64,14 +67,18 @@ export class TileViewer {
     const width = Math.round(this.canvas.clientWidth);
     const height = Math.round(this.canvas.clientHeight);
     if (!width || !height) return;
-    const wasFit = !this.minZoom || this.zoom <= this.minZoom;
+    const firstSize = !this.minZoom;
+    const ratio = window.devicePixelRatio || 1;
+    if (!firstSize && width === this.width && height === this.height && ratio === this.ratio) return;
+    const wasFit = firstSize || this.zoom <= this.minZoom;
     this.width = width;
     this.height = height;
-    this.ratio = window.devicePixelRatio || 1;
+    this.ratio = ratio;
     this.canvas.width = Math.round(width * this.ratio);
     this.canvas.height = Math.round(height * this.ratio);
     this.minZoom = Math.min(width / this.slide.dimensions[0], height / this.slide.dimensions[1]);
-    if (wasFit && !this.following) this.fitToWindow();
+    if (!firstSize && this.limits.keepCameraOnResize) this.schedule();
+    else if (wasFit && !this.following) this.fitToWindow();
     else this.update();
   }
 
@@ -82,11 +89,12 @@ export class TileViewer {
     this.update();
   }
 
-  magnify(factor: number, x = this.width / 2, y = this.height / 2) {
-    const next = Math.min(Math.max(4, this.minZoom), Math.max(this.minZoom, this.zoom * factor));
-    this.centerX += (x - this.width / 2) * (1 / this.zoom - 1 / next);
-    this.centerY += (y - this.height / 2) * (1 / this.zoom - 1 / next);
-    this.zoom = next;
+  magnify(factor: number) {
+    this.zoomTo(this.zoom * factor);
+  }
+
+  zoomTo(zoom: number) {
+    this.zoom = Math.min(Math.max(4, this.minZoom), Math.max(this.minZoom, zoom));
     this.update();
   }
 

@@ -70,16 +70,17 @@ try {
       left: 0, top: 0, right: original.results[0].dimensions[0], bottom: original.results[0].dimensions[1],
     } }));
     await page.getByRole('button', { name: 'Fit to Window', exact: true }).click();
-    await card.getByRole('button', { name: 'Pick Cell on Slide' }).click();
     await canvas.scrollIntoViewIfNeeded();
     const box = await canvas.boundingBox();
     const zoom = Number(await view.getAttribute('data-view-zoom'));
     const cx = Number(await view.getAttribute('data-view-center-x'));
     const cy = Number(await view.getAttribute('data-view-center-y'));
-    await canvas.click({ position: { x: box.width / 2 + (sample.points[0][0] - cx) * zoom,
+    await canvas.click({ button: 'right', position: { x: box.width / 2 + (sample.points[0][0] - cx) * zoom,
       y: box.height / 2 + (sample.points[0][1] - cy) * zoom } });
+    const menu = page.getByRole('group', { name: 'Edit Cell on Slide' });
+    await menu.getByRole('button', { name: 'Strong (3+)', exact: true }).click();
     const grade = card.getByRole('combobox', { name: 'User Cell Grade' });
-    await grade.selectOption('3');
+    assert.equal(await grade.inputValue(), '3');
     await card.getByRole('spinbutton', { name: 'Minimum Detection Confidence' }).fill('0.8');
     await card.getByRole('textbox', { name: 'Review Reason' }).fill('Synthetic threshold and grade review');
     await card.getByRole('button', { name: 'Save IHC Review' }).click();

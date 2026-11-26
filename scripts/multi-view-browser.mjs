@@ -94,6 +94,13 @@ try {
   const unchanged = await frame(2);
   await zoom(1, 5);
   assert.deepEqual(await frame(2), unchanged);
+  const beforeWheel = await frame(1);
+  await canvas(1).hover({ position: { x: 125, y: 80 } });
+  await page.mouse.wheel(0, -120);
+  await page.waitForFunction((old) => Number(document.querySelector('.multi-view-pane .image-panel')?.dataset.viewZoom) > old, beforeWheel.zoom);
+  const afterWheel = await frame(1);
+  assert.ok(Math.hypot(afterWheel.x - beforeWheel.x, afterWheel.y - beforeWheel.y) < 0.01);
+  assert.ok(Math.abs(afterWheel.zoom / beforeWheel.zoom - 1.1) < 0.00001);
   await sync.click();
   await drag(1, 45, 35);
   const normalized = report(await frame(1), await frame(2), dimensions[0], dimensions[1]);
@@ -111,9 +118,13 @@ try {
   await drag(1, -34, -19);
   const anchored = report(await frame(1), await frame(2), dimensions[0], dimensions[1], anchors);
 
-  await button('Expand Active Pane').click();
+  const beforeExpand = await frame(1);
+  await canvas(1).dblclick();
   await pane(2).waitFor({ state: 'hidden' });
   await page.getByText(/Sync Paused While Expanded/).waitFor();
+  const expanded = await frame(1);
+  assert.ok(Math.hypot(expanded.x - beforeExpand.x, expanded.y - beforeExpand.y) < 0.01);
+  assert.equal(expanded.zoom, beforeExpand.zoom);
   await button('Restore Split View').click();
   await pane(2).waitFor();
   await canvas(2).focus();

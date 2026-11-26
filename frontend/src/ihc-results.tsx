@@ -54,6 +54,7 @@ export function useIhcResults(endpoint: string, ready: boolean, view?: Viewport)
   const [attempt, setAttempt] = useState(0);
   const [picking, setPicking] = useState(false);
   const [picked, setPicked] = useState<Point>();
+  const [decision, setDecision] = useState<{ id: number; grade: string }>();
   const results = list?.endpoint === endpoint ? list.results : undefined;
   const source = results?.find((item) => item.id === sourceId) ?? results?.[0];
   const base = source && endpoint + '/ihc/' + source.id;
@@ -102,6 +103,7 @@ export function useIhcResults(endpoint: string, ready: boolean, view?: Viewport)
   function resetSelection() {
     setPicking(false);
     setPicked(undefined);
+    setDecision(undefined);
   }
 
   function pickAt(x: number, y: number) {
@@ -113,10 +115,11 @@ export function useIhcResults(endpoint: string, ready: boolean, view?: Viewport)
       if (current < distance) { nearest = point; distance = current; }
     }
     if (nearest) setPicked(nearest);
+    return nearest;
   }
 
   const visible = (cells?.points ?? []).filter(([px, py]) => px >= x && px < x + width && py >= y && py < y + height);
-  return { source, results, details, base, cells, visible, picking, pickAt, picked, setPicking, setPicked,
+  return { source, results, details, base, cells, visible, picking, pickAt, picked, setPicking, setPicked, decision, setDecision,
     canReview: list?.endpoint === endpoint && list.can_review && version === undefined,
     enabled, version, failed: listError || detailsError || overlayError,
     setEnabled(value: boolean) { resetSelection(); setEnabled(value); },
@@ -128,10 +131,41 @@ export function useIhcResults(endpoint: string, ready: boolean, view?: Viewport)
 
 type IhcState = ReturnType<typeof useIhcResults>;
 
-export function IhcOverlay({ state, view }: { state: IhcState; view?: Viewport }) {
+export function IhcOverlay({ state, view, mpp }: { state: IhcState; view?: Viewport; mpp?: number | null }) {
   if (!state.source) return null;
+  const { decision, picked } = state;
+  const previewGrade = picked && decision && decision.id === picked[3] && decision.grade !== ''
+    ? decision.grade === 'original' ? picked[5] : Number(decision.grade)
+    : undefined;
   return <CellOverlay view={view} points={state.cells?.points} colors={colors}
-    label={markers[state.source.marker] + ' Cell Overlay'} selected={state.picked} />;
+    label={markers[state.source.marker] + ' Cell Overlay'} selected={picked} previewGrade={previewGrade} mpp={mpp} />;
+}
+
+export function IhcCellMenu({ state, close, x, y }: { state: IhcState; close: () => void; x: number; y: number }) {
+  const cell = state.picked;
+  const menu = useRef<HTMLDivElement>(null);
+  useEffect(() => { menu.current?.focus({ preventScroll: true }); }, []);
+  if (!cell || !state.canReview) return null;
+  const grades = classLabels(state.source);
+  function choose(grade: string) {
+    if (cell) state.setDecision({ id: cell[3], grade });
+    close();
+  }
+  return <div className="ihc-cell-menu" role="group" aria-label="Edit Cell on Slide" ref={menu} tabIndex={-1}
+    onKeyDown={(event) => {
+      if (event.key === 'Escape') { event.stopPropagation(); close(); }
+      if (/^[1-5]$/.test(event.key) && Number(event.key) <= grades.length) {
+        event.preventDefault();
+        choose(String(Number(event.key) - 1));
+      }
+    }}
+    style={{ left: x, top: y }}>
+    <header><strong>Cell {cell[3] + 1}</strong><button type="button" className="icon-button" aria-label="Close Cell Menu" onClick={close}>×</button></header>
+    <small>Original {grades[cell[5]]}</small>
+    {grades.map((label, grade) => <button key={label} type="button" className="button secondary"
+      aria-keyshortcuts={String(grade + 1)} onClick={() => choose(String(grade))}><i style={{ background: colors[grade] }} />{label}</button>)}
+    {cell[6] && <button type="button" className="button secondary" onClick={() => choose('original')}>Clear User Decision</button>}
+  </div>;
 }
 
 function Score({ details }: { details: Details }) {
@@ -160,7 +194,7 @@ function Score({ details }: { details: Details }) {
 
 function ReviewForm({ state, details, onPickStart }: { state: IhcState; details: Details; onPickStart: () => void }) {
   const [threshold, setThreshold] = useState(String(details.threshold));
-  const [decision, setDecision] = useState<{ id: number; grade: string }>();
+  const { decision, setDecision } = state;
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -217,7 +251,7 @@ function ReviewForm({ state, details, onPickStart }: { state: IhcState; details:
             {grades.map((value, index) => <option key={value} value={index}>{value}</option>)}
             {picked[6] && <option value="original">Clear User Decision</option>}
           </select>
-        </label></div>}
+        </label>{grade !== '' && <small role="status">Pending Cell Edit · Save IHC Review to record it.</small>}</div>}
     </div>
     {state.picking && <p role="status">Select a marked cell on the slide. Zoom in to distinguish nearby markers.</p>}
     <label className="form-field">Review Reason

@@ -624,6 +624,7 @@ dialog::backdrop { background: #21193575; }
   .viewer-image-controls, .viewer-image-navigation { gap: 2px; }
   .viewer-image-controls .icon-button { min-width: 26px; width: 26px; }
   .viewer-image-controls .zoom-value { font-size: 12px; }
+  .viewer-image-controls .viewer-image-navigation:has(.wsi-magnification) .zoom-value { display: none; }
 }
 @media (min-width: 761px) {
   .viewer-layout[data-orientation=vertical][data-tray=true]:has(.tray-items[data-gallery=true]) {
@@ -856,6 +857,22 @@ dialog::backdrop { background: #21193575; }
 .viewer-workbench .viewer-heading .actions { gap: 5px; }
 .viewer-workbench .image-actions { flex-wrap: wrap; gap: 5px; max-width: 100%; }
 .analysis-workspace { position: relative; }
+.analysis-workspace[data-results-dock=true] { display: grid; grid-template-columns: minmax(0, 1fr) clamp(260px, 27%, 355px); }
+.viewer-results-dock { min-width: 0; overflow: auto; overscroll-behavior: contain; border-left: 1px solid var(--line); }
+.viewer-results-heading { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 4px 11px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.viewer-results-dock .pdl1-panel { padding: 10px; }
+.wsi-magnification { max-width: 64px; min-height: 28px; }
+.ihc-cell-menu { position: absolute; z-index: 7; width: min(200px, calc(100% - 8px)); max-height: calc(100% - 8px);
+  overflow: auto; display: grid; gap: 3px; padding: 7px; background: var(--surface);
+  border: 1px solid var(--line); border-radius: 7px; box-shadow: 0 4px 15px #21193550; }
+.ihc-cell-menu header { display: flex; align-items: center; justify-content: space-between; }
+.ihc-cell-menu .button { justify-content: flex-start; min-height: 25px; padding: 3px 6px; }
+.ihc-cell-menu i { width: 10px; height: 10px; border-radius: 2px; }
+@media (max-width: 760px) {
+  .analysis-workspace[data-results-dock=true] { grid-template-columns: minmax(0, 1fr); }
+  .viewer-results-dock { border-left: 0; border-top: 1px solid var(--line); }
+}
 .viewer-analysis {
   box-sizing: border-box; position: absolute; inset: 10px 10px 10px auto; z-index: 6;
   width: min(345px, calc(100% - 20px)); overflow: auto; overscroll-behavior: contain;

@@ -93,10 +93,10 @@ export function usePdl1(endpoint: string, ready: boolean, view: Viewport | undef
 
 type Pdl1State = ReturnType<typeof usePdl1>;
 
-export function Pdl1Overlay({ view, result, cells }: { view?: Viewport; result?: Result; cells?: Cells }) {
+export function Pdl1Overlay({ view, result, cells, mpp }: { view?: Viewport; result?: Result; cells?: Cells; mpp?: number | null }) {
   const colors = useMemo(() => Object.fromEntries(Object.entries(result?.classes ?? {})
     .map(([key, value]) => [key, value.color])), [result]);
-  return <CellOverlay view={view} colors={colors} points={result ? cells?.points : undefined} label="PD-L1 Cell Overlay" />;
+  return <CellOverlay view={view} colors={colors} points={result ? cells?.points : undefined} label="PD-L1 Cell Overlay" mpp={mpp} />;
 }
 
 const scoreStatusLabel: Record<ScoreStatus, string> = {

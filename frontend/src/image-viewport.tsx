@@ -1,18 +1,18 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
-import { AlertTriangle, ChevronLeft, ChevronRight, Download, Image, Layers, List, LocateFixed, Map, Minus, Pause, Play, Plus, ScanLine, Tag, Tally5 } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, ChevronRight, Download, Image, Layers, List, LocateFixed, Map, Minus, Pause, Play, Plus, ScanLine, Tag, Tally5, X } from 'lucide-react';
 import type { CollectionOrigin } from './workflow-navigation';
 import type { WsiScan } from './demo';
 import { api, auditAttemptId, jsonBody, request } from './session';
 import { ViewerAnalysis } from './viewer-analysis';
-import { IhcOverlay, IhcPanel, useIhcResults } from './ihc-results';
+import { IhcCellMenu, IhcOverlay, IhcPanel, useIhcResults } from './ihc-results';
 import { usePapGallery } from './pap-gallery-state';
 import { useSkinReview } from './skin-review-state';
 import { ProstateOverlay, ProstatePanel, useProstateResults } from './prostate-results';
 import { Pdl1Badge, Pdl1Overlay, Pdl1Panel, usePdl1 } from './pdl1';
 import { roiSearchHref } from './roi-search';
 import { LymphCounts } from './lymph-counts';
-import { TileViewer } from './tile-viewer';
+import { referenceMagnification, TileViewer, wheelZoomStep } from './tile-viewer';
 import type { CameraFrame, SlideInfo, Viewport } from './tile-viewer';
 import { AnnotationOverlay, DrawingControls, ViewerRecordsPanel, ViewerToolsBar, hasVertices, screenToSlide, useViewerRecords } from './viewer-tools';
 import type { Camera, Geometry, Point, Tool } from './viewer-tools';
@@ -121,6 +121,8 @@ function useCanvasFit(enabled: boolean) {
 }
 
 const autopanVectors = { right: [-1, 0], left: [1, 0], down: [0, -1], up: [0, 1] } as const;
+const reviewViewerLimits = { loads: 4, tiles: 64, keepCameraOnResize: true };
+const comparisonViewerLimits = { loads: 2, tiles: 24, keepCameraOnResize: true };
 
 export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint, initialSnapshot, initialRoi, initialCamera, roiCaseId, options, sharedReview, extraAction, analysis, papMode, relatedReviewAction, caseRequestsHref }: {
   scan: WsiScan; label: string; stain: string; comparison?: PaneComparison; readOnlyEndpoint?: string; initialSnapshot?: string; initialRoi?: string; initialCamera?: Camera; roiCaseId?: string; options?: ViewerOptions;
@@ -130,11 +132,14 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   sharedReview?: { locked: boolean; camera?: Camera; onFrame: (camera: Camera) => void };
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
-  const fit = useCanvasFit(Boolean(options));
+  const isFullViewer = Boolean(options);
+  const fit = useCanvasFit(isFullViewer);
   const slideVisible = options?.active ?? true;
   const analysisButton = useRef<HTMLButtonElement>(null);
   const pdlPanel = useRef<HTMLDivElement>(null);
   const ihcPanel = useRef<HTMLDivElement>(null);
+  const [resultDock, setResultDock] = useState<'ihc' | 'pdl1' | null>();
+  const [cellMenu, setCellMenu] = useState(false);
   const papReviewPanel = useRef<HTMLDivElement>(null);
   const papGalleryPanel = useRef<HTMLDivElement>(null);
   const papFocus = useRef<'gallery' | 'review'>(undefined);
@@ -192,6 +197,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     if (!viewer || reviewFrame.current?.locked) return;
     setAutopan(false);
     setAutopanNotice('');
+    setCellMenu(false);
     action(viewer);
     report.current?.onNavigate(viewer.cameraFrame());
   }
@@ -322,7 +328,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     element.addEventListener('wheel', (event) => {
       if (!renderer.current) return;
       event.preventDefault();
-      navigate((viewer) => viewer.magnify(event.deltaY < 0 ? 1.25 : 0.8, event.offsetX, event.offsetY));
+      if (event.deltaY) navigate((viewer) => viewer.magnify(event.deltaY < 0 ? wheelZoomStep : 1 / wheelZoomStep));
     }, { signal, passive: false });
 
     const auditId = auditAttemptId();
@@ -349,7 +355,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         }, (status) => {
           setTileStatus(status);
           if (status !== 'loading') recordView(status === 'unavailable' ? 'failed' : 'success');
-        }, compareMode ? { loads: 2, tiles: 24 } : undefined);
+        }, compareMode ? comparisonViewerLimits : isFullViewer ? reviewViewerLimits : undefined);
         setInfo(metadata);
       } catch (error) {
         if (!signal.aborted) {
@@ -366,7 +372,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       drag.current = null;
       drawing.current = null;
     };
-  }, [endpoint, attempt, compareMode, scan.source]);
+  }, [endpoint, attempt, compareMode, isFullViewer, scan.source]);
 
   useEffect(() => {
     setOverview('');
@@ -522,12 +528,43 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     category: pap.archive?.categories.find(({ code }) => code === pap.selected?.category)?.label ?? pap.selected.category };
   const showIhcJump = canOpenSlideReview && !papStain && (ihcStain || ihc.source || ihc.failed);
   const showPdlJump = canOpenSlideReview && !papStain && (stainKey === 'pdl1' || pdl1.result || pdl1.error || pdl1.referenceMissing);
+  const mpp = info?.mpp_x;
+  const resultMode = resultDock === undefined ? (
+    pdl1.result && (initialSnapshot || stainKey === 'pdl1') ? 'pdl1'
+      : ihc.source || ihcStain ? 'ihc' : pdl1.result ? 'pdl1' : null
+  ) : resultDock;
+  const dockedResult = options && !presenting && !analysis?.open && !annotationsOpen && !lymphOpen && !showPap
+    && info && !readOnlyEndpoint && !papStain ? resultMode : null;
+
+  function openResult(mode: 'ihc' | 'pdl1', focus = true) {
+    if (!options) { (mode === 'ihc' ? ihcPanel : pdlPanel).current?.focus(); return; }
+    setResultDock(mode);
+    setAnnotationsOpen(false);
+    setLymphOpen(false);
+    setShowPap(false);
+    if (mode !== 'ihc') { setCellMenu(false); ihc.setPicking(false); }
+    if (analysis?.open) analysis.change(false);
+    if (focus) requestAnimationFrame(() => (mode === 'ihc' ? ihcPanel : pdlPanel).current?.focus());
+  }
+
+  const pdlResults = <Pdl1Panel state={pdl1} reportHref={options?.reportHref} onSlide={focusSlide} />;
+  const ihcResults = <IhcPanel state={ihc} readOnly={following} showEmpty={ihcStain} caseRequestsHref={caseRequestsHref} onSlide={focusSlide}
+    onPickStart={() => { setAutopan(false); skin.setMode(undefined); viewerRecords.chooseTool('pan'); canvas.current?.focus({ preventScroll: true }); }} />;
 
   const navigationControls = <>
         <button className="icon-button" title="Zoom Out" aria-label="Zoom Out" disabled={!info || following} onClick={() => navigate((viewer) => viewer.magnify(0.7))}><Minus size={18} /></button>
         <output aria-label="Zoom relative to scan" className="zoom-value">{view ? `${(view.zoom * 100).toFixed(view.zoom < 0.01 ? 2 : view.zoom < 0.1 ? 1 : 0)}%` : '—'}</output>
         <button className="icon-button" title="Zoom In" aria-label="Zoom In" disabled={!info || following} onClick={() => navigate((viewer) => viewer.magnify(1.4))}><Plus size={18} /></button>
         <button className="icon-button" title="Fit to Window" aria-label="Fit to Window" disabled={!info || following} onClick={() => navigate((viewer) => viewer.fitToWindow())}><LocateFixed size={17} /></button>
+        {mpp && view && <select className="wsi-magnification" aria-label="Calibrated Magnification" title="Calibrated Magnification"
+          value="" disabled={following} onChange={(event) => {
+            const value = Number(event.target.value);
+            if (value > 0) navigate((viewer) => viewer.zoomTo(value * mpp / referenceMagnification));
+          }}>
+          <option value="" disabled>{Number((view.zoom * referenceMagnification / mpp).toPrecision(2))}×</option>
+          {[2, 5, 10, 20, 40, 80].filter((value) => value * mpp / referenceMagnification <= 4)
+            .map((value) => <option value={value} key={value}>{value}×</option>)}
+        </select>}
         <button className="icon-button" title="Minimap" aria-label="Minimap" aria-keyshortcuts={settings?.shortcuts ? 'M' : undefined} aria-pressed={minimap} disabled={!overview && !options} onClick={toggleMinimap}><Map size={17} /></button>
         {options && <>
           <button type="button" className="icon-button" title="Scan Label" aria-label="Scan Label" aria-pressed={settings?.show_label}
@@ -582,8 +619,10 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
             if (analysis?.open) analysis.change(false);
             setLymphOpen(!lymphOpen || !!analysis?.open);
           }}><Tally5 size={16} aria-hidden="true" /> Lymph Node Count</button>}
-        {showPdlJump && <button type="button" className="button secondary" onClick={() => pdlPanel.current?.focus()}><Layers size={15} /> PD-L1 Results</button>}
-        {showIhcJump && <button type="button" className="button secondary" onClick={() => ihcPanel.current?.focus()}><Layers size={15} /> IHC Results</button>}
+        {showPdlJump && <button type="button" className="button secondary" aria-expanded={options ? dockedResult === 'pdl1' : undefined}
+          onClick={() => openResult('pdl1')}><Layers size={15} /> PD-L1 Results</button>}
+        {showIhcJump && <button type="button" className="button secondary" aria-expanded={options ? dockedResult === 'ihc' : undefined}
+          onClick={() => openResult('ihc')}><Layers size={15} /> IHC Results</button>}
         {canOpenPap && <button type="button" className="button secondary" aria-expanded={showPapReview}
           onClick={() => setShowPapReview((open) => !open)}>Pap Review</button>}
         {canOpenPap && <button type="button" className="button secondary" aria-expanded={showPap}
@@ -596,12 +635,25 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       </div>
     </div>
     {!options && reviewTools}
-    <div className={!presenting && canOpenPap && showPap ? 'analysis-workspace pap-workspace' : 'analysis-workspace'}>
+    <div className={!presenting && canOpenPap && showPap ? 'analysis-workspace pap-workspace' : 'analysis-workspace'}
+      data-results-dock={Boolean(dockedResult)}>
     <div ref={fit.surface} className="image-surface" data-review-dock={Boolean(options && reviewTools)}
       style={options && fit.height ? { height: fit.height } : undefined}>
       <canvas className={presenting || (viewerRecords.tool === 'pan' && !ihc.picking && !skin.mode) ? 'wsi-canvas' : 'wsi-canvas drawing-tool'} ref={canvas} tabIndex={0} aria-label="WSI Canvas"
+        onContextMenu={(event) => {
+          if (!options || presenting || following || !ihc.canReview || !ihc.enabled || viewerRecords.tool !== 'pan' || skin.mode) return;
+          const box = event.currentTarget.getBoundingClientRect();
+          const x = event.clientX - box.left;
+          const y = event.clientY - box.top;
+          if (!view || !ihc.pickAt(view.x + x / view.zoom, view.y + y / view.zoom)) return;
+          event.preventDefault();
+          setAutopan(false);
+          openResult('ihc', false);
+          setCellMenu(true);
+        }}
         onPointerDown={(event) => {
           if (following || event.button !== 0 || !info || drag.current || drawing.current) return;
+          setCellMenu(false);
           setAutopan(false);
           setAutopanNotice('');
           if (report.current?.captureLandmark) {
@@ -715,8 +767,8 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
           event.preventDefault();
         }}
       />
-      {!papStain && <Pdl1Overlay view={view} result={pdl1.result} cells={pdl1.cells} />}
-      {!papStain && <IhcOverlay state={ihc} view={view} />}
+      {!papStain && <Pdl1Overlay view={view} result={pdl1.result} cells={pdl1.cells} mpp={mpp} />}
+      {!papStain && <IhcOverlay state={ihc} view={view} mpp={mpp} />}
       {canOpenSlideReview && !papStain && showSkin && <Suspense fallback={null}><SkinOverlay state={skin} view={view} /></Suspense>}
       {canOpenSlideReview && !papStain && showProstate && <ProstateOverlay state={prostate} view={view} />}
       {showPap && view && pap.selected && <svg className="annotation-overlay pap-candidate-overlay" aria-label="Selected Pap Candidate"
@@ -759,7 +811,19 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       </div>}
       {canReview && <DrawingControls state={viewerRecords} info={info} preview={drawingPreview} shortcuts={settings?.shortcuts !== false} />}
       {options && reviewTools && <div className="viewer-tool-dock">{reviewTools}</div>}
+      {cellMenu && dockedResult === 'ihc' && !following && view && ihc.picked && <IhcCellMenu state={ihc}
+        x={Math.max(4, Math.min((ihc.picked[0] - view.x) * view.zoom, view.width * view.zoom - 208))}
+        y={Math.max(4, Math.min((ihc.picked[1] - view.y) * view.zoom, view.height * view.zoom - 272))}
+        close={() => { setCellMenu(false); focusSlide(); }} />}
     </div>
+    {dockedResult && <div className="viewer-results-dock clinical-panel-focus"
+      ref={dockedResult === 'ihc' ? ihcPanel : pdlPanel} tabIndex={-1} style={{ maxHeight: fit.height }}>
+      <div className="viewer-results-heading"><strong>Detection Results</strong>
+        <button type="button" className="icon-button" aria-label="Close Detection Results" onClick={() => {
+          setResultDock(null); setCellMenu(false); ihc.setPicking(false); focusSlide();
+        }}><X size={16} /></button></div>
+      {dockedResult === 'ihc' ? ihcResults : pdlResults}
+    </div>}
     {canOpenPap && showPap && <div className="clinical-panel-focus pap-gallery-dock" ref={papGalleryPanel} tabIndex={-1}>
       <Suspense fallback={<p role="status">Loading Pap Gallery…</p>}>
         <PapGallery state={pap} following={following} onReview={() => openPapPanel('review')} />
@@ -772,7 +836,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     </div>}
     {analysis?.open && <ViewerAnalysis caseEndpoint={analysis.caseEndpoint} scanId={scan.id} label={label} stain={stain}
       format={scan.format} collectionOrigin={analysis.collectionOrigin}
-      onClose={closeAnalysis} onResult={(id) => { pdl1.openSnapshot(id); closeAnalysis(); }} />}
+      onClose={closeAnalysis} onResult={(id) => { pdl1.openSnapshot(id); closeAnalysis(); openResult('pdl1', false); }} />}
     </div>
     <footer className="image-footer">
       <span>{info ? `${info.dimensions[0].toLocaleString()} × ${info.dimensions[1].toLocaleString()} px` : scan.format}</span>
@@ -810,13 +874,10 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     {viewportSnapshot && <ViewportExport snapshot={viewportSnapshot} endpoint={endpoint} onClose={() => setViewportSnapshot(undefined)} />}
     {!options && recordsPanel}
     {!options && canCountLymph && <LymphCounts endpoint={endpoint} scanId={scan.id} />}
-    {info && !compareMode && !readOnlyEndpoint && !papStain && <div className="clinical-panel-focus" ref={pdlPanel} tabIndex={-1}>
-      <Pdl1Panel state={pdl1} reportHref={options?.reportHref} onSlide={focusSlide} />
-    </div>}
-    {info && !compareMode && !readOnlyEndpoint && !papStain && <div className="clinical-panel-focus" ref={ihcPanel} tabIndex={-1}>
-      <IhcPanel state={ihc} readOnly={following} showEmpty={ihcStain} caseRequestsHref={caseRequestsHref} onSlide={focusSlide}
-        onPickStart={() => { setAutopan(false); skin.setMode(undefined); viewerRecords.chooseTool('pan'); }} />
-    </div>}
+    {!options && info && !compareMode && !readOnlyEndpoint && !papStain && <>
+      <div className="clinical-panel-focus" ref={pdlPanel} tabIndex={-1}>{pdlResults}</div>
+      <div className="clinical-panel-focus" ref={ihcPanel} tabIndex={-1}>{ihcResults}</div>
+    </>}
   </section>;
 }
 
