@@ -58,13 +58,17 @@ class TissueUpdate(ClinicalInput):
     anchors: Annotated[dict[UUID, AlignmentPosition], Field(min_length=2, max_length=6)] | None = None
 
 
+def storage_prefix(case_id, user):
+    case_fingerprint = (case_id.hex if isinstance(case_id, UUID)
+                        else hashlib.sha256(f"files:{case_id}".encode()).hexdigest()[:32])
+    return f"tissue:{case_fingerprint}:{user.id.hex}:"
+
+
 def storage_key(case_id, user, scan_ids):
     if len(set(scan_ids)) != len(scan_ids):
         raise HTTPException(422, "Choose different scans for tissue registration.")
     digest = hashlib.sha256(",".join(sorted(map(str, scan_ids))).encode()).hexdigest()[:20]
-    case_fingerprint = (case_id.hex if isinstance(case_id, UUID)
-                        else hashlib.sha256(f"files:{case_id}".encode()).hexdigest()[:32])
-    return f"tissue:{case_fingerprint}:{user.id.hex}:{digest}"
+    return storage_prefix(case_id, user) + digest
 
 
 async def file_scan_bindings(session, user, case_number, scan_ids, *, lock):
@@ -118,6 +122,30 @@ async def saved_catalog(session, key, signatures):
             "active": active, "sync": bool(active and entry.get("sync"))}
 
 
+async def inherited_catalog(session, prefix, signatures):
+    # The selected scan fingerprints must still match the broader registration.
+    records = await session.scalars(select(ApplicationSetting.value).where(ApplicationSetting.key.startswith(prefix)))
+    candidates = []
+    for entry in records:
+        saved = entry.get("signatures", {})
+        active = entry.get("active")
+        profile = entry.get("profiles", {}).get(active)
+        if profile and len(saved) > len(signatures) and all(saved.get(scan) == signature for scan, signature in signatures.items()):
+            candidates.append((len(saved), profile["saved_at"], active, profile, bool(entry.get("sync"))))
+    if not candidates:
+        return None
+    smallest = min(candidate[0] for candidate in candidates)
+    _, _, active, profile, sync = max((candidate for candidate in candidates if candidate[0] == smallest),
+                                      key=lambda candidate: candidate[1])
+    if "anchors" in profile:
+        selected_profile = {**profile, "anchors": {scan: profile["anchors"][scan] for scan in signatures}}
+    else:
+        # The two fitting landmarks define the same relative transforms from any selected reference.
+        reference = profile["reference"] if profile["reference"] in signatures else min(signatures)
+        selected_profile = {**profile, "reference": reference, "points": {scan: profile["points"][scan] for scan in signatures}}
+    return {"version": 0, "profiles": {active: selected_profile}, "active": active, "sync": sync, "inherited": True}
+
+
 def fingerprints(bindings):
     return {str(scan): source_id(*binding) for scan, binding in bindings.items()}
 
@@ -129,7 +157,13 @@ async def get_registrations(scope: Scope, case_key: CaseKey, user: CurrentUser, 
     case_id = case_scope(scope, case_key)
     key = storage_key(case_id, user, scan_ids)
     bindings = await scan_bindings(session, user, case_id, scan_ids)
-    return await saved_catalog(session, key, fingerprints(bindings))
+    signatures = fingerprints(bindings)
+    catalog = await saved_catalog(session, key, signatures)
+    if catalog["version"] == 0:
+        inherited = await inherited_catalog(session, storage_prefix(case_id, user), signatures)
+        if inherited:
+            return inherited
+    return catalog
 
 
 @router.put(catalog_path)

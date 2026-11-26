@@ -310,12 +310,56 @@ try {
   const catalog = await (await page.request.get(endpoint, { params: fileQuery })).json();
   assert.deepEqual({ active: catalog.active, profiles: catalog.profiles, version: catalog.version },
     { active: null, profiles: {}, version: 0 });
+  await compare('QA-3 · SVS').uncheck();
+  await page.getByText(/Session Alignment.*Sync On/).waitFor();
+  await keepCameras(beforeReload.slice(0, 3));
+  await compare('QA-3 · SVS').check();
+  await page.getByText(/Session Alignment.*Sync On/).waitFor();
+  await keepCameras(beforeReload);
+
   const registration = page.getByText('Tissue Registration', { exact: true });
   await registration.click();
   const tissue = page.getByLabel('Tissue', { exact: true });
   assert.equal(await tissue.count(), 0);
   await button('Go to Sync Origin').waitFor();
   await registration.click();
+
+  await sync.click();
+  await page.getByText(/Session Alignment.*Sync Off/).waitFor();
+  await registration.click();
+  await button('Use Current Positions as Alignment Points').click();
+  await page.getByText(/Manual Alignment Points.*Sync Off/).waitFor();
+  await registration.click();
+  await sync.click();
+  await page.getByText(/Manual Alignment Points.*Sync On/).waitFor();
+  const savedFour = await readFour();
+  await compare('QA-0 · SVS').uncheck();
+  await page.getByText(/Manual Alignment Points.*Sync On/).waitFor();
+  await keepCameras(savedFour.slice(1));
+  const subsetQuery = new URLSearchParams(files.slice(1).map((file) => ['scan_ids', file.id]));
+  const inherited = await (await page.request.get(endpoint, { params: subsetQuery })).json();
+  assert.equal(inherited.inherited, true);
+  assert.deepEqual(Object.keys(inherited.profiles[inherited.active].anchors).sort(), files.slice(1).map((file) => file.id).sort());
+  await sync.click();
+  await page.getByText(/Manual Alignment Points.*Sync Off/).waitFor();
+  await sync.click();
+  await page.getByText(/Manual Alignment Points.*Sync On/).waitFor();
+  await keepCameras(savedFour.slice(1));
+  assert.equal((await (await page.request.get(endpoint, { params: fileQuery })).json()).sync, true);
+
+  // A subset missing the original landmark reference remains usable.
+  const full = await (await page.request.get(endpoint, { params: fileQuery })).json();
+  const update = await page.request.put(endpoint, { data: {
+    scan_ids: files.map((file) => file.id), version: full.version, active: full.active, sync: true,
+    landmarks: { reference: files[0].id, points: Object.fromEntries(files.map((file, index) =>
+      [file.id, [[11000 + index * 100, 13000], [20000 + index * 100, 14000], [22000 + index * 100, 20000]]])) },
+  } });
+  assert.equal(update.status(), 200, await update.text());
+  const subsetLandmarks = await (await page.request.get(endpoint, { params: subsetQuery })).json();
+  const rebased = subsetLandmarks.profiles[subsetLandmarks.active];
+  assert.equal(subsetLandmarks.inherited, true);
+  assert.ok(files.slice(1).some((file) => file.id === rebased.reference));
+  assert.deepEqual(Object.keys(rebased.points).sort(), files.slice(1).map((file) => file.id).sort());
 
   const otherCase = 'QA-FILE-TISSUE-OTHER';
   for (const [index, file] of files.entries()) {
@@ -334,7 +378,7 @@ try {
   assert.equal(await button('Go to Tissue').count(), 0);
   assert.equal(await button('Go to Sync Origin').count(), 0);
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ result: 'PASS', maximumPanes: 6, normalized, reversed, anchored, manualAlignmentRestore: true, intakeAlignment, separateFileCases: true, sixPaneSync,
+  console.log(JSON.stringify({ result: 'PASS', maximumPanes: 6, normalized, reversed, anchored, manualAlignmentRestore: true, intakeAlignment, separateFileCases: true, fourToThree: true, sixPaneSync,
     paneRetry: true, focusedPane: true, otherPanesKept: true, paneAnnotationsRestored: true }));
 } finally {
   await browser.close();

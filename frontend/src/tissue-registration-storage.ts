@@ -5,7 +5,7 @@ import type { Camera, Point } from './viewer-tools';
 export type LandmarkRegistration = { reference: string; points: Record<string, Point[]> };
 export type TissueRegistration = LandmarkRegistration | { anchors: Record<string, Camera> };
 type TissueProfile = TissueRegistration & { saved_at: string };
-type TissueCatalog = { version: number; profiles: Record<string, TissueProfile>; active: string | null; sync: boolean };
+type TissueCatalog = { version: number; profiles: Record<string, TissueProfile>; active: string | null; sync: boolean; inherited?: boolean };
 
 export function useTissueRegistrationStorage(endpoint: string | undefined, selected: string[]) {
   const params = new URLSearchParams([...selected].sort().map((id) => ['scan_ids', id]));
@@ -56,12 +56,14 @@ export function useTissueRegistrationStorage(endpoint: string | undefined, selec
 type ComparisonPosition = {
   profile: string | null;
   sync: boolean;
+  savedAt?: number;
   positions: Record<string, Camera>;
   anchors?: Record<string, Camera>;
 };
 
 export function useComparisonPosition(account: string, scope: string, selected: string[]) {
-  const key = `comparison-position:${account}:${scope}:${[...selected].sort().join(',')}`;
+  const prefix = `comparison-position:${account}:${scope}:`;
+  const key = prefix + [...selected].sort().join(',');
   const pending = useRef<{ key: string; value: ComparisonPosition }>(undefined);
   const timer = useRef<number>(undefined);
 
@@ -86,13 +88,24 @@ export function useComparisonPosition(account: string, scope: string, selected: 
   return {
     read(profile: string | null) {
       try {
-        const saved = JSON.parse(sessionStorage.getItem(key) ?? 'null') as ComparisonPosition | null;
-        if (saved?.profile === profile && selected.every((id) => saved.positions[id])) return saved;
+        const entries = Object.keys(sessionStorage).filter((entry) => entry.startsWith(prefix));
+        const matches = entries.flatMap((entry) => {
+          const saved = JSON.parse(sessionStorage.getItem(entry) ?? 'null') as ComparisonPosition | null;
+          return saved?.profile === profile && selected.every((id) => saved.positions[id])
+            ? [{ entry, saved }] : [];
+        });
+        matches.sort((a, b) => Number(Boolean(b.saved.anchors)) - Number(Boolean(a.saved.anchors))
+          || Number(b.entry === key) - Number(a.entry === key)
+          || Object.keys(a.saved.positions).length - Object.keys(b.saved.positions).length
+          || (b.saved.savedAt ?? 0) - (a.saved.savedAt ?? 0));
+        const match = matches[0]?.saved;
+        if (match) return { ...match, positions: Object.fromEntries(selected.map((id) => [id, match.positions[id]])),
+          anchors: match.anchors && Object.fromEntries(selected.map((id) => [id, match.anchors![id]])) };
       } catch { /* A missing or invalid browser entry starts a new comparison. */ }
     },
     remember(value: ComparisonPosition) {
       if (pending.current && pending.current.key !== key) flush();
-      pending.current = { key, value };
+      pending.current = { key, value: { ...value, savedAt: Date.now() } };
       window.clearTimeout(timer.current);
       timer.current = window.setTimeout(flush, 180);
     },

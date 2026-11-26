@@ -49,6 +49,7 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
   const savedRegistration = savedTissue ? storage.catalog?.profiles[savedTissue] : undefined;
   const profileKey = savedRegistration ? `${savedTissue}:${savedRegistration.saved_at}` : null;
   const movedPanes = useRef(new Set<string>());
+  const rememberFrames = useRef(false);
   const storageLoading = Boolean(tissueEndpoint && !storage.catalog && !storage.error);
   const frames = useRef<Frames>({});
   const metadata = useRef<Record<string, SlideInfo>>({});
@@ -157,10 +158,11 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
 
   async function changeSync() {
     const next = !synchronized;
-    if (tissueEndpoint && (registered || anchors) && savedTissue && !await storage.save(savedTissue, next)) return;
+    if (tissueEndpoint && (registered || anchors) && savedTissue && !storage.catalog?.inherited && !await storage.save(savedTissue, next)) return;
     const alignment = anchors ?? (next && !registered && movedPanes.current.size > 1 ? currentPositions() : undefined);
     setAnchors(alignment);
     setSynchronized(next);
+    rememberFrames.current = next;
     movedPanes.current.clear();
     rememberPosition(next, alignment);
     if (next && frames.current[active]) publish(active, frames.current[active], registered, false, alignment);
@@ -169,7 +171,9 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
 
   async function clearRegistration() {
     if (picking && savedRegistration) {
-      apply(savedRegistration, storage.catalog?.sync ?? false, false);
+      const saved = comparison.read(profileKey);
+      const sync = storage.catalog?.inherited && saved ? saved.sync : storage.catalog?.sync ?? false;
+      apply(savedRegistration, sync, false);
       return;
     }
     if (!picking && tissueEndpoint && !await storage.save(null, false)) return;
@@ -191,6 +195,7 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
   }
 
   function goToTissue() {
+    rememberFrames.current = synchronized;
     if (anchors) { setCommands({ ...anchors }); return; }
     const camera = tissueCamera(active, points);
     if (!camera) return;
@@ -211,6 +216,7 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
     clearWorkingRegistration();
     setFocused(false);
     restoredScope.current = undefined;
+    rememberFrames.current = false;
     movedPanes.current.clear();
   }, [selectionKey]);
 
@@ -219,7 +225,8 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
     restoredScope.current = selectionKey;
     const saved = comparison.read(profileKey);
     if (savedRegistration) {
-      apply(savedRegistration, storage.catalog?.sync ?? false,
+      const sync = storage.catalog?.inherited && saved ? saved.sync : storage.catalog?.sync ?? false;
+      apply(savedRegistration, sync,
         !saved && !selected.every((id) => entryCameras.current.has(id)));
     } else if (saved) {
       setAnchors(saved.anchors);
@@ -351,11 +358,14 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
               if (!frames.current[id]) setLoaded((current) => [...current, id]);
               frames.current[id] = frame;
               onFrame(id, frame);
-              if (synchronized && !focused && selected.every((scanId) => frames.current[scanId])) rememberPosition(true);
+              if (rememberFrames.current && synchronized && !focused && selected.every((scanId) => frames.current[scanId])) rememberPosition(true);
             },
             onNavigate: (frame) => {
               onActive(id);
-              if (synchronized && !focused) publish(id, frame);
+              if (synchronized && !focused) {
+                rememberFrames.current = true;
+                publish(id, frame);
+              }
               else if (!focused && !picking) movedPanes.current.add(id);
             },
           }} />
