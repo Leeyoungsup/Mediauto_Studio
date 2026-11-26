@@ -7,8 +7,7 @@ export type TissueRegistration = LandmarkRegistration | { anchors: Record<string
 type TissueProfile = TissueRegistration & { saved_at: string };
 type TissueCatalog = { version: number; profiles: Record<string, TissueProfile>; active: string | null; sync: boolean };
 
-export function useTissueRegistrationStorage(caseId: string | undefined, selected: string[]) {
-  const endpoint = caseId ? `/api/viewer/cases/${caseId}/tissue-registrations` : undefined;
+export function useTissueRegistrationStorage(endpoint: string | undefined, selected: string[]) {
   const params = new URLSearchParams([...selected].sort().map((id) => ['scan_ids', id]));
   const key = endpoint && `${endpoint}?${params}`;
   const currentKey = useRef(key);

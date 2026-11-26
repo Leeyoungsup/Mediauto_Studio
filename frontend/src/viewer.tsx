@@ -261,7 +261,8 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, canReques
         </div>)}</div>
       </aside>
       {comparing ? <MultiView slides={available} selected={selected} active={activeComparison} cameras={comparisonCameras.current}
-        caseId={item.recordId}
+        tissueEndpoint={item.recordId ? `/api/viewer/cases/${item.recordId}/tissue-registrations`
+          : item.source === 'files' ? `/api/viewer/file-cases/${encodeURIComponent(item.id)}/tissue-registrations` : undefined}
         roiCaseId={canRequest ? item.recordId : undefined}
         onActive={setCompareActive} onFrame={(id, camera) => { comparisonCameras.current[id] = camera; }}
         onClose={() => closeComparison()} onSingle={closeComparison} />

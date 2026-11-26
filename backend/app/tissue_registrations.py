@@ -1,27 +1,40 @@
 """Personal tissue registration profiles for a verified set of case scans."""
 
+import asyncio
 import hashlib
 import math
 from datetime import datetime, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
 from pydantic import Field, StringConstraints
 from sqlalchemy import select
 
 from app.auth import CurrentUser, Session
 from app.clinical import ClinicalInput, case_visibility
-from app.intake import save_version, source_id
+from app.intake import DATA_ROOT, require_intake, save_version, scan_files, slide_entries, source_id
 from app.models import ApplicationSetting, Case, Slide, SlideScan, Specimen
 from app.scan_quality import BLOCKED_QC
 from app.viewer_records import Coordinate, check_point
 from app.wsi import PRIVATE, scan_response, verified_scan_path
 
-router = APIRouter(prefix="/api/viewer/cases/{case_id}/tissue-registrations", tags=["Tissue registration"])
+router = APIRouter(prefix="/api/viewer", tags=["Tissue registration"])
 
 Tissue = Annotated[str, StringConstraints(pattern=r"^[A-Z]$")]
 Scans = Annotated[list[UUID], Field(min_length=2, max_length=6)]
+Scope = Literal["cases", "file-cases"]
+CaseKey = Annotated[str, Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")]
+catalog_path = "/{scope}/{case_key}/tissue-registrations"
+
+
+def case_scope(scope: Scope, case_key: str) -> UUID | str:
+    if scope == "file-cases":
+        return case_key
+    try:
+        return UUID(case_key)
+    except ValueError:
+        raise HTTPException(422, "Choose a valid case ID.") from None
 
 
 class TissueLandmarks(ClinicalInput):
@@ -49,10 +62,39 @@ def storage_key(case_id, user, scan_ids):
     if len(set(scan_ids)) != len(scan_ids):
         raise HTTPException(422, "Choose different scans for tissue registration.")
     digest = hashlib.sha256(",".join(sorted(map(str, scan_ids))).encode()).hexdigest()[:20]
-    return f"tissue:{case_id.hex}:{user.id.hex}:{digest}"
+    case_fingerprint = (case_id.hex if isinstance(case_id, UUID)
+                        else hashlib.sha256(f"files:{case_id}".encode()).hexdigest()[:32])
+    return f"tissue:{case_fingerprint}:{user.id.hex}:{digest}"
+
+
+async def file_scan_bindings(session, user, case_number, scan_ids, *, lock):
+    require_intake(user)
+    sources = await asyncio.to_thread(scan_files, DATA_ROOT)
+    selected_ids = set(map(str, scan_ids))
+    selected = [source for source in sources if source.id in selected_ids]
+    entries = await slide_entries(session, selected, lock=lock)
+    if len(entries) != len(scan_ids) or any(entry["fields"]["case_id"] != case_number for entry in entries.values()):
+        raise HTTPException(404, "A registration scan is unavailable in this case.")
+
+    def verify():
+        bindings = {}
+        for source in selected:
+            try:
+                stat = (DATA_ROOT / source.filename).stat()
+            except OSError:
+                raise HTTPException(404, "A registration scan is unavailable in this case.") from None
+            binding = (source.filename, stat.st_size, stat.st_mtime_ns)
+            if source_id(*binding) != source.id:
+                raise HTTPException(409, "A registration scan changed. Reload the comparison.")
+            bindings[UUID(source.id)] = binding
+        return bindings
+
+    return await asyncio.to_thread(verify)
 
 
 async def scan_bindings(session, user, case_id, scan_ids, *, lock=False):
+    if isinstance(case_id, str):
+        return await file_scan_bindings(session, user, case_id, scan_ids, lock=lock)
     query = (select(SlideScan.id, SlideScan.storage_key, SlideScan.size_bytes, SlideScan.modified_ns)
              .join(Slide, Slide.id == SlideScan.slide_id)
              .join(Specimen, Specimen.id == Slide.specimen_id)
@@ -80,19 +122,21 @@ def fingerprints(bindings):
     return {str(scan): source_id(*binding) for scan, binding in bindings.items()}
 
 
-@router.get("")
-async def get_registrations(case_id: UUID, user: CurrentUser, session: Session, response: Response,
+@router.get(catalog_path)
+async def get_registrations(scope: Scope, case_key: CaseKey, user: CurrentUser, session: Session, response: Response,
                             scan_ids: Annotated[list[UUID], Query(min_length=2, max_length=6)]):
     response.headers.update(PRIVATE)
+    case_id = case_scope(scope, case_key)
     key = storage_key(case_id, user, scan_ids)
     bindings = await scan_bindings(session, user, case_id, scan_ids)
     return await saved_catalog(session, key, fingerprints(bindings))
 
 
-@router.put("")
-async def save_registration(case_id: UUID, data: TissueUpdate, request: Request, response: Response,
+@router.put(catalog_path)
+async def save_registration(scope: Scope, case_key: CaseKey, data: TissueUpdate, request: Request, response: Response,
                             user: CurrentUser, session: Session):
     response.headers.update(PRIVATE)
+    case_id = case_scope(scope, case_key)
     key = storage_key(case_id, user, data.scan_ids)
     if data.anchors and data.landmarks:
         raise HTTPException(422, "Choose one tissue alignment method.")
