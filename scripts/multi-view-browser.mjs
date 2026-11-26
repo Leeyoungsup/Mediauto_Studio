@@ -155,8 +155,12 @@ try {
   await drag(2, -25, 22);
   const anchors = [await frame(1), await frame(2)];
   await page.getByText('Tissue Registration', { exact: true }).click();
-  await page.getByText(/Landmark 1.*Waiting for Pane 1, Pane 2/).waitFor();
+  await page.getByText(/Pick the same feature in each pane/).waitFor();
+  assert.equal(await page.getByText(/Landmark 1.*Waiting/).count(), 0);
+  assert.ok(await button('Undo Landmark Round').isDisabled());
   assert.ok(await button('Use Tissue Registration').isDisabled());
+  await button('Pick Tissue Landmarks').click();
+  await page.getByText(/Landmark 1.*Waiting for Pane 1, Pane 2/).waitFor();
   await button('Cancel Landmark Picking').click();
   await button('Use Current Positions as Alignment Points').and(page.locator(':enabled')).waitFor();
   await button('Use Current Positions as Alignment Points').click();
@@ -381,7 +385,11 @@ try {
   assert.equal(await tissue.count(), 0);
   assert.equal(await button('Go to Tissue').count(), 0);
   assert.equal(await button('Go to Sync Origin').count(), 0);
+  await page.getByText(/Pick the same feature in each pane/).waitFor();
+  assert.equal(await page.getByText(/Landmark 1.*Waiting/).count(), 0);
+  await button('Pick Tissue Landmarks').click();
   await page.getByText(/Landmark 1.*Waiting for Pane 1, Pane 2, Pane 3, Pane 4/).waitFor();
+  await button('Cancel Landmark Picking').click();
   await page.getByText('Tissue Registration', { exact: true }).click();
   await sync.and(page.locator(':enabled')).waitFor();
   assert.deepEqual(errors, []);

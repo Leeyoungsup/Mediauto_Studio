@@ -38,8 +38,6 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
   const [anchors, setAnchors] = useState<Record<string, Camera>>();
   const [commands, setCommands] = useState<Record<string, Camera>>({});
   const [picking, setPicking] = useState(false);
-  const [registrationOpen, setRegistrationOpen] = useState(false);
-  const pendingAutoPick = useRef(false);
   const [points, setPoints] = useState<Record<string, Point[]>>({});
   const [registered, setRegistered] = useState<Record<string, Transform>>();
   const [reference, setReference] = useState<string>();
@@ -72,6 +70,7 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
   const alignmentLabel = registered ? 'Tissue Landmark Registration'
     : savedRegistration && anchors ? 'Manual Alignment Points' : anchors ? 'Session Alignment' : 'Normalized Image Coordinates';
   const allReady = selected.length >= 2 && selected.every((id) => loaded.includes(id));
+  const showLandmarkActions = picking || (!savedRegistration && !anchors && !registered);
 
   function publish(driver: string, frame: CameraFrame, transforms = registered, retainDriver = false, alignment = anchors) {
     const commands: Record<string, Camera> = {};
@@ -245,14 +244,6 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
     if (saved) setCommands(saved.positions);
   }, [allReady, picking, selectionKey, storageLoading, storage.catalog]);
 
-  useEffect(() => {
-    if (!registrationOpen || !pendingAutoPick.current || !allReady || storageLoading) return;
-    pendingAutoPick.current = false;
-    if (picking || savedRegistration || anchors || registered || synchronized || focused || storage.error) return;
-    const previous = comparison.read(profileKey);
-    if (!previous?.anchors && !previous?.sync) beginLandmarkPicking();
-  }, [registrationOpen, allReady, storageLoading, picking, savedRegistration, anchors, registered, synchronized, focused, storage.error]);
-
   const grid = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const element = grid.current;
@@ -299,27 +290,22 @@ export function MultiView({ slides, selected, active, cameras, account, tissueEn
         <button className="icon-button" aria-label="Open Active Scan in Single View" title="Open Active Scan in Single View"
           disabled={!loaded.includes(active)} onClick={() => onSingle(active, frames.current[active])}><PanelTop size={16} aria-hidden="true" /></button>
         <button className="icon-button" aria-label="Close Comparison" title="Close Comparison" onClick={onClose}><Unlink2 size={16} aria-hidden="true" /></button>
-        <details className="tissue-registration" onToggle={(event) => {
-          const open = event.currentTarget.open;
-          pendingAutoPick.current = open;
-          setRegistrationOpen(open);
-          if (!open && picking && !Object.values(points).some((landmarks) => landmarks.length)) setPicking(false);
-        }}>
+        <details className="tissue-registration">
           <summary>Tissue Registration</summary>
           <div className="registration-popover">
-            {picking && <p className="muted">Pick the same feature in each pane. Use the first two landmarks to fit the alignment and another landmark to check it.</p>}
+            {showLandmarkActions && <p className="muted">Pick the same feature in each pane. Use the first two landmarks to fit the alignment and another landmark to check it.</p>}
             <div className="actions">
               <button className="button secondary" disabled={!allReady || synchronized || focused || picking || !!registered || storage.savePending || !!tissueEndpoint && !storage.catalog}
                 onClick={() => void saveAlignmentPositions()}>
                 {anchors && savedRegistration ? 'Update Alignment Positions' : 'Use Current Positions as Alignment Points'}</button>
               <button className="button secondary" disabled={!allReady || synchronized || focused || picking || storage.savePending}
                 onClick={beginLandmarkPicking}>Pick Tissue Landmarks</button>
-              {picking && <>
-                <button className="button secondary" disabled={!Object.values(points).some((list) => list.length)} onClick={() => {
+              {showLandmarkActions && <>
+                <button className="button secondary" disabled={!picking || !Object.values(points).some((list) => list.length)} onClick={() => {
                   const last = Math.max(...Object.values(points).map((list) => list.length));
                   setPoints(Object.fromEntries(selected.map((id) => [id, (points[id] ?? []).slice(0, last - 1)])));
                 }}>Undo Landmark Round</button>
-                <button className="button primary" disabled={!validated || storage.savePending || !!tissueEndpoint && !storage.catalog}
+                <button className="button primary" disabled={!picking || !validated || storage.savePending || !!tissueEndpoint && !storage.catalog}
                   onClick={() => void useRegistration()}>{savedRegistration ? 'Update Tissue Registration' : 'Use Tissue Registration'}</button>
               </>}
               {(picking || registered || anchors && savedRegistration) && <button className="button secondary" disabled={storage.savePending}

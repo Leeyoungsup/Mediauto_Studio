@@ -181,7 +181,7 @@ try {
     for (const index of [1, 2]) await button(pane(index), 'Fit to Window').click();
   }
   await page.getByText('Tissue Registration', { exact: true }).click();
-  if (await page.getByText(/Manual Alignment Points/).count()) await button(page, 'Pick Tissue Landmarks').click();
+  await button(page, 'Pick Tissue Landmarks').click();
   await page.getByText(/Waiting for Pane 1, Pane 2/).waitFor();
 
   async function landmark(index, xy) {
