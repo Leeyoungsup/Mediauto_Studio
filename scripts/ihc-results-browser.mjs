@@ -113,51 +113,45 @@ try {
   const archive = await read(page.request.get(densePath));
   const source = archive.results[0];
   const [cx, cy] = source.dimensions.map((dimension) => Math.floor(dimension / 2));
-  const bx = Math.floor(cx / 2048);
-  const by = Math.floor(cy / 2048);
   const overlayURL = densePath + '/' + source.id + '/overlay';
-  const requests = [];
-  let finishDetail;
-  const detailGate = new Promise((resolve) => { finishDetail = resolve; });
+  let requests = 0;
+  const packed = Buffer.alloc(6200 * 7 * 8);
+  for (let index = 0; index < 6200; index++) {
+    const x = index === 6199 ? cx + 1500 : cx;
+    [x, cy, 1, index, .9, 1, 0].forEach((value, column) => packed.writeDoubleLE(value, (index * 7 + column) * 8));
+  }
   await page.route('**' + densePath, (route) => route.fulfill({
     json: { ...archive, results: [{ ...source, point_count: 6200 }] },
   }));
-  await page.route('**' + overlayURL + '*', async (route) => {
-    const query = new URL(route.request().url()).searchParams;
-    requests.push(query.toString());
-    if (!query.has('bx')) return route.fulfill({
-      json: { step: 512, bins: [[Math.floor(cx / 512) * 512, Math.floor(cy / 512) * 512, 1, 6200]] },
-    });
-    if (Number(query.get('bx')) !== bx || Number(query.get('by')) !== by) return route.fulfill({
-      json: { points: [], next_offset: null },
-    });
-    const offset = Number(query.get('offset'));
-    if (offset) await detailGate;
-    const points = Array.from({ length: offset ? 1200 : 5000 }, (_, index) => [cx, cy, 1, offset + index, .9, 1, false]);
-    return route.fulfill({ json: { points, next_offset: offset ? null : 5000 } });
+  await page.route('**' + overlayURL + '*', (route) => {
+    requests++;
+    return route.fulfill({ body: packed, contentType: 'application/octet-stream', headers: { 'X-Cell-Stride': '7' } });
   });
   await page.goto('/#viewer/' + caseId + '/' + denseScan);
   await page.reload();
   const layer = page.getByLabel('Ki-67 Cell Overlay', { exact: true });
-  await page.waitForFunction(() => document.querySelector('canvas[aria-label="Ki-67 Cell Overlay"]')?.dataset.overlayMode === 'density');
+  await page.locator('canvas[data-overlay-mode=points]').waitFor();
+  assert.equal(await layer.getAttribute('data-cell-count'), '6200');
+  const alpha = await layer.evaluate((canvas, [cx, cy]) => {
+    const panel = canvas.closest('.image-panel');
+    const zoom = Number(panel.dataset.viewZoom);
+    const ratio = devicePixelRatio;
+    const x = (x) => Math.round(canvas.width / 2 + (x - Number(panel.dataset.viewCenterX)) * zoom * ratio);
+    const y = Math.round(canvas.height / 2 + (cy - Number(panel.dataset.viewCenterY)) * zoom * ratio);
+    return [cx, cx + 750, cx + 1500].map((point) => canvas.getContext('2d').getImageData(x(point), y, 1, 1).data[3]);
+  }, [cx, cy]);
+  assert.ok(alpha[0] > 0 && alpha[2] > 0 && alpha[1] === 0, 'Only the actual cell locations should be marked');
   const zoom = page.getByLabel('Calibrated Magnification');
-  const secondPage = page.waitForRequest((request) => request.url().includes(overlayURL) && request.url().includes('offset=5000'));
   await zoom.selectOption('20');
-  await secondPage;
-  assert.equal(await layer.getAttribute('data-overlay-mode'), 'density');
-  finishDetail();
-  await page.waitForFunction(() => document.querySelector('canvas[aria-label="Ki-67 Cell Overlay"]')?.dataset.overlayMode === 'cells');
-  const before = requests.length;
+  await page.locator('canvas[data-overlay-mode=outlines]').waitFor();
   await zoom.selectOption('40');
   await page.waitForFunction(() => document.querySelector('.wsi-magnification')?.selectedOptions[0]?.textContent === '40×');
-  await page.waitForTimeout(250);
   await page.getByRole('button', { name: 'Fit to Window', exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('canvas[aria-label="Ki-67 Cell Overlay"]')?.dataset.overlayMode === 'density');
-  assert.equal(requests.length, before, 'Zooming inside cached detail and back to overview must reuse existing data');
-  assert.equal(requests.filter((query) => !query.includes('bx=')).length, 1);
+  await page.locator('canvas[data-overlay-mode=points]').waitFor();
+  assert.equal(requests, 1, 'Zooming and returning to overview must reuse the same cells');
   assert.deepEqual(errors, []);
   await evidence.finish();
-  console.log('PASS: IHC cards, editing, restore, density fallback, complete paged detail and zoom cache');
+  console.log('PASS: IHC cards, editing, restore, complete individual points, transparent space between cells and zoom cache');
 } finally {
   await browser.close();
 }

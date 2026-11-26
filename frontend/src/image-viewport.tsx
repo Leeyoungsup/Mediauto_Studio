@@ -220,8 +220,8 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   const appliedPapFocus = useRef<typeof pap.focus>(undefined);
   const skin = useSkinReview(endpoint, canOpenSlideReview && !papStain && showSkin);
   const prostate = useProstateResults(endpoint, canOpenSlideReview && !papStain && showProstate);
-  const ihc = useIhcResults(endpoint, Boolean(info) && !readOnlyEndpoint && !papStain, view, info?.mpp_x);
-  const pdl1 = usePdl1(endpoint, Boolean(info) && !readOnlyEndpoint && !papStain, view, info?.mpp_x, initialSnapshot);
+  const ihc = useIhcResults(endpoint, Boolean(info) && !readOnlyEndpoint && !papStain, view);
+  const pdl1 = usePdl1(endpoint, Boolean(info) && !readOnlyEndpoint && !papStain, initialSnapshot);
   const restoreCamera = useCallback((camera: Camera) => {
     if (!reviewFrame.current?.locked) {
       setAutopan(false);
@@ -777,9 +777,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       />
       {!papStain && overlayMode === 'pdl1' && <Pdl1Overlay view={view} state={pdl1} mpp={mpp} />}
       {!papStain && overlayMode === 'ihc' && <IhcOverlay state={ihc} view={view} mpp={mpp} />}
-      {!dockedResult && currentOverlay?.density && <span className="cell-overlay-status" role="status">
-        {currentOverlay.loading ? 'Loading individual cells…' : 'Cell density overview'}
-      </span>}
+      {!dockedResult && currentOverlay?.loading && <span className="cell-overlay-status" role="status">Loading cell markers…</span>}
       {canOpenSlideReview && !papStain && showSkin && <Suspense fallback={null}><SkinOverlay state={skin} view={view} /></Suspense>}
       {canOpenSlideReview && !papStain && showProstate && <ProstateOverlay state={prostate} view={view} />}
       {showPap && view && pap.selected && <svg className="annotation-overlay pap-candidate-overlay" aria-label="Selected Pap Candidate"

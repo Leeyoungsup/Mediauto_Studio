@@ -5,7 +5,6 @@ import { useCellOverlay } from './cell-overlay-data';
 import { api } from './session';
 import type { Viewport } from './tile-viewer';
 
-type Point = [x: number, y: number, category: number];
 type Audit = { action: string; actor: string; occurred_at: string; source: 'ims' | 'exported'; reference?: string };
 type ScoreStatus = 'archived' | 'native' | 'validated_original' | 'validated_pair' | 'input_unverified' | 'invalid_saved_score' | 'edited_score_unverified';
 type Comparison = {
@@ -28,7 +27,7 @@ const typeLabel = { original: 'Original', edited: 'User Edit' };
 const number = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
 const date = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' });
 
-export function usePdl1(endpoint: string, ready: boolean, view: Viewport | undefined, mpp: number | null | undefined, initialSnapshot?: string) {
+export function usePdl1(endpoint: string, ready: boolean, initialSnapshot?: string) {
   const [data, setData] = useState<{ results: Result[]; comparison: Comparison }>();
   const results = data?.results;
   const [selected, selectResult] = useState(initialSnapshot ?? '');
@@ -48,8 +47,7 @@ export function usePdl1(endpoint: string, ready: boolean, view: Viewport | undef
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const result = results?.find((item) => item.id === selected);
-  const overlay = useCellOverlay<Point>(result && endpoint + '/pdl1/' + result.id, undefined, result?.dimensions,
-    result?.point_count, ready && enabled, view, mpp, attempt);
+  const overlay = useCellOverlay(result && endpoint + '/pdl1/' + result.id, undefined, 3, ready && enabled, attempt);
 
   useEffect(() => {
     if (!ready) return;
@@ -77,7 +75,7 @@ export function Pdl1Overlay({ view, state, mpp }: { view?: Viewport; state: Pdl1
   const { result, overlay } = state;
   const colors = useMemo(() => Object.fromEntries(Object.entries(result?.classes ?? {})
     .map(([key, value]) => [key, value.color])), [result]);
-  return <CellOverlay view={view} colors={colors} points={overlay.points} density={overlay.density} label="PD-L1 Cell Overlay" mpp={mpp} />;
+  return <CellOverlay view={view} colors={colors} cells={overlay.cells} label="PD-L1 Cell Overlay" mpp={mpp} />;
 }
 
 const scoreStatusLabel: Record<ScoreStatus, string> = {
@@ -153,7 +151,7 @@ export function Pdl1Panel({ state, reportHref, onSlide }: { state: Pdl1State; re
         <ul className="pdl1-legend">{Object.entries(result.classes).map(([key, item]) => <li key={key}><i style={{ background: item.color }} />
           <span>{item.label}{key in result.counts && ` · ${number.format(result.counts[key])}`}</span>
         </li>)}</ul>
-        {enabled && overlay.density && <p role="status">{overlay.loading ? 'Loading individual cells…' : 'Cell density overview · Zoom in for individual cells.'}</p>}
+        {enabled && overlay.loading && <p role="status">Loading cell markers…</p>}
         {enabled && overlay.failed && <p role="alert">Unable to load cell markers. <button className="button secondary" onClick={retry}>Reload</button></p>}
         <details className="pdl1-audit"><summary>Audit History</summary>
           {result.audit.filter((entry) => entry.source === 'exported').length === 0 && <p>No source audit history is available.</p>}

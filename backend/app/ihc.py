@@ -8,12 +8,12 @@ from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 import openslide
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import Field, StringConstraints
 from sqlalchemy import String, select
 
 from app.auth import CurrentUser, Session
-from app.cell_overlay import BUCKET, density_grid, tile_page
+from app.cell_overlay import BUCKET, cell_buffer_response, packed_cells, tile_page
 from app.clinical import ClinicalInput, add_event
 from app.her2 import SCHEMAS, clinical_display
 from app.ihc_archive import approved_rule, aggregate, archive_cells, archive_folder, counts_at, digest, load_cells
@@ -193,7 +193,7 @@ async def overlay_context(source, scan_id, source_id, user, session, version):
     threshold = revision.threshold if revision else original["default_threshold"]
     overrides = {int(index): grade for index, grade in revision.overrides.items()} if revision else {}
     await session.rollback()
-    return folder / source_id, tuple(original["dimensions"]), threshold, overrides
+    return folder / source_id, threshold, overrides
 
 
 @router.get("/{source}/{scan_id}/ihc/{source_id}/cells")
@@ -203,22 +203,22 @@ async def cells(source: Source, scan_id: UUID, source_id: SnapshotId, user: Curr
     response.headers.update(PRIVATE)
     if left >= right or top >= bottom:
         raise HTTPException(422, "Check the display area.")
-    folder, _, threshold, overrides = await overlay_context(source, scan_id, source_id, user, session, version)
+    folder, threshold, overrides = await overlay_context(source, scan_id, source_id, user, session, version)
     return await asyncio.to_thread(visible_cells, folder, threshold, overrides, left, top, right, bottom)
 
 
 @lru_cache(maxsize=12)
-def cached_density(path, modified_ns, dimensions, threshold, edits):
+def cached_cell_buffer(path, modified_ns, threshold, edits):
     rows, buckets, _ = load_cells(path, modified_ns)
     overrides = dict(edits)
-    return density_grid(buckets, dimensions, lambda index: review_point(rows, index, threshold, overrides))
+    return packed_cells(buckets, lambda index: review_point(rows, index, threshold, overrides))
 
 
-def build_overlay(folder, dimensions, threshold, overrides, bx, by, offset):
+def build_overlay(folder, threshold, overrides, bx, by, offset):
     if bx is None:
         path = folder / "cells.json"
         try:
-            return cached_density(path, path.stat().st_mtime_ns, dimensions, threshold, tuple(sorted(overrides.items())))
+            return cached_cell_buffer(path, path.stat().st_mtime_ns, threshold, tuple(sorted(overrides.items())))
         except (OSError, ValueError):
             raise HTTPException(503, "IHC cell data is unavailable.") from None
     rows, buckets, _ = load_index(folder)
@@ -227,7 +227,7 @@ def build_overlay(folder, dimensions, threshold, overrides, bx, by, offset):
 
 @router.get("/{source}/{scan_id}/ihc/{source_id}/overlay")
 async def overlay(source: Source, scan_id: UUID, source_id: SnapshotId, user: CurrentUser, session: Session,
-                  response: Response, version: Annotated[int, Query(ge=0)] = 0,
+                  request: Request, response: Response, version: Annotated[int, Query(ge=0)] = 0,
                   bx: Annotated[int, Query(ge=0, le=500_000)] | None = None,
                   by: Annotated[int, Query(ge=0, le=500_000)] | None = None,
                   offset: Annotated[int, Query(ge=0)] = 0):
@@ -235,7 +235,8 @@ async def overlay(source: Source, scan_id: UUID, source_id: SnapshotId, user: Cu
     if (bx is None) != (by is None) or (bx is None and offset):
         raise HTTPException(422, "Check the overlay tile.")
     context = await overlay_context(source, scan_id, source_id, user, session, version)
-    return await asyncio.to_thread(build_overlay, *context, bx, by, offset)
+    result = await asyncio.to_thread(build_overlay, *context, bx, by, offset)
+    return cell_buffer_response(request, result, 7) if bx is None else result
 
 
 @router.post("/{source}/{scan_id}/ihc/{source_id}/revisions")

@@ -12,11 +12,11 @@ from typing import Annotated
 from uuid import UUID
 
 import openslide
-from fastapi import APIRouter, HTTPException, Path as RoutePath, Query, Response
+from fastapi import APIRouter, HTTPException, Path as RoutePath, Query, Request, Response
 
 from app.auth import CurrentUser, Session
 from app.biomarker_evidence import validation_records
-from app.cell_overlay import BUCKET, density_grid, tile_page
+from app.cell_overlay import BUCKET, cell_buffer_response, packed_cells, tile_page
 from app.pdl1_policy import display_policy
 from app.wsi import PRIVATE, Source, registered_path
 
@@ -160,24 +160,25 @@ async def cells(source: Source, scan_id: UUID, snapshot_id: SnapshotId, user: Cu
 
 
 @lru_cache(maxsize=12)
-def cached_density(path, modified_ns, dimensions):
-    return density_grid(load_cell_index(path, modified_ns), dimensions, tuple)
+def cached_cell_buffer(path, modified_ns):
+    return packed_cells(load_cell_index(path, modified_ns), tuple)
 
 
 def build_overlay(folder, snapshot_id, role, bx, by, offset):
-    path, dimensions = overlay_source(folder, snapshot_id, role)
+    path, _ = overlay_source(folder, snapshot_id, role)
     if bx is None:
-        return cached_density(path, path.stat().st_mtime_ns, dimensions)
+        return cached_cell_buffer(path, path.stat().st_mtime_ns)
     return tile_page(cell_index(path).get((bx, by), ()), offset, tuple)
 
 
 @router.get("/{source}/{scan_id}/pdl1/{snapshot_id}/overlay")
 async def overlay(source: Source, scan_id: UUID, snapshot_id: SnapshotId, user: CurrentUser, session: Session,
-                  response: Response, bx: Annotated[int, Query(ge=0, le=500_000)] | None = None,
+                  request: Request, response: Response, bx: Annotated[int, Query(ge=0, le=500_000)] | None = None,
                   by: Annotated[int, Query(ge=0, le=500_000)] | None = None,
                   offset: Annotated[int, Query(ge=0)] = 0):
     response.headers.update(PRIVATE)
     if (bx is None) != (by is None) or (bx is None and offset):
         raise HTTPException(422, "Check the overlay tile.")
     folder = await directory_for(source, scan_id, user, session)
-    return await asyncio.to_thread(build_overlay, folder, snapshot_id, user.role, bx, by, offset)
+    result = await asyncio.to_thread(build_overlay, folder, snapshot_id, user.role, bx, by, offset)
+    return cell_buffer_response(request, result, 3) if bx is None else result
