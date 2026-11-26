@@ -107,7 +107,15 @@ export class TileViewer {
     return { x: this.centerX, y: this.centerY, zoom: this.zoom, fitZoom: this.minZoom, dimensions: this.slide.dimensions };
   }
 
-  restoreCamera(camera: { x: number; y: number; zoom: number }) {
+  restoreCamera(camera: { x: number; y: number; zoom: number }, aligned = false) {
+    if (aligned) {
+      // An aligned view can include empty space near a scan edge.
+      this.zoom = Math.max(1e-9, Math.min(64, camera.zoom));
+      this.centerX = camera.x;
+      this.centerY = camera.y;
+      this.schedule();
+      return;
+    }
     this.zoom = Math.min(Math.max(4, this.minZoom), Math.max(this.minZoom, camera.zoom));
     this.centerAt(camera.x, camera.y);
   }

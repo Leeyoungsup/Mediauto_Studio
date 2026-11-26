@@ -161,6 +161,44 @@ try {
   await drag(1, -34, -19);
   const anchored = report(await frame(1), await frame(2), dimensions[0], dimensions[1], anchors);
 
+  const beforeToggle = [await frame(1), await frame(2)];
+  const keepCameras = async (expected) => {
+    for (const index of [0, 1]) {
+      const actual = await frame(index + 1);
+      assert.ok(Math.hypot(actual.x - expected[index].x, actual.y - expected[index].y) < 0.01);
+      assert.ok(Math.abs(actual.zoom - expected[index].zoom) < 0.00001);
+    }
+  };
+  await page.getByText('Tissue Registration', { exact: true }).click();
+  await page.getByLabel('Tissue', { exact: true }).waitFor();
+  await page.getByText('Tissue Registration', { exact: true }).click();
+  await sync.click();
+  await page.getByText(/Manual Alignment Points.*Tissue A.*Sync Off/).waitFor();
+  await sync.click();
+  await page.getByText(/Manual Alignment Points.*Tissue A.*Sync On/).waitFor();
+  await keepCameras(beforeToggle);
+
+  await button('Close Comparison').click();
+  await page.getByRole('region', { name: 'Multi View' }).waitFor({ state: 'detached' });
+  await compare('SYNTH-01 · SVS').check();
+  await page.getByText(/Manual Alignment Points.*Tissue A.*Sync On/).waitFor();
+  await keepCameras(beforeToggle);
+
+  const reopened = await browser.newPage({ baseURL, viewport: page.viewportSize() });
+  const reopenedLogin = await reopened.request.post('/api/auth/login', { data: {
+    organization: 'local', username: 'integration-admin', password: 'synthetic-test-password',
+  } });
+  assert.equal(reopenedLogin.status(), 200);
+  await reopened.goto(page.url());
+  const restoredTray = reopened.getByRole('complementary', { name: 'Slide Tray', exact: true });
+  await restoredTray.getByRole('checkbox', { name: 'Compare SYNTH-01 · SVS', exact: true }).check();
+  await reopened.getByText(/Manual Alignment Points.*Tissue A.*Sync On/).waitFor();
+  await reopened.waitForFunction((expected) => [...document.querySelectorAll('.multi-view-pane .image-panel')]
+    .every((panel, index) => Math.hypot(Number(panel.dataset.viewCenterX) - expected[index].x,
+      Number(panel.dataset.viewCenterY) - expected[index].y) < 0.01
+      && Math.abs(Number(panel.dataset.viewZoom) - expected[index].zoom) < 0.00001), anchors);
+  await reopened.close();
+
   const beforeExpand = await frame(1);
   await canvas(1).dblclick();
   await pane(2).waitFor({ state: 'hidden' });
@@ -225,7 +263,7 @@ try {
   await page.getByRole('region', { name: 'Multi View' }).waitFor({state: 'detached'});
   assert.equal(await page.locator('.wsi-canvas').count(), 1);
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ result: 'PASS', maximumPanes: 6, normalized, reversed, anchored, sixPaneSync,
+  console.log(JSON.stringify({ result: 'PASS', maximumPanes: 6, normalized, reversed, anchored, manualAlignmentRestore: true, sixPaneSync,
     paneRetry: true, focusedPane: true, otherPanesKept: true, paneAnnotationsRestored: true }));
 } finally {
   await browser.close();

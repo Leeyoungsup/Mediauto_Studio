@@ -173,6 +173,13 @@ try {
   const normalized = [[[270, 74], [304, 154], [309, 248], [333, 300]], [[86, 53], [105, 100], [111, 156], [125, 187]]];
   const slideInfo = [metadata, await (await page.request.get('/api/wsi/clinical/' + svs.id)).json()];
   for (const index of [1, 2]) await button(pane(index), 'Pan using minimap').waitFor();
+  const registrationSync = button(page, 'Sync Position');
+  await registrationSync.and(page.locator(':enabled')).waitFor();
+  if (await registrationSync.getAttribute('aria-pressed') === 'true') {
+    await registrationSync.click();
+    await page.getByText(/Manual Alignment Points.*Sync Off/).waitFor();
+    for (const index of [1, 2]) await button(pane(index), 'Fit to Window').click();
+  }
   await page.getByText('Tissue Registration', { exact: true }).click();
   await button(page, 'Pick Tissue Landmarks').click();
   await page.getByText(/Waiting for Pane 1, Pane 2/).waitFor();
@@ -194,7 +201,7 @@ try {
   const tissueError = page.getByRole('list', { name: 'Registration Error by Scan' });
   await tissueError.getByText(/Check landmarks 2 · RMS .* · Maximum/).waitFor();
   await evidence.capture(page.locator('.tissue-registration'), 'landmark-checks');
-  await button(page, 'Use Tissue Registration').click();
+  await page.getByRole('button', { name: /^(Use|Update) Tissue Registration$/ }).click();
   await button(page, 'Sync Position').click();
   await page.getByText(/Tissue Landmark Registration.*Sync On/).waitFor();
   await button(pane(1), 'Zoom In').click();

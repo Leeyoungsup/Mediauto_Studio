@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, jsonBody } from './session';
-import type { Point } from './viewer-tools';
+import type { Camera, Point } from './viewer-tools';
 
 export type LandmarkRegistration = { reference: string; points: Record<string, Point[]> };
-type TissueProfile = LandmarkRegistration & { saved_at: string };
+export type TissueRegistration = LandmarkRegistration | { anchors: Record<string, Camera> };
+type TissueProfile = TissueRegistration & { saved_at: string };
 type TissueCatalog = { version: number; profiles: Record<string, TissueProfile>; active: string | null; sync: boolean };
 
 export function useTissueRegistrationStorage(caseId: string | undefined, selected: string[]) {
@@ -31,13 +32,13 @@ export function useTissueRegistrationStorage(caseId: string | undefined, selecte
     return () => controller.abort();
   }, [key, attempt]);
 
-  async function save(active: string | null, sync: boolean, landmarks?: LandmarkRegistration) {
+  async function save(active: string | null, sync: boolean, registration?: TissueRegistration) {
     if (!endpoint || !key || !catalog || savePending) return false;
     setSavePending(true);
     setFault(undefined);
     try {
       const response = await api<TissueCatalog>(endpoint, jsonBody('PUT', {
-        version: catalog.version, scan_ids: selected, active, sync, ...(landmarks ? { landmarks } : {}),
+        version: catalog.version, scan_ids: selected, active, sync, ...(registration && ('anchors' in registration ? registration : { landmarks: registration })),
       }));
       if (currentKey.current !== key) return false;
       setData({ key, catalog: response });

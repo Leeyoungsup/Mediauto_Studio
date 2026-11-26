@@ -60,6 +60,7 @@ function Navigator({ src, info, view, dynamic, onMove }: { src: string; info: Sl
 
 export type PaneComparison = {
   camera?: Camera;
+  aligned?: boolean;
   captureLandmark?: (point: Point) => void;
   landmarks?: Point[];
   onFrame: (frame: CameraFrame, info?: SlideInfo) => void;
@@ -205,8 +206,8 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   }
 
   useEffect(() => {
-    if (info && comparison?.camera) renderer.current?.restoreCamera(comparison.camera);
-  }, [info, comparison?.camera]);
+    if (info && comparison?.camera) renderer.current?.restoreCamera(comparison.camera, comparison.aligned);
+  }, [info, comparison?.camera, comparison?.aligned]);
   const sharedCamera = sharedReview?.camera;
   useEffect(() => {
     if (info) renderer.current?.followCamera(following ? sharedCamera : undefined);
@@ -234,8 +235,9 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   useEffect(() => {
     if (!info || !entryCamera.current || following || initialFocusApplied.current) return;
     initialFocusApplied.current = true;
-    restoreCamera(entryCamera.current);
-  }, [info, following, restoreCamera]);
+    if (compareMode) renderer.current?.restoreCamera(entryCamera.current, true);
+    else restoreCamera(entryCamera.current);
+  }, [info, following, compareMode, restoreCamera]);
 
   const { tool, draft, notice: recordNotice, error: recordError } = viewerRecords;
   useEffect(() => {

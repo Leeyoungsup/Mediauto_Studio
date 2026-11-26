@@ -53,6 +53,7 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, canReques
   const exitPresentation = useRef<HTMLButtonElement>(null);
   const singleCamera = useRef<{ id: string; camera: CameraFrame }>(undefined);
   const comparisonCameras = useRef<Record<string, SlideCamera>>({});
+  const lastComparisonScans = useRef<string[]>([]);
   const [returnCamera, setReturnCamera] = useState<{ id: string; camera: SlideCamera }>();
   const preferences = useViewerPreferences();
   const { settings, change } = preferences;
@@ -112,6 +113,7 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, canReques
 
   function closeComparison(id = activeComparison, camera = comparisonCameras.current[id]) {
     if (id) selectSlide(id, camera);
+    lastComparisonScans.current = selected;
     setCompareIds([]);
   }
 
@@ -122,7 +124,8 @@ export function Viewer({ item, activeSlide, onSlide, onBack, onReview, canReques
     if (next.length === 1) { closeComparison(next[0]); return; }
     if (!comparing) {
       const entry = singleCamera.current;
-      comparisonCameras.current = entry && entry.id === slide?.id && entry.camera.zoom > entry.camera.fitZoom * 1.001
+      const reopening = next.every((scanId) => lastComparisonScans.current.includes(scanId));
+      if (!reopening) comparisonCameras.current = entry && entry.id === slide?.id && entry.camera.zoom > entry.camera.fitZoom * 1.001
         ? { [entry.id]: entry.camera } : {};
       setCompareActive(checkedScans[0] ?? id);
       setContextTab('slides');

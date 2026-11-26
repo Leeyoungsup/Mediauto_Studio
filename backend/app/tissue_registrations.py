@@ -30,12 +30,19 @@ class TissueLandmarks(ClinicalInput):
                       Field(min_length=2, max_length=6)]
 
 
+class AlignmentPosition(ClinicalInput):
+    x: Coordinate
+    y: Coordinate
+    zoom: Annotated[float, Field(gt=0, le=64, allow_inf_nan=False)]
+
+
 class TissueUpdate(ClinicalInput):
     scan_ids: Scans
     version: Annotated[int, Field(ge=0)]
     active: Tissue | None
     sync: bool = False
     landmarks: TissueLandmarks | None = None
+    anchors: Annotated[dict[UUID, AlignmentPosition], Field(min_length=2, max_length=6)] | None = None
 
 
 def storage_key(case_id, user, scan_ids):
@@ -87,20 +94,23 @@ async def save_registration(case_id: UUID, data: TissueUpdate, request: Request,
                             user: CurrentUser, session: Session):
     response.headers.update(PRIVATE)
     key = storage_key(case_id, user, data.scan_ids)
-    if data.active is None and (data.sync or data.landmarks):
+    if data.anchors and data.landmarks:
+        raise HTTPException(422, "Choose one tissue alignment method.")
+    if data.active is None and (data.sync or data.landmarks or data.anchors):
         raise HTTPException(422, "Choose a tissue for registration.")
     bindings = None
-    if data.landmarks:
-        points = data.landmarks.points
-        if set(points) != set(data.scan_ids) or data.landmarks.reference not in points:
-            raise HTTPException(422, "Pick corresponding landmarks for the selected scans.")
+    if data.anchors or data.landmarks:
+        points = ({scan: [(camera.x, camera.y)] for scan, camera in data.anchors.items()}
+                  if data.anchors else data.landmarks.points)
+        if set(points) != set(data.scan_ids) or (data.landmarks and data.landmarks.reference not in points):
+            raise HTTPException(422, "Set corresponding alignment positions for the selected scans.")
         if len({len(group) for group in points.values()}) != 1:
             raise HTTPException(422, "Pick the same number of landmarks for each scan.")
         bindings = await scan_bindings(session, user, case_id, data.scan_ids)
         await session.rollback()
         for scan_id, (storage, size, modified) in bindings.items():
             group = points[scan_id]
-            if math.dist(group[0], group[1]) < 4:
+            if data.landmarks and math.dist(group[0], group[1]) < 4:
                 raise HTTPException(422, "Choose two more widely spaced fit landmarks.")
             path, _ = await verified_scan_path(storage, (size, modified))
             metadata = await scan_response(request, path, "metadata")
@@ -115,8 +125,10 @@ async def save_registration(case_id: UUID, data: TissueUpdate, request: Request,
         if data.version != catalog["version"]:
             raise HTTPException(409, "Tissue registrations changed in another session. Reload saved tissues.")
         profiles = {**catalog["profiles"]}
-        if data.landmarks:
-            profiles[data.active] = {**data.landmarks.model_dump(mode="json"), "saved_at": datetime.now(timezone.utc).isoformat()}
+        if data.landmarks or data.anchors:
+            alignment = ({"anchors": data.model_dump(mode="json")["anchors"]} if data.anchors
+                         else data.landmarks.model_dump(mode="json"))
+            profiles[data.active] = {**alignment, "saved_at": datetime.now(timezone.utc).isoformat()}
         if data.active is not None and data.active not in profiles:
             raise HTTPException(404, "Saved tissue registration not found.")
         result = {"version": data.version + 1, "profiles": profiles, "active": data.active, "sync": data.sync}
