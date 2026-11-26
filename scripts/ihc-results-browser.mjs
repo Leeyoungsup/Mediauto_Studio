@@ -169,9 +169,29 @@ try {
   await page.getByRole('button', { name: 'Fit to Window', exact: true }).click();
   await page.locator('canvas[data-overlay-mode=points]').waitFor();
   assert.equal(requests, 1, 'Zooming, panning and returning to overview must reuse the same cells');
+  const tray = page.getByRole('complementary', { name: 'Slide Tray', exact: true });
+  await tray.getByRole('checkbox', { name: 'Compare I-PR · SVS', exact: true }).check();
+  const multi = page.getByRole('region', { name: 'Multi View', exact: true });
+  const kiPane = multi.getByRole('group', { name: /^Pane \d+: I-KI/ });
+  const prPane = multi.getByRole('group', { name: /^Pane \d+: I-PR/ });
+  const toggle = kiPane.getByRole('button', { name: 'AI Overlay', exact: true });
+  const kiLayer = kiPane.getByLabel('Ki-67 Cell Overlay', { exact: true });
+  const prLayer = prPane.getByLabel('PR Cell Overlay', { exact: true });
+  await kiLayer.waitFor();
+  await prLayer.waitFor();
+  assert.equal(await toggle.getAttribute('aria-pressed'), 'true');
+  await toggle.click();
+  await kiLayer.waitFor({ state: 'detached' });
+  assert.equal(await toggle.getAttribute('aria-pressed'), 'false');
+  assert.ok(await prLayer.isVisible());
+  const requestsBeforeRestore = requests;
+  await toggle.click();
+  await kiLayer.waitFor();
+  assert.equal(await toggle.getAttribute('aria-pressed'), 'true');
+  assert.equal(requests, requestsBeforeRestore);
   assert.deepEqual(errors, []);
   await evidence.finish();
-  console.log('PASS: IHC cards, editing, restore, complete individual points, transparent space between cells and zoom cache');
+  console.log('PASS: IHC cards, editing, restore, complete individual points, transparent space between cells, zoom cache and per-pane AI toggle');
 } finally {
   await browser.close();
 }

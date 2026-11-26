@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
-import { AlertTriangle, ChevronLeft, ChevronRight, Download, Image, Layers, List, LocateFixed, Map, Minus, Pause, Play, Plus, ScanLine, Tag, Tally5, X } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, ChevronRight, Download, Eye, EyeOff, Image, Layers, List, LocateFixed, Map, Minus, Pause, Play, Plus, ScanLine, Tag, Tally5, X } from 'lucide-react';
 import type { CollectionOrigin } from './workflow-navigation';
 import type { WsiScan } from './demo';
 import { api, auditAttemptId, jsonBody, request } from './session';
@@ -541,7 +541,8 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
     : ihc.source ? 'ihc' : pdl1.result ? 'pdl1' : null;
   const resultMode = resultDock === undefined ? defaultOverlay ?? (ihcStain ? 'ihc' : null) : resultDock;
   const overlayMode = selectedOverlay ?? defaultOverlay;
-  const currentOverlay = overlayMode === 'ihc' ? ihc.overlay : overlayMode === 'pdl1' ? pdl1.overlay : undefined;
+  const currentDetection = overlayMode === 'ihc' ? ihc : overlayMode === 'pdl1' ? pdl1 : undefined;
+  const currentOverlay = currentDetection?.overlay;
   const dockedResult = options && !presenting && !analysis?.open && !annotationsOpen && !lymphOpen && !showPap
     && info && !readOnlyEndpoint && !papStain ? resultMode : null;
 
@@ -642,6 +643,12 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
           disabled={skin.busy} onClick={() => { skin.setMode(undefined); setShowSkin((open) => !open); }}>Skin Review</button>}
         {canOpenSlideReview && !papStain && <button type="button" className="button secondary" aria-expanded={showProstate}
           onClick={() => setShowProstate((open) => !open)}>Prostate AI</button>}
+        {compareMode && !papStain && currentDetection && <button type="button" className="icon-button"
+          aria-label="AI Overlay" aria-pressed={currentDetection.enabled}
+          title={currentDetection.enabled ? 'Hide AI Overlay' : 'Show AI Overlay'}
+          onClick={() => currentDetection.setEnabled(!currentDetection.enabled)}>
+          {currentDetection.enabled ? <Eye size={16} aria-hidden="true" /> : <EyeOff size={16} aria-hidden="true" />}
+        </button>}
         {!options && navigationControls}
       </div>
     </div>
@@ -797,7 +804,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         {comparison.landmarks.map(([x, y], index) => <text className="annotation-length" key={index}
           x={(x - view.x) * view.zoom} y={(y - view.y) * view.zoom}>{index + 1}</text>)}
       </svg>}
-      {info && !readOnlyEndpoint && !papStain && <Pdl1Badge state={pdl1} />}
+      {info && !readOnlyEndpoint && !papStain && (!compareMode || currentDetection?.enabled) && <Pdl1Badge state={pdl1} />}
       {tileStatus === 'loading' && !failure && <div className="wsi-overlay image-empty" role="status">Opening slide…</div>}
       {tileStatus === 'refining' && <span className="viewport-tile-status" role="status">Loading tiles…</span>}
       {tileStatus === 'partial' && <div className="viewport-tile-status" role="status">
