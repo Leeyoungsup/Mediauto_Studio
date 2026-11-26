@@ -47,6 +47,7 @@ from app.models import ApplicationSetting, IntegrationConnection
 from app.lymph_counts import router as lymph_counts_router
 from app.review_room import router as review_room_router
 from app.roi_search import router as roi_search_router
+from app.tissue_registrations import router as tissue_registrations_router
 from app.viewer_records import router as viewer_records_router
 from app.worklist import router as worklist_router
 from app.worklist_views import router as worklist_views_router
@@ -125,6 +126,7 @@ app.include_router(viewer_records_router)
 app.include_router(roi_search_router)
 app.include_router(lymph_counts_router)
 app.include_router(viewer_preferences_router)
+app.include_router(tissue_registrations_router)
 app.include_router(pdl1_router)
 app.include_router(pap_router)
 app.include_router(prostate_router)

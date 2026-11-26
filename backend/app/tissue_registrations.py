@@ -1,0 +1,124 @@
+"""Personal tissue registration profiles for a verified set of case scans."""
+
+import hashlib
+import math
+from datetime import datetime, timezone
+from typing import Annotated
+from uuid import UUID
+
+from fastapi import APIRouter, HTTPException, Query, Request, Response
+from pydantic import Field, StringConstraints
+from sqlalchemy import select
+
+from app.auth import CurrentUser, Session
+from app.clinical import ClinicalInput, case_visibility
+from app.intake import save_version, source_id
+from app.models import ApplicationSetting, Case, Slide, SlideScan, Specimen
+from app.scan_quality import BLOCKED_QC
+from app.viewer_records import Coordinate, check_point
+from app.wsi import PRIVATE, scan_response, verified_scan_path
+
+router = APIRouter(prefix="/api/viewer/cases/{case_id}/tissue-registrations", tags=["Tissue registration"])
+
+Tissue = Annotated[str, StringConstraints(pattern=r"^[A-Z]$")]
+Scans = Annotated[list[UUID], Field(min_length=2, max_length=6)]
+
+
+class TissueLandmarks(ClinicalInput):
+    reference: UUID
+    points: Annotated[dict[UUID, Annotated[list[tuple[Coordinate, Coordinate]], Field(min_length=3, max_length=8)]],
+                      Field(min_length=2, max_length=6)]
+
+
+class TissueUpdate(ClinicalInput):
+    scan_ids: Scans
+    version: Annotated[int, Field(ge=0)]
+    active: Tissue | None
+    sync: bool = False
+    landmarks: TissueLandmarks | None = None
+
+
+def storage_key(case_id, user, scan_ids):
+    if len(set(scan_ids)) != len(scan_ids):
+        raise HTTPException(422, "Choose different scans for tissue registration.")
+    digest = hashlib.sha256(",".join(sorted(map(str, scan_ids))).encode()).hexdigest()[:20]
+    return f"tissue:{case_id.hex}:{user.id.hex}:{digest}"
+
+
+async def scan_bindings(session, user, case_id, scan_ids, *, lock=False):
+    query = (select(SlideScan.id, SlideScan.storage_key, SlideScan.size_bytes, SlideScan.modified_ns)
+             .join(Slide, Slide.id == SlideScan.slide_id)
+             .join(Specimen, Specimen.id == Slide.specimen_id)
+             .join(Case, Case.id == Specimen.case_id)
+             .where(Case.id == case_id, Case.organization == user.organization, case_visibility(Case, user),
+                    SlideScan.organization == user.organization, SlideScan.id.in_(scan_ids), SlideScan.qc_status.not_in(BLOCKED_QC)))
+    if lock:
+        query = query.with_for_update(read=True, of=(Case, SlideScan))
+    rows = (await session.execute(query)).all()
+    if len(rows) != len(scan_ids):
+        raise HTTPException(404, "A registration scan is unavailable in this case.")
+    return {scan: (key, size, modified) for scan, key, size, modified in rows}
+
+
+async def saved_catalog(session, key, signatures):
+    stored = await session.get(ApplicationSetting, key)
+    entry = stored.value if stored else {}
+    profiles = entry["profiles"] if entry.get("signatures") == signatures else {}
+    active = entry.get("active") if entry.get("active") in profiles else None
+    return {"version": entry.get("version", 0), "profiles": profiles,
+            "active": active, "sync": bool(active and entry.get("sync"))}
+
+
+def fingerprints(bindings):
+    return {str(scan): source_id(*binding) for scan, binding in bindings.items()}
+
+
+@router.get("")
+async def get_registrations(case_id: UUID, user: CurrentUser, session: Session, response: Response,
+                            scan_ids: Annotated[list[UUID], Query(min_length=2, max_length=6)]):
+    response.headers.update(PRIVATE)
+    key = storage_key(case_id, user, scan_ids)
+    bindings = await scan_bindings(session, user, case_id, scan_ids)
+    return await saved_catalog(session, key, fingerprints(bindings))
+
+
+@router.put("")
+async def save_registration(case_id: UUID, data: TissueUpdate, request: Request, response: Response,
+                            user: CurrentUser, session: Session):
+    response.headers.update(PRIVATE)
+    key = storage_key(case_id, user, data.scan_ids)
+    if data.active is None and (data.sync or data.landmarks):
+        raise HTTPException(422, "Choose a tissue for registration.")
+    bindings = None
+    if data.landmarks:
+        points = data.landmarks.points
+        if set(points) != set(data.scan_ids) or data.landmarks.reference not in points:
+            raise HTTPException(422, "Pick corresponding landmarks for the selected scans.")
+        if len({len(group) for group in points.values()}) != 1:
+            raise HTTPException(422, "Pick the same number of landmarks for each scan.")
+        bindings = await scan_bindings(session, user, case_id, data.scan_ids)
+        await session.rollback()
+        for scan_id, (storage, size, modified) in bindings.items():
+            group = points[scan_id]
+            if math.dist(group[0], group[1]) < 4:
+                raise HTTPException(422, "Choose two more widely spaced fit landmarks.")
+            path, _ = await verified_scan_path(storage, (size, modified))
+            metadata = await scan_response(request, path, "metadata")
+            for x, y in group:
+                check_point(x, y, metadata["dimensions"])
+    async with session.begin():
+        current = await scan_bindings(session, user, case_id, data.scan_ids, lock=True)
+        if bindings is not None and bindings != current:
+            raise HTTPException(409, "The selected scans changed. Reload the comparison.")
+        signatures = fingerprints(current)
+        catalog = await saved_catalog(session, key, signatures)
+        if data.version != catalog["version"]:
+            raise HTTPException(409, "Tissue registrations changed in another session. Reload saved tissues.")
+        profiles = {**catalog["profiles"]}
+        if data.landmarks:
+            profiles[data.active] = {**data.landmarks.model_dump(mode="json"), "saved_at": datetime.now(timezone.utc).isoformat()}
+        if data.active is not None and data.active not in profiles:
+            raise HTTPException(404, "Saved tissue registration not found.")
+        result = {"version": data.version + 1, "profiles": profiles, "active": data.active, "sync": data.sync}
+        await save_version(session, key, data.version, {**result, "signatures": signatures})
+        return result
