@@ -1,15 +1,13 @@
 import { Crosshair, Maximize2, PanelTop, Unlink2 } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ImageViewport } from './image-viewport';
 import type { Slide } from './demo';
 import { fitTissue, identity, project, unproject } from './tissue-registration';
 import type { Transform } from './tissue-registration';
 import type { CameraFrame, SlideInfo } from './tile-viewer';
-import { ScanReference } from './worklist';
 import type { Camera, Point } from './viewer-tools';
 
-const MIN_PANES = 2;
-const MAX_PANES = 6;
+export const MAX_COMPARE_SCANS = 6;
 type Frames = Record<string, CameraFrame>;
 
 export function mapCamera(source: CameraFrame, target: CameraFrame, start?: CameraFrame, end?: CameraFrame): Camera {
@@ -22,16 +20,11 @@ export function mapCamera(source: CameraFrame, target: CameraFrame, start?: Came
   };
 }
 
-export function MultiView({ slides, primary, onClose, onSingle }: {
-  slides: Slide[]; primary?: string; onClose: () => void; onSingle: (id: string, camera?: Camera) => void;
+export function MultiView({ slides, selected, active, cameras, onActive, onFrame, onClose, onSingle }: {
+  slides: Slide[]; selected: string[]; active: string; cameras: Record<string, Camera>;
+  onActive: (id: string) => void; onFrame: (id: string, camera: Camera) => void;
+  onClose: () => void; onSingle: (id: string, camera?: Camera) => void;
 }) {
-  const [selection, setSelection] = useState(() => {
-    const ids = slides.map((slide) => slide.id);
-    return (primary && ids.includes(primary) ? [primary, ...ids.filter((id) => id !== primary)] : ids).slice(0, MIN_PANES);
-  });
-  const selected = selection.filter((id) => slides.some((slide) => slide.id === id));
-  const [activeId, setActiveId] = useState(selection[0]);
-  const active = selected.includes(activeId) ? activeId : selected[0];
   const [synchronized, setSynchronized] = useState(false);
   const [focused, setFocused] = useState(false);
   const [loaded, setLoaded] = useState<string[]>([]);
@@ -54,8 +47,7 @@ export function MultiView({ slides, primary, onClose, onSingle }: {
   const formatError = (value: number, unit: string) => unit === 'µm' && value >= 1000
     ? `${(value / 1000).toFixed(2)} mm` : `${value.toFixed(2)} ${unit}`;
   const waitingFor = picking ? selected.flatMap((id, index) => (points[id]?.length ?? 0) === round ? [`Pane ${index + 1}`] : []) : [];
-  const activeScan = slides.find(({ id }) => id === active);
-  const allReady = selected.length >= MIN_PANES && selected.every((id) => loaded.includes(id));
+  const allReady = selected.length >= 2 && selected.every((id) => loaded.includes(id));
 
   function publish(driver: string, frame: CameraFrame, bases = anchors) {
     const commands: Record<string, Camera> = {};
@@ -76,22 +68,50 @@ export function MultiView({ slides, primary, onClose, onSingle }: {
     setCommands(commands);
   }
 
-  function toggleSlide(id: string) {
-    const checked = selected.includes(id);
-    if ((checked && selected.length <= MIN_PANES) || (!checked && selected.length >= MAX_PANES)) return;
-    if (checked) {
-      delete frames.current[id];
-      setLoaded((current) => current.filter((value) => value !== id));
+  const lastSelection = useRef(selected.join(','));
+  const selectionKey = selected.join(',');
+  useEffect(() => {
+    if (lastSelection.current === selectionKey) return;
+    lastSelection.current = selectionKey;
+    const current = new Set(selectionKey.split(','));
+    for (const id of Object.keys(frames.current)) {
+      if (!current.has(id)) { delete frames.current[id]; delete metadata.current[id]; }
     }
-    setSelection(checked ? selected.filter((value) => value !== id) : [...selected, id]);
+    setLoaded((previous) => previous.filter((id) => current.has(id)));
     setSynchronized(false);
+    setFocused(false);
     setCommands({});
     setAnchors(undefined);
     setPoints({});
     setRegistered(undefined);
     setPicking(false);
-    delete metadata.current[id];
-  }
+  }, [selectionKey]);
+
+  const grid = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const element = grid.current;
+    if (!element) return;
+    const workbench = element.closest('.viewer-workbench');
+    function resize() {
+      if (!element) return;
+      const fullscreen = document.fullscreenElement;
+      const bounds = element.getBoundingClientRect();
+      const top = fullscreen?.contains(element) ? bounds.top - fullscreen.getBoundingClientRect().top + fullscreen.scrollTop : bounds.top + window.scrollY;
+      const height = (fullscreen?.clientHeight ?? window.innerHeight) - top - 8;
+      element.style.setProperty('--comparison-height', `${Math.max(320, Math.floor(height))}px`);
+    }
+    const observer = new ResizeObserver(resize);
+    if (workbench) observer.observe(workbench);
+    if (element.previousElementSibling) observer.observe(element.previousElementSibling);
+    window.addEventListener('resize', resize);
+    document.addEventListener('fullscreenchange', resize);
+    resize();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', resize);
+      document.removeEventListener('fullscreenchange', resize);
+    };
+  }, []);
 
   function recordPoint(id: string, point: Point) {
     setPoints((current) => {
@@ -102,77 +122,61 @@ export function MultiView({ slides, primary, onClose, onSingle }: {
   }
 
   return <section aria-label="Multi View" className="multi-view">
-    <div className="panel multi-view-control">
-      <div className="panel-title"><h2>Multi View</h2><span>{selected.length} / {MAX_PANES} panes</span></div>
-      <div className="multi-view-options">
-        <div className="multi-view-status">
-          <p><strong>Active {active ? `Pane ${selected.indexOf(active) + 1}` : 'Pane'}</strong>
-            {activeScan?.wsi && <> · {activeScan.label ?? activeScan.id} · {activeScan.wsi.format} <ScanReference scan={activeScan.wsi} /></>}</p>
-          <p className="muted">Compare {MIN_PANES}–{MAX_PANES} scans from this case.</p>
-        </div>
-        <fieldset className="multi-view-slides" disabled={focused}><legend>Scans in This Case</legend>
-          {slides.map((slide) => {
-            const checked = selected.includes(slide.id);
-            return <label key={slide.id}>
-              <input type="checkbox" checked={checked}
-                disabled={checked ? selected.length <= MIN_PANES : selected.length >= MAX_PANES}
-                onChange={() => toggleSlide(slide.id)} />
-              {slide.label ?? slide.id} · {slide.wsi?.format}
-              <span aria-hidden="true"><ScanReference scan={slide.wsi} /></span>
-            </label>;
-          })}
-        </fieldset>
-        <div className="actions multi-view-actions">
-          <button className="button secondary" aria-pressed={synchronized} disabled={!allReady || focused || picking} onClick={() => {
-            const next = !synchronized;
-            setSynchronized(next);
-            if (next && active && frames.current[active]) publish(active, frames.current[active]);
-            else setCommands({});
-          }}>Sync Position</button>
-          <button className="button secondary" disabled={!allReady || synchronized || focused || picking || !!registered} onClick={() => {
-            setAnchors(anchors ? undefined : Object.fromEntries(selected.map((id) => [id, frames.current[id]])));
-          }}>{anchors ? 'Clear Alignment Points' : 'Use Current Positions as Alignment Points'}</button>
-          <button className="button secondary" aria-pressed={focused} disabled={!active || !loaded.includes(active) || picking}
-            onClick={() => setFocused(!focused)}><Maximize2 size={15} aria-hidden="true" />{focused ? 'Restore Split View' : 'Expand Active Pane'}</button>
-          <button className="button secondary" disabled={!active || !loaded.includes(active)} onClick={() => { if (active) onSingle(active, frames.current[active]); }}>
-            <PanelTop size={15} aria-hidden="true" /> Open Active Scan in Single View</button>
-          <button className="button secondary" onClick={onClose}><Unlink2 size={15} aria-hidden="true" /> Close Comparison</button>
-        </div>
-        <p className="muted" role="status">{registered ? 'Tissue Landmark Registration' : anchors ? 'Manual Alignment Points' : 'Normalized Image Coordinates'} · {focused ? 'Sync Paused While Expanded' : synchronized ? 'Sync On' : 'Sync Off'}</p>
+    <div className="multi-view-control">
+      <div className="actions multi-view-actions">
+        <span className="multi-view-count" title="Selected scans">{selected.length} / {MAX_COMPARE_SCANS} panes</span>
+        <button className="button secondary" aria-pressed={synchronized} disabled={!allReady || focused || picking} onClick={() => {
+          const next = !synchronized;
+          setSynchronized(next);
+          if (next && frames.current[active]) publish(active, frames.current[active]);
+          else setCommands({});
+        }}>Sync Position</button>
+        <button className="button secondary" aria-pressed={focused} disabled={!loaded.includes(active) || picking}
+          aria-label={focused ? 'Restore Split View' : 'Expand Active Pane'} title={focused ? 'Restore Split View' : 'Expand Active Pane'}
+          onClick={() => setFocused(!focused)}><Maximize2 size={15} aria-hidden="true" />{focused ? 'Restore Split' : 'Expand'}</button>
+        <button className="icon-button" aria-label="Open Active Scan in Single View" title="Open Active Scan in Single View"
+          disabled={!loaded.includes(active)} onClick={() => onSingle(active, frames.current[active])}><PanelTop size={16} aria-hidden="true" /></button>
+        <button className="icon-button" aria-label="Close Comparison" title="Close Comparison" onClick={onClose}><Unlink2 size={16} aria-hidden="true" /></button>
         <details className="tissue-registration">
           <summary>Tissue Registration</summary>
-          <p className="muted">Pick the same feature in each pane. The first two landmarks fit the alignment. Use a different feature for each additional check.</p>
-          <div className="actions">
-            <button className="button secondary" disabled={!allReady || synchronized || focused || picking} onClick={() => {
-              setRegistered(undefined); setPoints({}); setPicking(true);
-            }}>Pick Tissue Landmarks</button>
-            {picking && <>
-              <button className="button secondary" disabled={!Object.values(points).some((list) => list.length)} onClick={() => {
-                const last = Math.max(...Object.values(points).map((list) => list.length));
-                setPoints(Object.fromEntries(selected.map((id) => [id, (points[id] ?? []).slice(0, last - 1)])));
-              }}>Undo Landmark Round</button>
-              <button className="button primary" disabled={!validated} onClick={() => {
-                setRegistered(Object.fromEntries([[selected[0], identity], ...pairs.map(({ id, result }) => [id, result!.fit])]));
-                setAnchors(undefined);
-                setPicking(false);
-              }}>Use Tissue Registration</button>
-            </>}
-            {(picking || registered) && <button className="button secondary" disabled={synchronized} onClick={() => {
-              setRegistered(undefined); setPoints({}); setPicking(false); setCommands({});
-            }}>Clear Tissue Registration</button>}
+          <div className="registration-popover">
+            <p className="muted">Pick the same feature in each pane. The first two landmarks fit the alignment. Use a different feature for each additional check.</p>
+            <div className="actions">
+              <button className="button secondary" disabled={!allReady || synchronized || focused || picking || !!registered}
+                onClick={() => setAnchors(anchors ? undefined : Object.fromEntries(selected.map((id) => [id, frames.current[id]])))}>
+                {anchors ? 'Clear Alignment Points' : 'Use Current Positions as Alignment Points'}</button>
+              <button className="button secondary" disabled={!allReady || synchronized || focused || picking} onClick={() => {
+                setRegistered(undefined); setPoints({}); setPicking(true);
+              }}>Pick Tissue Landmarks</button>
+              {picking && <>
+                <button className="button secondary" disabled={!Object.values(points).some((list) => list.length)} onClick={() => {
+                  const last = Math.max(...Object.values(points).map((list) => list.length));
+                  setPoints(Object.fromEntries(selected.map((id) => [id, (points[id] ?? []).slice(0, last - 1)])));
+                }}>Undo Landmark Round</button>
+                <button className="button primary" disabled={!validated} onClick={() => {
+                  setRegistered(Object.fromEntries([[selected[0], identity], ...pairs.map(({ id, result }) => [id, result!.fit])]));
+                  setAnchors(undefined);
+                  setPicking(false);
+                }}>Use Tissue Registration</button>
+              </>}
+              {(picking || registered) && <button className="button secondary" disabled={synchronized} onClick={() => {
+                setRegistered(undefined); setPoints({}); setPicking(false); setCommands({});
+              }}>Clear Tissue Registration</button>}
+            </div>
+            {picking && <p role="status" className="landmark-progress"><Crosshair size={15} aria-hidden="true" />
+              {round < 8 ? `Landmark ${round + 1} · ${round < 2 ? 'Fit' : 'Independent Check'} · Waiting for ${waitingFor.join(', ')}` : 'Eight landmarks recorded'}
+            </p>}
+            {pairs.length > 0 && <ul aria-label="Registration Error by Scan">{pairs.map(({ id, result }) => <li key={id}>
+              {slides.find((slide) => slide.id === id)?.label ?? id}{' · '}
+              {result ? `Check landmarks ${round - 2} · RMS ${formatError(result.rms, result.unit)} · Maximum ${formatError(result.maximum, result.unit)}`
+                : 'Choose two more widely spaced fit landmarks.'}
+            </li>)}</ul>}
           </div>
-          {picking && <p role="status" className="landmark-progress"><Crosshair size={15} aria-hidden="true" />
-            {round < 8 ? `Landmark ${round + 1} · ${round < 2 ? 'Fit' : 'Independent Check'} · Waiting for ${waitingFor.join(', ')}` : 'Eight landmarks recorded'}
-          </p>}
-          {pairs.length > 0 && <ul aria-label="Registration Error by Scan">{pairs.map(({ id, result }) => <li key={id}>
-            {slides.find((slide) => slide.id === id)?.label ?? id}{' · '}
-            {result ? `Check landmarks ${round - 2} · RMS ${formatError(result.rms, result.unit)} · Maximum ${formatError(result.maximum, result.unit)}`
-              : 'Choose two more widely spaced fit landmarks.'}
-          </li>)}</ul>}
         </details>
       </div>
+      <span className="multi-view-sync-status muted" role="status">{registered ? 'Tissue Landmark Registration' : anchors ? 'Manual Alignment Points' : 'Normalized Image Coordinates'} · {focused ? 'Sync Paused While Expanded' : synchronized ? 'Sync On' : 'Sync Off'}</span>
     </div>
-    <div className="multi-view-grid" data-count={selected.length} data-focused={focused}>
+    <div ref={grid} className="multi-view-grid" data-count={selected.length} data-focused={focused}>
       {selected.map((id, index) => {
         const slide = slides.find((item) => item.id === id);
         if (!slide?.wsi) return null;
@@ -193,24 +197,22 @@ export function MultiView({ slides, primary, onClose, onSingle }: {
             if (!withinClickWindow || focused || picking || !loaded.includes(id)
                 || !(event.target instanceof HTMLCanvasElement)) return;
             event.preventDefault();
-            setActiveId(id);
+            onActive(id);
             setFocused(true);
           }}
-          onFocusCapture={() => setActiveId(id)} onPointerDownCapture={() => setActiveId(id)}>
-          <button type="button" className="multi-view-activate" aria-pressed={active === id} onClick={() => setActiveId(id)}>
-            Pane {index + 1}{active === id ? ' · Active' : ''}
-            {picking && round < 8 && <span className="pane-landmark-state">{(points[id]?.length ?? 0) === round ? 'Pick Landmark' : 'Landmark Recorded'}</span>}
-          </button>
-          <ImageViewport scan={slide.wsi} label={slide.label ?? id} stain={slide.stain} comparison={{
+          onFocusCapture={() => onActive(id)} onPointerDownCapture={() => onActive(id)}>
+          {picking && round < 8 && <span className="pane-landmark-state">{(points[id]?.length ?? 0) === round ? 'Pick Landmark' : 'Landmark Recorded'}</span>}
+          <ImageViewport scan={slide.wsi} label={slide.label ?? id} stain={slide.stain} initialCamera={cameras[id]} comparison={{
             camera: commands[id], landmarks: points[id],
             captureLandmark: picking ? (point) => recordPoint(id, point) : undefined,
             onFrame: (frame, info) => {
               if (info) metadata.current[id] = info;
               if (!frames.current[id]) setLoaded((current) => [...current, id]);
               frames.current[id] = frame;
+              onFrame(id, frame);
             },
             onNavigate: (frame) => {
-              setActiveId(id);
+              onActive(id);
               if (synchronized && !focused) publish(id, frame);
             },
           }} />

@@ -123,6 +123,7 @@ else
     run_browser workspace-layout
     run_browser viewer-preferences
     run_browser viewer-records
+    run_browser wsi-viewport-coverage general
     run_browser multi-view ihc pap
     run_browser worklist-views
     if selected; then node scripts/registration-browser.mjs; fi

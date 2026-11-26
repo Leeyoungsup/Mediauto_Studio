@@ -13,7 +13,7 @@ import { Pdl1Badge, Pdl1Overlay, Pdl1Panel, usePdl1 } from './pdl1';
 import { roiSearchHref } from './roi-search';
 import { LymphCounts } from './lymph-counts';
 import { referenceMagnification, TileViewer, wheelZoomStep } from './tile-viewer';
-import type { CameraFrame, SlideInfo, Viewport } from './tile-viewer';
+import type { CameraFrame, SlideInfo, TileStatus, Viewport } from './tile-viewer';
 import { AnnotationOverlay, DrawingControls, ViewerRecordsPanel, ViewerToolsBar, hasVertices, screenToSlide, useViewerRecords } from './viewer-tools';
 import type { Camera, Geometry, Point, Tool } from './viewer-tools';
 import type { ViewerSettings } from './viewer-preferences';
@@ -70,7 +70,7 @@ type ViewerOptions = {
   settings: ViewerSettings;
   active: boolean;
   presenting?: boolean;
-  onCamera?: (camera: Camera) => void;
+  onCamera?: (camera: CameraFrame) => void;
   reportHref?: string;
   position: { index: number; total: number };
   previous?: () => void;
@@ -181,7 +181,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   const autopanDirection = settings?.autopan_direction;
   const [showNavigator, setShowNavigator] = useState(true);
   const [failure, setFailure] = useState('');
-  const [tileStatus, setTileStatus] = useState<'loading' | 'ok' | 'partial' | 'unavailable'>('loading');
+  const [tileStatus, setTileStatus] = useState<TileStatus>('loading');
   const [viewportSnapshot, setViewportSnapshot] = useState<ViewportSnapshot>();
   const [attempt, setAttempt] = useState(0);
   const endpoint = readOnlyEndpoint ?? slideEndpoint(scan);
@@ -232,8 +232,9 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
   useEffect(() => {
     if (!info || !entryCamera.current || following || initialFocusApplied.current) return;
     initialFocusApplied.current = true;
-    restoreCamera(entryCamera.current);
-  }, [info, following, restoreCamera]);
+    if (compareMode) renderer.current?.restoreCamera(entryCamera.current);
+    else restoreCamera(entryCamera.current);
+  }, [info, following, compareMode, restoreCamera]);
 
   const { tool, draft, notice: recordNotice, error: recordError } = viewerRecords;
   useEffect(() => {
@@ -578,7 +579,7 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
         </button></>}
   </>;
 
-  return <section className="image-panel" aria-label="Slide Image" data-scan-id={scan.id} data-autopan={autopan}
+  return <section className="image-panel" aria-label="Slide Image" data-scan-id={scan.id} data-autopan={autopan} data-tiles={tileStatus}
     data-view-center-x={view && view.x + view.width / 2} data-view-center-y={view && view.y + view.height / 2}
     data-view-zoom={view?.zoom}>
     <div className={options ? 'image-toolbar viewer-image-toolbar' : 'image-toolbar'}>
@@ -787,6 +788,10 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       </svg>}
       {info && !readOnlyEndpoint && !papStain && <Pdl1Badge state={pdl1} />}
       {tileStatus === 'loading' && !failure && <div className="wsi-overlay image-empty" role="status">Opening slide…</div>}
+      {tileStatus === 'refining' && <span className="viewport-tile-status" role="status">Loading tiles…</span>}
+      {tileStatus === 'partial' && <div className="viewport-tile-status" role="status">
+        Some tiles could not be loaded. <button className="button secondary" onClick={() => renderer.current?.retryTiles()}>Retry</button>
+      </div>}
       {(failure || tileStatus === 'unavailable') && <div className="wsi-overlay image-empty" role="alert"><AlertTriangle size={25} />
         <strong>Unable to open the slide.</strong><p>{presenting ? 'Try loading the slide again.' : failure || 'Unable to load tiles.'}</p>
         <button className="button secondary" onClick={() => setAttempt((value) => value + 1)}>Retry</button>
@@ -844,7 +849,6 @@ export function ImageViewport({ scan, label, stain, comparison, readOnlyEndpoint
       {pdl1.referenceMissing && <span className="tile-warning" role="status">Referenced PD-L1 Result Unavailable
         <button type="button" className="button secondary" onClick={() => pdlPanel.current?.focus()}>Review Result Status</button></span>}
       {overviewFailed && minimap && !settings?.show_overview && <span className="tile-warning" role="status">Minimap unavailable. <button className="button secondary" onClick={() => setOverviewAttempt((value) => value + 1)}>Retry Overview</button></span>}
-      {tileStatus === 'partial' && <span className="tile-warning" role="status">Some tiles could not be loaded. <button className="button secondary" onClick={() => renderer.current?.retryTiles()}>Retry</button></span>}
     </footer>
     {canOpenPap && showPapReview && <div className="clinical-panel-focus" ref={papReviewPanel} tabIndex={-1}>
       <Suspense fallback={<p role="status">Loading Pap review…</p>}>

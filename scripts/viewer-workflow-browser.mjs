@@ -167,7 +167,8 @@ try {
 
   await page.goto(slideUrl);
   await button(page, 'Pan using minimap').waitFor();
-  await button(page, 'Multi View').click();
+  await page.getByRole('complementary', { name: 'Slide Tray', exact: true })
+    .locator('input[type=checkbox]:not(:checked):enabled').first().check();
   const pane = (i) => page.getByRole('group', { name: new RegExp('^Pane ' + i + ':') });
   const normalized = [[[270, 74], [304, 154], [309, 248], [333, 300]], [[86, 53], [105, 100], [111, 156], [125, 187]]];
   const slideInfo = [metadata, await (await page.request.get('/api/wsi/clinical/' + svs.id)).json()];

@@ -37,6 +37,8 @@ try {
   const canvas = (i) => pane(i).getByLabel('WSI Canvas');
   const button = (text) => page.getByRole('button', { name: text, exact: true });
   const sync = button('Sync Position');
+  const tray = page.getByRole('complementary', { name: 'Slide Tray', exact: true });
+  const compare = (label) => tray.getByRole('checkbox', { name: 'Compare ' + label, exact: true });
 
   async function open(caseId) {
     const response = await page.request.get('/api/worklist', { params: { q: caseId } });
@@ -47,7 +49,7 @@ try {
     await page.goto('/#case/' + row.record_id);
     await page.getByRole('heading', { name: caseId, exact: true }).waitFor();
     await button('Open Viewer').click();
-    await button('Multi View').click();
+    await tray.locator('input[type=checkbox]:not(:checked):enabled').first().check();
     await pane(1).getByRole('button', { name: 'Pan using minimap' }).waitFor();
     await pane(2).getByRole('button', { name: 'Pan using minimap' }).waitFor();
   }
@@ -91,6 +93,9 @@ try {
 
   await open('IMS-DEMO-101');
   const dimensions = [[49920, 59904], [70685, 87947]];
+  assert.equal(await tray.locator('input:checked').count(), 2);
+  const splitBox = await canvas(1).boundingBox();
+  assert.ok(splitBox.height >= 650 && splitBox.y < 220, 'Comparison should use the available height');
   const unchanged = await frame(2);
   await zoom(1, 5);
   assert.deepEqual(await frame(2), unchanged);
@@ -112,7 +117,9 @@ try {
   await sync.click();
   await drag(2, -25, 22);
   const anchors = [await frame(1), await frame(2)];
+  await page.getByText('Tissue Registration', { exact: true }).click();
   await button('Use Current Positions as Alignment Points').click();
+  await page.getByText('Tissue Registration', { exact: true }).click();
   await page.getByText(/Manual Alignment Points/).waitFor();
   await sync.click();
   await drag(1, -34, -19);
@@ -154,12 +161,14 @@ try {
   const failurePath = '**/api/wsi/clinical/' + lastScan.id;
   const reject = (route) => route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"QA pane error"}' });
   await page.route(failurePath, reject);
-  await page.getByRole('checkbox', { name: 'I-PR · SVS', exact: true }).check();
-  await page.getByRole('checkbox', { name: 'S-TP · SVS', exact: true }).check();
-  await page.getByRole('checkbox', { name: 'SYNTH FIVE · SVS', exact: true }).check();
-  await page.getByRole('checkbox', { name: 'SYNTH SIX · SVS', exact: true }).check();
+  const retainedCanvas = await canvas(1).elementHandle();
+  await compare('I-PR · SVS').check();
+  await compare('S-TP · SVS').check();
+  await compare('SYNTH FIVE · SVS').check();
+  await compare('SYNTH SIX · SVS').check();
   await page.getByText('6 / 6 panes').waitFor();
-  assert.ok(await page.getByRole('checkbox', { name: 'SYNTH LIMIT · SVS', exact: true }).isDisabled());
+  assert.ok(await compare('SYNTH LIMIT · SVS').isDisabled());
+  assert.ok(await retainedCanvas?.evaluate((node) => node.isConnected));
   await pane(4).getByText('QA pane error').waitFor();
   await pane(1).getByRole('button', { name: 'Pan using minimap' }).waitFor();
   assert.ok(await sync.isDisabled());
@@ -172,8 +181,8 @@ try {
   const brcaDimensions = [[117836, 82278], [87127, 82682], [85106, 82076], [79651, 82884]];
   const sixPaneSync = [];
   for (const i of [2, 3, 4, 5, 6]) sixPaneSync.push(report(await frame(1), await frame(i), brcaDimensions[0], brcaDimensions[i - 1] ?? brcaDimensions[0]));
-  await button('Close Comparison').click();
-  await page.getByRole('button', { name: 'Multi View', exact: true }).waitFor();
+  for (const label of ['SYNTH SIX', 'SYNTH FIVE', 'S-TP', 'I-PR', 'I-KI']) await compare(label + ' · SVS').uncheck();
+  await page.getByRole('region', { name: 'Multi View' }).waitFor({state: 'detached'});
   assert.equal(await page.locator('.wsi-canvas').count(), 1);
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ result: 'PASS', maximumPanes: 6, normalized, reversed, anchored, sixPaneSync,

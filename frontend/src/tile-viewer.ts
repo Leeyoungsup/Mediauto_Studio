@@ -12,6 +12,7 @@ export const referenceMagnification = 40 * 0.25;
 export type SlideInfo = { dimensions: [number, number]; mpp_x: number | null; mpp_y: number | null };
 export type CameraFrame = { x: number; y: number; zoom: number; fitZoom: number; dimensions: [number, number] };
 export type Viewport = { x: number; y: number; width: number; height: number; zoom: number };
+export type TileStatus = 'loading' | 'refining' | 'ok' | 'partial' | 'unavailable';
 type Tile = { stage: number; x: number; y: number };
 
 function keyOf({ stage, x, y }: Tile) { return `${stage}/${x}/${y}`; }
@@ -24,7 +25,7 @@ export async function loadBitmap(url: string, signal: AbortSignal) {
 export class TileViewer {
   private readonly context: CanvasRenderingContext2D;
   private readonly resizeObserver: ResizeObserver;
-  private readonly cache = new Map<string, ImageBitmap>();
+  private readonly cache = new Map<string, { tile: Tile; bitmap: ImageBitmap }>();
   private readonly requests = new Map<string, AbortController>();
   private readonly failed = new Set<string>();
   private frame = 0;
@@ -41,7 +42,7 @@ export class TileViewer {
   private ratio = 1;
 
   constructor(private canvas: HTMLCanvasElement, private slide: SlideInfo, private endpoint: string,
-    private onView: (viewport: Viewport) => void, private onTileStatus: (state: 'loading' | 'ok' | 'partial' | 'unavailable') => void,
+    private onView: (viewport: Viewport) => void, private onTileStatus: (state: TileStatus) => void,
     private readonly limits: { loads: number; tiles: number; keepCameraOnResize?: boolean } = singleViewerLimits) {
     const context = canvas.getContext('2d', { alpha: false });
     if (!context) throw new Error('This browser cannot open the slide canvas.');
@@ -172,60 +173,73 @@ export class TileViewer {
     if (this.overview) ctx.drawImage(this.overview, 0, 0, width, height);
 
     const effectiveMpp = (this.slide.mpp_x ?? 0.25) / (this.zoom * this.ratio);
-    const stage = effectiveMpp < 2 ? 0 : effectiveMpp < 15 ? 1 : 2;
-    const wanted = this.visibleTiles(stage, view);
-    // The pyramid overview covers low magnifications without fetching every coarse tile.
-    const targets = this.overview && this.zoom * Math.max(width, height) <= Math.min(960, Math.max(width, height)) / this.ratio
-      ? [] : wanted;
-    for (let level = 2; level >= stage; level--) {
+    let stage = effectiveMpp < 2 ? 0 : effectiveMpp < 15 ? 1 : 2;
+    const overviewSized = this.zoom * Math.max(width, height) <= Math.min(960, Math.max(width, height)) / this.ratio;
+    const overviewOnly = overviewSized && (Boolean(this.overview) || !this.overviewReady);
+    let targets = overviewOnly ? [] : this.visibleTiles(stage, view);
+    // Select a pyramid level for the whole viewport when its working set is large.
+    // A cache limit must never cut away the outer tiles of the selected level.
+    while (stage < downsamples.length - 1 && targets.length > this.limits.tiles
+        && this.zoom * this.ratio * downsamples[stage + 1] <= 1) {
+      stage += 1;
+      targets = this.visibleTiles(stage, view);
+    }
+    const keys = new Set(targets.map(keyOf));
+    let hasVisibleTile = false;
+    for (let level = downsamples.length - 1; level >= 0; level--) {
       const size = tileSize * downsamples[level];
-      for (const tile of this.visibleTiles(level, view)) {
-        const bitmap = this.cache.get(keyOf(tile));
-        if (bitmap) ctx.drawImage(bitmap, tile.x * size, tile.y * size, size, size);
+      for (const { tile, bitmap } of this.cache.values()) {
+        const left = tile.x * size;
+        const top = tile.y * size;
+        if (tile.stage !== level || left >= view.x + view.width || left + size <= view.x
+            || top >= view.y + view.height || top + size <= view.y) continue;
+        ctx.drawImage(bitmap, left, top, size, size);
+        hasVisibleTile = true;
       }
     }
     ctx.restore();
 
     this.onView(view);
-    if (!this.overviewReady) return;
-
     const distance = (tile: Tile) => {
       const size = tileSize * downsamples[tile.stage];
       return Math.hypot((tile.x + 0.5) * size - this.centerX, (tile.y + 0.5) * size - this.centerY);
     };
-    const ordered = targets.sort((a, b) => distance(a) - distance(b)).slice(0, this.limits.tiles / 2);
-    const keys = new Set(ordered.map(keyOf));
+    const ordered = targets.sort((a, b) => distance(a) - distance(b));
     for (const [key, controller] of this.requests) {
       if (!keys.has(key)) { controller.abort(); this.requests.delete(key); }
     }
     for (const key of this.failed) {
       if (!keys.has(key)) this.failed.delete(key);
     }
+    const capacity = Math.max(this.limits.tiles, keys.size);
+    for (const [key, { bitmap }] of this.cache) {
+      if (this.cache.size <= capacity) break;
+      if (keys.has(key)) continue;
+      bitmap.close();
+      this.cache.delete(key);
+    }
     for (const tile of ordered) {
       if (this.requests.size >= this.limits.loads) break;
       const key = keyOf(tile);
       if (this.cache.has(key) || this.failed.has(key) || this.requests.has(key)) continue;
-      this.fetchTile(key);
+      this.fetchTile(key, tile);
     }
-    const hasVisibleTile = wanted.some((tile) => this.cache.has(keyOf(tile)));
-    if (!this.overview && !hasVisibleTile) {
-      this.onTileStatus(this.requests.size ? 'loading' : 'unavailable');
-    } else {
-      this.onTileStatus(this.failed.size ? 'partial' : 'ok');
-    }
+    const hasPreview = Boolean(this.overview) || hasVisibleTile;
+    const pending = (!hasPreview && !this.overviewReady) || ordered.some((tile) => {
+      const key = keyOf(tile);
+      return !this.cache.has(key) && !this.failed.has(key);
+    });
+    if (pending) this.onTileStatus(hasPreview ? 'refining' : 'loading');
+    else if (!hasPreview) this.onTileStatus('unavailable');
+    else this.onTileStatus(this.failed.size ? 'partial' : 'ok');
   }
 
-  private fetchTile(key: string) {
+  private fetchTile(key: string, tile: Tile) {
     const controller = new AbortController();
     this.requests.set(key, controller);
     void loadBitmap(`${this.endpoint}/${key}.jpeg`, controller.signal).then((bitmap) => {
       if (controller.signal.aborted) { bitmap.close(); return; }
-      this.cache.set(key, bitmap);
-      if (this.cache.size > this.limits.tiles) {
-        const [oldest, image] = this.cache.entries().next().value!;
-        image.close();
-        this.cache.delete(oldest);
-      }
+      this.cache.set(key, { tile, bitmap });
     }).catch(() => {
       if (!controller.signal.aborted) this.failed.add(key);
     }).finally(() => {
@@ -240,7 +254,7 @@ export class TileViewer {
     cancelAnimationFrame(this.frame);
     for (const controller of this.requests.values()) controller.abort();
     this.requests.clear();
-    for (const bitmap of this.cache.values()) bitmap.close();
+    for (const { bitmap } of this.cache.values()) bitmap.close();
     this.cache.clear();
   }
 }
