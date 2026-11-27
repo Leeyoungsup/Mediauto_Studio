@@ -1,4 +1,26 @@
-# Mediauto_Studio
+# MeDIAuto Studio
+
+병리 케이스를 접수·배정하고, WSI에서 조직을 비교·판독한 뒤 보고와 감사 이력까지 확인하는 디지털 병리 워크스페이스입니다.
+
+[00194 한국어 사용자 매뉴얼 및 데모 PDF](docs/Mediauto_Studio_00194_사용자_매뉴얼_및_데모.pdf) · [개발 환경 준비](#개발-환경-준비) · [9920 포트에서 실행](#9920-포트에서-실행) · [운영 및 배포](#운영-및-배포) · [기능별 검증 기록](#기능별-검증-기록)
+
+## 00194 데모 화면
+
+[![케이스 00194의 H&E, HER2, Ki-67, PR 스캔을 나란히 띄운 Multi View](docs/screenshots/00194/multi-view.webp)](docs/screenshots/00194/multi-view.webp)
+
+**Multi View**에서 H&E·HER2·Ki-67·PR 스캔을 나란히 열고 `Tissue Registration`과 `Sync Position`으로 같은 조직 위치를 비교합니다. 같은 케이스에서 정합에 포함된 슬라이드 일부를 다시 선택해도 해당 정합을 사용할 수 있습니다. [조직 정합 사용법](work/tissue-registration-storage.md)
+
+| Worklist와 케이스 미리보기 | WSI Viewer와 ROI 주석 |
+| --- | --- |
+| [![00194를 검색한 Worklist와 우측 케이스 미리보기](docs/screenshots/00194/worklist.webp)](docs/screenshots/00194/worklist.webp) | [![00194의 H&E 스캔에서 Polygon ROI를 지정한 Viewer](docs/screenshots/00194/viewer-annotation.webp)](docs/screenshots/00194/viewer-annotation.webp) |
+| `Search Cases`에서 00194를 찾고 스캔과 배정 상태를 확인합니다. | `Annotations`에서 조직 영역을 표시하고 판독 근거를 남깁니다. |
+
+| Ki-67 결과와 세포 표시 | 보고 검토와 승인 |
+| --- | --- |
+| [![00194 Ki-67 세포 오버레이와 IHC Results 패널](docs/screenshots/00194/ki67-overlay.webp)](docs/screenshots/00194/ki67-overlay.webp) | [![합성 사례의 승인된 보고서와 검토 상태](docs/screenshots/00194/report-approval.webp)](docs/screenshots/00194/report-approval.webp) |
+| `IHC Results`에서 분석 버전, 등급별 세포 수와 오버레이를 확인합니다. | `Report Draft`에서 결과 근거를 대조하고 보고 버전과 승인 상태를 확인합니다. |
+
+화면을 누르면 크게 볼 수 있습니다. 76페이지 매뉴얼에는 접수·배정부터 WSI 판독·보고·감사까지 화면 70장을 담았습니다. 보고 승인 화면과 Frozen·Pap·Tumor Board·공동 판독은 별도 합성 사례를 사용합니다. [전체 매뉴얼 PDF](docs/Mediauto_Studio_00194_사용자_매뉴얼_및_데모.pdf)
 
 ## 개발 환경 준비
 
@@ -45,6 +67,75 @@ Worklist에서는 **Hide Case Preview**로 목록을 넓힐 수 있습니다. WS
 ### Workspace Layout
 
 **Worklist**에서 업무 탭과 Frozen Cases, Tumor Board, OR Results에 접근합니다. 오른쪽 **Case Preview**의 **Slides**, **Case Summary**, **Review** 탭은 선택 케이스를 이어서 표시합니다. Viewer와 Settings도 업무별 탭으로 이동합니다. [화면 구성 변경과 검증](work/pdf-workspace-layout.md)
+
+## 운영 및 배포
+
+### 실행 상태와 중지
+
+`./start.sh`는 `mediauto-studio` Conda 환경으로 서비스를 시작하거나 재시작합니다. 헬스 체크가 통과하면 내부 접속 주소를 출력하고 터미널에 서버 로그를 이어 표시합니다. 사용자 systemd로 실행 중이면 `Ctrl+C`는 로그 보기를 종료하며 서버는 계속 실행됩니다. 사용자 systemd가 없는 환경에서는 같은 터미널에서 서버가 실행되고 `Ctrl+C`로 중지합니다.
+
+```bash
+./start.sh --detach  # 서비스 시작 후 터미널 프롬프트로 복귀
+./start.sh --logs    # 이미 실행 중인 서비스의 로그 표시
+systemctl --user status mediauto-studio-dev.service
+systemctl --user stop mediauto-studio-dev.service
+```
+
+### Nginx HTTPS 배포
+
+[Nginx 설정](deployment/nginx/mediauto-ims.conf)은 `studio.mediauto.dev`의 HTTPS 9920 요청을 서버 내부 `127.0.0.1:9921`로 전달합니다. 서버에 `studio.mediauto.dev`용 인증서가 설치되어 있어야 하며, 외부 TCP 9920이 이 서버의 9920으로 전달되어야 합니다.
+
+Cloudflare DNS 인증을 자동화하려면 `mediauto.dev`의 TXT 레코드를 관리할 수 있는 Certbot 자격 증명을 서버에 설정합니다. 수동 DNS 인증은 Cloudflare에서 TXT 레코드를 추가하며, 갱신할 때도 이 절차가 필요합니다. HTTP 인증을 사용하려면 외부 TCP 80에서 Nginx의 ACME 챌린지 경로에 접근할 수 있어야 합니다.
+
+```bash
+sudo install -m 0644 deployment/nginx/mediauto-ims.conf /etc/nginx/conf.d/mediauto-ims.conf
+sudo nginx -t
+systemctl --user stop mediauto-studio-dev.service
+MEDIAUTO_HOST=127.0.0.1 MEDIAUTO_PORT=9921 MEDIAUTO_COOKIE_SECURE=1 ./start.sh --detach
+sudo systemctl reload nginx
+curl --resolve studio.mediauto.dev:9920:127.0.0.1 https://studio.mediauto.dev:9920/api/health
+```
+
+실행 중인 서비스는 `./start.sh`로 재시작하고 `./start.sh --logs`로 로그를 봅니다. 서비스를 완전히 중지한 뒤 처음 시작할 때는 위 환경 변수를 다시 지정합니다. 기존 HTTP 개발 모드로 되돌리려면 해당 Nginx 설정을 제거하고 `sudo nginx -t` 후 Nginx를 다시 로드한 다음, 사용자 서비스를 중지하고 `./start.sh`로 시작합니다.
+
+### 템플릿 로그인
+
+로컬 기관의 로그인 폼은 **Demo Account**에서 여섯 시연 계정을 선택할 수 있으며 기본값은 `admin1`입니다. **Other Account**를 선택하면 사용자명을 직접 입력할 수 있습니다.
+
+공개 시연 환경에서는 Git에 포함되지 않는 `frontend/.env.local`에 `VITE_DEMO_PASSWORD`를 설정하고 `npm --prefix frontend run build`를 실행하면 여섯 시연 계정에 공통 비밀번호가 채워집니다. 이 빌드에서는 방문자가 관리자 계정을 포함한 시연 계정으로 로그인할 수 있습니다. 자동 입력을 끄려면 설정을 제거한 뒤 다시 빌드합니다.
+
+HTTPS 템플릿 배포에서 세션 만료를 끄려면 사용자 서비스를 중지한 뒤 Nginx 배포용 실행 명령에 `MEDIAUTO_DEMO_SESSION_NO_EXPIRY=1`을 추가합니다. 이후 HTTPS로 새로 로그인하면 15분 만료가 없는 브라우저 세션 쿠키를 발급합니다. 로그아웃하면 세션이 폐기됩니다. 15분 만료를 복원하려면 서비스를 중지한 뒤 이 옵션 없이 다시 시작합니다.
+
+### 프런트엔드 수정
+
+API를 실행한 상태에서 `npm --prefix frontend run dev`를 실행합니다. 로컬 Vite 주소 `http://127.0.0.1:5173/`에서 코드 수정이 반영되며, `/api` 요청은 기본적으로 9920으로 전달됩니다. Nginx 배포 모드에서는 `MEDIAUTO_PORT=9921 npm --prefix frontend run dev`로 내부 API에 연결합니다. 배포 화면을 갱신하려면 `npm --prefix frontend run build`로 다시 빌드합니다.
+
+### 염색별 슬라이드 시연
+
+Worklist의 **Stains**는 케이스에 등록된 염색 이름을 중복 없이 표시합니다. **Columns**에서 표시 여부를 조정할 수 있습니다. 미배정 업무함에서 `DEMO-BREAST-001`과 `DEMO-GASTRIC-001`을 검색하면 케이스 상세와 WSI에서 합성 슬라이드를 전환할 수 있습니다. 합성 영상에는 **SYNTHETIC DEMO** 표시가 있습니다.
+
+서버의 `mediauto-studio` 환경에서 합성 시연 케이스를 다시 만들 수 있습니다. 스크립트는 `tifffile` 및 NumPy를 사용합니다.
+
+```bash
+PYTHONPATH="$PWD/backend" MEDIAUTO_DB_SOCKET="$PWD/.runtime/pgsocket" MEDIAUTO_DB_USER="$(id -un)" \
+  python -s scripts/seed-stain-demo.py
+```
+
+외부 시연 승인을 받은 기존 SaaS 영상은 Worklist의 **Saved View → SaaS Stain Demo**에서 확인합니다. Viewer는 복사한 WSI의 원본 영상에 연결되고, Worklist의 환자 이름·로컬 환자 ID·생년월일·성별·채취 및 접수 날짜는 합성값입니다. **Data Source**에 `Original WSI · Synthetic Case Fields`가 표시됩니다.
+
+등록 스크립트는 프로젝트명과 파일명의 염색 코드를 대조하고, 데이터셋·조직 분류·사이트·케이스 번호가 모두 일치한 파일을 한 케이스에 묶습니다. 동일 슬라이드의 NDPI·SVS와 내용이 다른 스캔은 각각 열 수 있습니다. 같은 포맷에서 전체 바이트가 일치한 사본은 Viewer에 하나만 표시합니다. 프로젝트별 사본은 `.runtime/saas-slide-import/projects/`에 보관합니다.
+
+승인된 자료의 전송과 등록을 재개하려면 아래 명령을 실행합니다. 옵션을 생략하면 전송 및 등록 상태만 확인합니다.
+
+```bash
+PYTHONPATH="$PWD/backend" MEDIAUTO_DB_SOCKET="$PWD/.runtime/pgsocket" MEDIAUTO_DB_USER="$(id -un)" \
+  python -s scripts/import-saas-stain-demo.py --watch-approved
+```
+
+## 기능별 검증 기록
+
+<details>
+<summary>기능별 사용법, 지원 범위와 개발 검증 기록 펼치기 (06–42)</summary>
 
 ### 42. Integrated Workflow Verification
 
@@ -156,7 +247,7 @@ PD-L1 요청은 담당자가 보관 결과를 연결하는 흐름입니다. 요�
 
 ### 15. Multi View
 
-케이스 뷰어에서 **Multi View**를 열고 같은 케이스의 스캔 2~4개를 선택합니다. 활성 화면에서 **Sync Position**를 켜거나, 각 패널의 중심을 맞춘 뒤 수동 기준점으로 연결할 수 있습니다. 지원 범위와 샘플별 조직 특징점 오차는 [15번 Multi View 검증 기록](work/multi-view-15.md)에 정리했습니다.
+케이스 뷰어의 **Slide Tray**에서 같은 케이스의 스캔 2~6개를 체크해 **Multi View**를 엽니다. 활성 화면에서 **Sync Position**를 켜거나, 각 패널의 중심을 맞춘 뒤 수동 기준점으로 연결할 수 있습니다. 지원 범위와 샘플별 조직 특징점 오차는 [15번 Multi View 검증 기록](work/multi-view-15.md)에 정리했습니다.
 
 ### 14. 판독 위치·ROI·거리
 
@@ -285,64 +376,4 @@ curl -b "$MEDIAUTO_COOKIE_JAR" 'http://127.0.0.1:9920/api/clinical/local/cases?u
 
 서비스가 중지된 상태에서 `MEDIAUTO_HOST=127.0.0.1 ./start.sh`로 실행하면 서버 자체에서만 접속할 수 있습니다. PostgreSQL 실행 파일이 다른 경로에 있다면 `MEDIAUTO_PG_BIN`으로 `bin` 디렉터리를 지정합니다.
 
-### 실행 상태와 중지
-
-`./start.sh`는 `mediauto-studio` Conda 환경으로 서비스를 시작하거나 재시작합니다. 헬스 체크가 통과하면 내부 접속 주소를 출력하고 터미널에 서버 로그를 이어 표시합니다. 사용자 systemd로 실행 중이면 `Ctrl+C`는 로그 보기를 종료하며 서버는 계속 실행됩니다. 사용자 systemd가 없는 환경에서는 같은 터미널에서 서버가 실행되고 `Ctrl+C`로 중지합니다.
-
-```bash
-./start.sh --detach  # 서비스 시작 후 터미널 프롬프트로 복귀
-./start.sh --logs    # 이미 실행 중인 서비스의 로그 표시
-systemctl --user status mediauto-studio-dev.service
-systemctl --user stop mediauto-studio-dev.service
-```
-
-### Nginx HTTPS 배포
-
-[Nginx 설정](deployment/nginx/mediauto-ims.conf)은 `studio.mediauto.dev`의 HTTPS 9920 요청을 서버 내부 `127.0.0.1:9921`로 전달합니다. 서버에 `studio.mediauto.dev`용 인증서가 설치되어 있어야 하며, 외부 TCP 9920이 이 서버의 9920으로 전달되어야 합니다.
-
-Cloudflare DNS 인증을 자동화하려면 `mediauto.dev`의 TXT 레코드를 관리할 수 있는 Certbot 자격 증명을 서버에 설정합니다. 수동 DNS 인증은 Cloudflare에서 TXT 레코드를 추가하며, 갱신할 때도 이 절차가 필요합니다. HTTP 인증을 사용하려면 외부 TCP 80에서 Nginx의 ACME 챌린지 경로에 접근할 수 있어야 합니다.
-
-```bash
-sudo install -m 0644 deployment/nginx/mediauto-ims.conf /etc/nginx/conf.d/mediauto-ims.conf
-sudo nginx -t
-systemctl --user stop mediauto-studio-dev.service
-MEDIAUTO_HOST=127.0.0.1 MEDIAUTO_PORT=9921 MEDIAUTO_COOKIE_SECURE=1 ./start.sh --detach
-sudo systemctl reload nginx
-curl --resolve studio.mediauto.dev:9920:127.0.0.1 https://studio.mediauto.dev:9920/api/health
-```
-
-실행 중인 서비스는 `./start.sh`로 재시작하고 `./start.sh --logs`로 로그를 봅니다. 서비스를 완전히 중지한 뒤 처음 시작할 때는 위 환경 변수를 다시 지정합니다. 기존 HTTP 개발 모드로 되돌리려면 해당 Nginx 설정을 제거하고 `sudo nginx -t` 후 Nginx를 다시 로드한 다음, 사용자 서비스를 중지하고 `./start.sh`로 시작합니다.
-
-### 템플릿 로그인
-
-로컬 기관의 로그인 폼은 **Demo Account**에서 여섯 시연 계정을 선택할 수 있으며 기본값은 `admin1`입니다. **Other Account**를 선택하면 사용자명을 직접 입력할 수 있습니다.
-
-공개 시연 환경에서는 Git에 포함되지 않는 `frontend/.env.local`에 `VITE_DEMO_PASSWORD`를 설정하고 `npm --prefix frontend run build`를 실행하면 여섯 시연 계정에 공통 비밀번호가 채워집니다. 이 빌드에서는 방문자가 관리자 계정을 포함한 시연 계정으로 로그인할 수 있습니다. 자동 입력을 끄려면 설정을 제거한 뒤 다시 빌드합니다.
-
-HTTPS 템플릿 배포에서 세션 만료를 끄려면 사용자 서비스를 중지한 뒤 Nginx 배포용 실행 명령에 `MEDIAUTO_DEMO_SESSION_NO_EXPIRY=1`을 추가합니다. 이후 HTTPS로 새로 로그인하면 15분 만료가 없는 브라우저 세션 쿠키를 발급합니다. 로그아웃하면 세션이 폐기됩니다. 15분 만료를 복원하려면 서비스를 중지한 뒤 이 옵션 없이 다시 시작합니다.
-
-### 프런트엔드 수정
-
-API를 실행한 상태에서 `npm --prefix frontend run dev`를 실행합니다. 로컬 Vite 주소 `http://127.0.0.1:5173/`에서 코드 수정이 반영되며, `/api` 요청은 기본적으로 9920으로 전달됩니다. Nginx 배포 모드에서는 `MEDIAUTO_PORT=9921 npm --prefix frontend run dev`로 내부 API에 연결합니다. 배포 화면을 갱신하려면 `npm --prefix frontend run build`로 다시 빌드합니다.
-
-### 염색별 슬라이드 시연
-
-Worklist의 **Stains**는 케이스에 등록된 염색 이름을 중복 없이 표시합니다. **Columns**에서 표시 여부를 조정할 수 있습니다. 미배정 업무함에서 `DEMO-BREAST-001`과 `DEMO-GASTRIC-001`을 검색하면 케이스 상세와 WSI에서 합성 슬라이드를 전환할 수 있습니다. 합성 영상에는 **SYNTHETIC DEMO** 표시가 있습니다.
-
-서버의 `mediauto-studio` 환경에서 합성 시연 케이스를 다시 만들 수 있습니다. 스크립트는 `tifffile` 및 NumPy를 사용합니다.
-
-```bash
-PYTHONPATH="$PWD/backend" MEDIAUTO_DB_SOCKET="$PWD/.runtime/pgsocket" MEDIAUTO_DB_USER="$(id -un)" \
-  python -s scripts/seed-stain-demo.py
-```
-
-외부 시연 승인을 받은 기존 SaaS 영상은 Worklist의 **Saved View → SaaS Stain Demo**에서 확인합니다. Viewer는 복사한 WSI의 원본 영상에 연결되고, Worklist의 환자 이름·로컬 환자 ID·생년월일·성별·채취 및 접수 날짜는 합성값입니다. **Data Source**에 `Original WSI · Synthetic Case Fields`가 표시됩니다.
-
-등록 스크립트는 프로젝트명과 파일명의 염색 코드를 대조하고, 데이터셋·조직 분류·사이트·케이스 번호가 모두 일치한 파일을 한 케이스에 묶습니다. 동일 슬라이드의 NDPI·SVS와 내용이 다른 스캔은 각각 열 수 있습니다. 같은 포맷에서 전체 바이트가 일치한 사본은 Viewer에 하나만 표시합니다. 프로젝트별 사본은 `.runtime/saas-slide-import/projects/`에 보관합니다.
-
-승인된 자료의 전송과 등록을 재개하려면 아래 명령을 실행합니다. 옵션을 생략하면 전송 및 등록 상태만 확인합니다.
-
-```bash
-PYTHONPATH="$PWD/backend" MEDIAUTO_DB_SOCKET="$PWD/.runtime/pgsocket" MEDIAUTO_DB_USER="$(id -un)" \
-  python -s scripts/import-saas-stain-demo.py --watch-approved
-```
+</details>
