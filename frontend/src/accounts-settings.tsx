@@ -8,7 +8,9 @@ import { WorkspaceTabs } from './workspace-tabs';
 type Access = Pick<User, 'id' | 'username' | 'display_name' | 'role'> & { active: boolean; version: number; can_manage: boolean };
 type Audit = {
   id: string; occurred_at: string; actor: string | null; actor_id: string; username: string; reason: string | null;
-  action: 'account_access_changed' | 'registration_approved' | 'registration_rejected' | 'workgroup_membership_changed';
+  action: 'account_access_changed' | 'registration_approved' | 'registration_rejected' | 'workgroup_membership_changed'
+    | 'login_succeeded' | 'login_failed' | 'logout';
+  ip_address: string | null;
   previous_role: User['role'] | null; role: User['role'] | null;
   previous_active: boolean | null; active: boolean | null;
   group_name: string | null; previous_member: boolean | null; member: boolean | null;
@@ -16,7 +18,8 @@ type Audit = {
 const pageSize = 30;
 const dateTime = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' });
 const actions = { account_access_changed: 'Access Changed', registration_approved: 'Registration Approved',
-  registration_rejected: 'Registration Rejected', workgroup_membership_changed: 'Workgroup Membership Changed' };
+  registration_rejected: 'Registration Rejected', workgroup_membership_changed: 'Workgroup Membership Changed',
+  login_succeeded: 'Sign-In Succeeded', login_failed: 'Sign-In Failed', logout: 'Signed Out' };
 const accessState = (active: boolean) => active ? 'Active' : 'Disabled';
 const errorText = (error: unknown) => error instanceof Error ? error.message : 'Unable to load account information.';
 
@@ -114,8 +117,9 @@ function AccountDirectory({ openLog }: { openLog: (username: string) => void }) 
 
 function AuditLog({ initialUsername }: { initialUsername: string }) {
   const [username, setUsername] = useState(initialUsername);
+  const [category, setCategory] = useState('all');
   const [offset, setOffset] = useState(0);
-  const { page, error, refresh } = useAccountPage<Audit>('/api/auth/account-audit?' + new URLSearchParams({ username, offset: String(offset) }));
+  const { page, error, refresh } = useAccountPage<Audit>('/api/auth/account-audit?' + new URLSearchParams({ username, category, offset: String(offset) }));
   function access(role: Audit['role'], active: Audit['active']) {
     if (!role || active === null) return '—';
     return accountRoleLabels[role] + ' · ' + accessState(active);
@@ -124,21 +128,27 @@ function AuditLog({ initialUsername }: { initialUsername: string }) {
     return group + ' · ' + (member ? 'Member' : 'Not a Member');
   }
   return <section className="detail-content registration-panel" aria-label="Account Audit Log">
-    <div className="preview-label"><div><h2>Account Audit Log</h2><p className="muted">Registration decisions, access changes, and workgroup membership.</p></div>
+    <div className="preview-label"><div><h2>Account Audit Log</h2><p className="muted">Sign-ins, sign-outs, account changes, registration decisions, and workgroup membership.</p></div>
       <button className="button secondary" type="button" onClick={refresh}>Refresh Log</button>
     </div>
     <form className="actions" onSubmit={(event) => {
       event.preventDefault();
-      setOffset(0); setUsername(String(new FormData(event.currentTarget).get('username') ?? '').trim());
+      const fields = new FormData(event.currentTarget);
+      setOffset(0);
+      setUsername(String(fields.get('username') ?? '').trim());
+      setCategory(String(fields.get('category') ?? 'all'));
     }}><label className="search-field"><Search size={15} aria-hidden="true" />
         <input name="username" aria-label="Filter by Username" placeholder="Exact username" defaultValue={initialUsername} maxLength={80} />
-      </label><button className="button secondary">Apply Filter</button></form>
+      </label><select name="category" aria-label="Filter by Event Type" defaultValue="all">
+        <option value="all">All Events</option><option value="authentication">Sign-In and Sign-Out</option>
+        <option value="account_changes">Account Changes</option>
+      </select><button className="button secondary">Apply Filter</button></form>
     {error ? <p role="alert" className="form-error">{error}</p> : !page && <p role="status">Loading account audit…</p>}
     {page && (page.rows.length ? <div className="table-scroll"><table aria-label="Account Audit Events">
-      <thead><tr><th scope="col">Time</th><th scope="col">Action</th><th scope="col">Account</th><th scope="col">Administrator</th>
+      <thead><tr><th scope="col">Time</th><th scope="col">Action</th><th scope="col">Account</th><th scope="col">Actor</th><th scope="col">Source IP</th>
         <th scope="col">Before</th><th scope="col">After</th><th scope="col">Reason</th></tr></thead>
       <tbody>{page.rows.map((row) => <tr key={row.id}><td>{dateTime.format(new Date(row.occurred_at))}</td><td>{actions[row.action]}</td>
-        <td>{row.username}</td><td>{row.actor || row.actor_id}</td>
+        <td>{row.username}</td><td>{row.actor || row.actor_id || '—'}</td><td>{row.ip_address || '—'}</td>
         <td>{row.group_name ? membership(row.group_name, row.previous_member) : access(row.previous_role, row.previous_active)}</td>
         <td>{row.group_name ? membership(row.group_name, row.member) : access(row.role, row.active)}</td><td>{row.reason || '—'}</td>
       </tr>)}</tbody></table></div> : <p className="empty-inline">No account events match the filter.</p>)}

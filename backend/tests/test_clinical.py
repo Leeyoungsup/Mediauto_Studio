@@ -77,6 +77,36 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, expected, response.text)
         return response.json()
 
+    async def test_authentication_audit_keeps_attempts_in_the_accounts_organization(self):
+        doctor = await create_account(self.org, "audit-doctor", "doctor")
+        audit = "/api/auth/account-audit"
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app, client=("192.0.2.17", 12345)),
+            base_url="http://localhost",
+        ) as actor:
+            denied = await actor.post("/api/auth/login", json={
+                "organization": self.org, "username": doctor.username, "password": "incorrect-synthetic-password",
+            })
+            self.assertEqual(denied.status_code, 401)
+            await login(actor, self.org, doctor.username)
+            self.assertEqual((await actor.get(audit)).status_code, 403)
+            self.assertEqual((await actor.post("/api/auth/logout")).status_code, 200)
+            self.assertEqual((await actor.post("/api/auth/logout")).status_code, 401)
+
+        params = {"category": "authentication", "username": doctor.username}
+        history = await self.client.get(audit, params=params)
+        self.assertEqual(history.status_code, 200, history.text)
+        events = history.json()["rows"]
+        self.assertEqual([event["action"] for event in events], ["logout", "login_succeeded", "login_failed"])
+        self.assertEqual([event["actor"] for event in events], [doctor.username, doctor.username, None])
+        self.assertTrue(all(event["ip_address"] == "192.0.2.17" for event in events))
+        self.assertNotIn("incorrect-synthetic-password", history.text)
+        self.assertNotIn("session_id", history.text)
+
+        other = await create_account("audit-" + uuid4().hex, "other-admin", "admin")
+        await login(self.client, other.organization, other.username)
+        self.assertEqual((await self.client.get(audit, params=params)).json()["rows"], [])
+
     async def test_account_registration_approval_rejection_and_organization_scope(self):
         payload = {"organization": self.org, "username": "New.Applicant", "display_name": "Synthetic Applicant",
                    "password": "synthetic-signup-password"}
@@ -138,7 +168,7 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
             self.assertEqual((await applicant.patch(access_url, json={**change, "role": "admin"})).status_code, 403)
             await login(self.client, other.organization, other.username)
             self.assertEqual((await self.client.patch(access_url, json=change)).status_code, 404)
-            self.assertEqual((await self.client.get(audit)).json()["rows"], [])
+            self.assertEqual((await self.client.get(audit, params={"category": "account_changes"})).json()["rows"], [])
             await login(self.client, self.org, self.user.username)
             self.assertEqual((await self.client.patch(f"{directory}/{self.user.id}/access", json=change)).status_code, 403)
             changed = await asyncio.gather(*(self.client.patch(access_url, json=change) for _ in range(2)))
@@ -153,7 +183,7 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
             self.assertFalse(disabled.json()["active"])
             self.assertEqual((await applicant.get("/api/auth/me")).status_code, 401)
             self.assertEqual((await applicant.post("/api/auth/login", json=payload)).status_code, 401)
-            audit_response = await self.client.get(audit, params={"username": "NEW.APPLICANT"})
+            audit_response = await self.client.get(audit, params={"username": "NEW.APPLICANT", "category": "account_changes"})
             self.assertEqual(audit_response.status_code, 200, audit_response.text)
             events = audit_response.json()["rows"]
             self.assertEqual([event["action"] for event in events],
@@ -172,7 +202,7 @@ class ClinicalApiTest(IsolatedAsyncioTestCase):
             self.assertEqual((promoted.json()["role"], promoted.json()["can_manage"]), ("admin", False))
             self.assertEqual((await applicant.post("/api/auth/login", json=payload)).json()["role"], "admin")
             self.assertEqual((await applicant.get(directory)).status_code, 200)
-            grant = (await self.client.get(audit, params={"username": "new.applicant"})).json()["rows"][0]
+            grant = (await self.client.get(audit, params={"username": "new.applicant", "category": "account_changes"})).json()["rows"][0]
             self.assertEqual((grant["previous_role"], grant["role"], grant["reason"]),
                              ("viewer", "admin", "Synthetic administrator grant"))
 

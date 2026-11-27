@@ -79,7 +79,8 @@ async def change_access(account_id: UUID, data: AccessChange, user: CurrentUser,
 
 @router.get("/account-audit")
 async def account_audit(user: CurrentUser, session: Session, offset: Annotated[int, Query(ge=0)] = 0,
-                        username: Annotated[str, Query(max_length=80)] = ""):
+                        username: Annotated[str, Query(max_length=80)] = "",
+                        category: Literal["all", "authentication", "account_changes"] = "all"):
     require_roles(user, ("admin",))
     event = ClinicalEvent
     registration = AccountRegistrationRequest
@@ -87,27 +88,39 @@ async def account_audit(user: CurrentUser, session: Session, offset: Annotated[i
     no_group = (literal(None, String()).label("group_name"),
                 literal(None, Boolean()).label("previous_member"),
                 literal(None, Boolean()).label("member"))
+    no_ip = literal(None, String()).label("ip_address")
     changes = select(
         event.id, event.occurred_at, event.actor.label("actor_id"), event.after["username"].as_string().label("username"),
         event.action, event.before["role"].as_string().label("previous_role"), event.after["role"].as_string().label("role"),
         event.before["active"].as_boolean().label("previous_active"), event.after["active"].as_boolean().label("active"),
-        event.reason, *no_group,
+        event.reason, *no_group, no_ip,
     ).where(event.organization == user.organization, event.record_type == "auth_users", event.action == "account_access_changed")
     applications = select(
         registration.id, registration.reviewed_at, cast(registration.reviewer_id, String), registration.username,
         case((registration.state == "approved", "registration_approved"), else_="registration_rejected"),
         literal(None), registration.role, literal(None),
         case((registration.state == "approved", True), else_=None),
-        literal(None), *no_group,
+        literal(None), *no_group, no_ip,
     ).where(registration.organization == user.organization, registration.reviewed_at.is_not(None))
     memberships = select(
         event.id, event.occurred_at, event.actor, member.username, event.action,
         literal(None), literal(None), literal(None), literal(None), event.reason, Workgroup.name,
-        event.before["member"].as_boolean(), event.after["member"].as_boolean(),
+        event.before["member"].as_boolean(), event.after["member"].as_boolean(), no_ip,
     ).select_from(event).join(Workgroup, (Workgroup.id == event.record_id) & (Workgroup.organization == event.organization)).join(
         member, (cast(member.id, String) == event.after["user_id"].as_string()) & (member.organization == event.organization),
     ).where(event.organization == user.organization, event.record_type == "workgroups", event.action == "workgroup_membership_changed")
-    audit = union_all(changes, applications, memberships).subquery()
+    authentication = select(
+        event.id, event.occurred_at, event.actor.label("actor_id"), event.after["username"].as_string().label("username"),
+        event.action, literal(None, String()).label("previous_role"), literal(None, String()).label("role"),
+        literal(None, Boolean()).label("previous_active"), literal(None, Boolean()).label("active"),
+        event.reason, *no_group, event.after["ip_address"].as_string().label("ip_address"),
+    ).where(event.organization == user.organization, event.record_type == "auth_events")
+    sources = {
+        "all": union_all(changes, applications, memberships, authentication),
+        "account_changes": union_all(changes, applications, memberships),
+        "authentication": authentication,
+    }
+    audit = sources[category].subquery()
     query = (select(*audit.c, AuthUser.username.label("actor"))
              .outerjoin(AuthUser, (cast(AuthUser.id, String) == audit.c.actor_id) & (AuthUser.organization == user.organization)))
     if username := username.strip().casefold():

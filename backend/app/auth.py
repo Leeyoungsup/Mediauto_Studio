@@ -4,6 +4,7 @@ import hmac
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Annotated
 from uuid import UUID, uuid4
@@ -15,7 +16,7 @@ from pydantic import BaseModel, StringConstraints
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AuthSession, AuthUser
+from app.models import AuthSession, AuthUser, ClinicalEvent
 
 ROLES = ("admin", "doctor", "labeler", "viewer")
 WRITERS = ("admin", "labeler")
@@ -132,6 +133,19 @@ def require_roles(user: AuthUser, roles: tuple[str, ...]) -> None:
         raise HTTPException(403, "You do not have permission to perform this action.")
 
 
+def record_auth_event(session: AsyncSession, user: AuthUser, request: Request, action: str) -> None:
+    try:
+        client_ip = str(ip_address(request.client.host)) if request.client else None
+    except ValueError:
+        client_ip = None
+    event_id = uuid4()
+    session.add(ClinicalEvent(
+        id=event_id, organization=user.organization, record_type="auth_events", record_id=event_id, version=1,
+        action=action, actor="" if action == "login_failed" else str(user.id), source="authentication",
+        before={}, after={"username": user.username, "ip_address": client_ip}, transaction_id=uuid4(),
+    ))
+
+
 @router.post("/login")
 async def login(data: Login, request: Request, response: Response, session: Session):
     same_origin(request)
@@ -168,6 +182,8 @@ async def login(data: Login, request: Request, response: Response, session: Sess
                 user.failed_attempts += 1
                 if user.failed_attempts >= 5:
                     user.locked_until = now + timedelta(minutes=30)
+        if user:
+            record_auth_event(session, user, request, "login_succeeded" if identity else "login_failed")
     if identity is None:
         raise HTTPException(401, "Check your username and password.", headers={"Cache-Control": "no-store"})
     response.set_cookie(COOKIE, token, max_age=None if demo_session else SESSION_SECONDS, httponly=True, samesite="strict",
@@ -183,6 +199,8 @@ async def me(user: CurrentUser):
 @router.post("/logout")
 async def logout(user: CurrentUser, request: Request, response: Response, session: Session):
     async with session.begin():
-        await session.execute(delete(AuthSession).where(AuthSession.id == request.state.auth_session_id))
+        revoked = await session.execute(delete(AuthSession).where(AuthSession.id == request.state.auth_session_id))
+        if revoked.rowcount:
+            record_auth_event(session, user, request, "logout")
     response.delete_cookie(COOKIE)
     return {"ok": True}

@@ -46,7 +46,7 @@ npm --prefix frontend run build
 
 로그인 화면의 **Request an Account**에서 기관 코드, 이름, 사용자명, 비밀번호를 제출합니다. 표시되는 확인 코드를 기관 관리자에게 전달합니다. 관리자는 **Accounts → Registration Requests**에서 신청을 열고 역할과 확인 코드를 입력해 승인합니다. 이후 신청에 사용한 사용자명과 비밀번호로 로그인할 수 있습니다. [가입 절차와 검증](work/account-registration.md)
 
-관리자 메뉴의 **Accounts → Directory and Access**에서 기존 계정의 역할·활성 상태를 바꾸고, 계정을 Active로 설정하여 Administrator 권한을 줄 수 있습니다. **Audit Log**에서 가입 결정, 계정 권한, Workgroup 멤버십의 변경 이력을 확인합니다. [계정 관리와 감사 범위](work/account-registration.md)
+관리자 메뉴의 **Accounts → Directory and Access**에서 기존 계정의 역할·활성 상태를 바꾸고, 계정을 Active로 설정하여 Administrator 권한을 줄 수 있습니다. **Audit Log**에서 로그인 성공·실패, 로그아웃, 가입 결정, 계정 권한과 Workgroup 멤버십 변경을 확인합니다. `Sign-In and Sign-Out` 필터로 접속 이력을 모아 볼 수 있습니다. [계정 관리와 감사 범위](work/account-registration.md)
 
 Worklist에서 등록한 케이스는 개발 PostgreSQL에 저장됩니다.
 
@@ -72,7 +72,7 @@ Worklist에서는 **Hide Case Preview**로 목록을 넓힐 수 있습니다. WS
 
 ### 실행 상태와 중지
 
-`./start.sh`는 `mediauto-studio` Conda 환경으로 서비스를 시작하거나 재시작합니다. 헬스 체크가 통과하면 내부 접속 주소를 출력하고 터미널에 서버 로그를 이어 표시합니다. 사용자 systemd로 실행 중이면 `Ctrl+C`는 로그 보기를 종료하며 서버는 계속 실행됩니다. 사용자 systemd가 없는 환경에서는 같은 터미널에서 서버가 실행되고 `Ctrl+C`로 중지합니다. 브라우저 접속과 API 요청은 같은 터미널에서 `Access`로 표시됩니다. 각 줄에 접속 IP, 요청 메서드, 경로 템플릿과 HTTP 상태가 표시됩니다.
+`./start.sh`는 `mediauto-studio` Conda 환경으로 서비스를 시작하거나 재시작합니다. 헬스 체크가 통과하면 내부 접속 주소를 출력하고 터미널에 서버 로그를 이어 표시합니다. 사용자 systemd로 실행 중이면 `Ctrl+C`는 로그 보기를 종료하며 서버는 계속 실행됩니다. 사용자 systemd가 없는 환경에서는 같은 터미널에서 서버가 실행되고 `Ctrl+C`로 중지합니다.
 
 ```bash
 ./start.sh --detach  # 서비스 시작 후 터미널 프롬프트로 복귀

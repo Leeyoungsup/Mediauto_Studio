@@ -13,7 +13,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from starlette.staticfiles import StaticFiles
 
-from app.access_log import AccessLogMiddleware
 from app.case_collections import router as case_collections_router
 from app.analysis_execution import router as analysis_execution_router
 from app.analysis_jobs import poll_analysis
@@ -97,7 +96,6 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Mediauto Studio", lifespan=lifespan)
-app.add_middleware(AccessLogMiddleware)
 app.add_exception_handler(StarletteHTTPException, case_http_exception)
 app.add_exception_handler(RequestValidationError, case_validation_exception)
 app.include_router(auth_router)

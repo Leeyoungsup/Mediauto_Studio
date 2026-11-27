@@ -67,6 +67,14 @@ try {
   await applicant.getByRole('heading', { name: 'Worklist', exact: true }).waitFor();
   const current = await (await applicant.request.get('/api/auth/me')).json();
   assert.equal(current.role, 'viewer');
+  const denied = await applicant.request.post('/api/auth/login', { data: {
+    organization: 'local', username, password: 'incorrect-synthetic-password',
+  } });
+  assert.equal(denied.status(), 401);
+  await button(applicant, 'Sign Out').click();
+  await applicant.getByRole('heading', { name: 'Sign In', exact: true }).waitFor();
+  await signIn();
+  await applicant.getByRole('heading', { name: 'Worklist', exact: true }).waitFor();
   for (const path of ['', '/requests', '/audit']) {
     await applicant.goto('/#settings/accounts' + path);
     await applicant.getByText('You do not have permission to open this page.', { exact: true }).waitFor();
@@ -116,6 +124,12 @@ try {
   await permission.getByRole('cell', { name: 'Medical Technologist · Active', exact: true }).waitFor();
   await permission.getByRole('cell', { name: 'integration-admin', exact: true }).waitFor();
   await log.getByRole('cell', { name: 'Medical Technologist · Disabled', exact: true }).waitFor();
+  await log.getByRole('combobox', { name: 'Filter by Event Type' }).selectOption('authentication');
+  await button(log, 'Apply Filter').click();
+  await log.getByRole('cell', { name: 'Sign-In Failed', exact: true }).waitFor();
+  await log.getByRole('cell', { name: 'Sign-In Succeeded', exact: true }).first().waitFor();
+  await log.getByRole('cell', { name: 'Signed Out', exact: true }).waitFor();
+  assert.equal(await log.getByRole('cell', { name: 'Registration Approved', exact: true }).count(), 0);
   await admin.goBack();
   await admin.getByRole('tab', { name: 'Directory and Access', exact: true, selected: true }).waitFor();
   await button(directory, 'Edit Access for ' + username).click();
